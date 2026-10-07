@@ -885,3 +885,235 @@ function BranchSettingsModal({ branch, onClose, onSaved }: { branch: Branch; onC
     <div className="modal-actions"><button type="button" className="ghost-button" onClick={onClose}>Cancelar</button><button className="primary" disabled={saving}>{saving ? "Guardando…" : "Guardar cambios"}</button></div>
   </form></div>;
 }
+
+
+function EditUserModal({
+  user,
+  branches,
+  currentUserId,
+  onClose,
+  onSaved
+}: {
+  user: AdminUser;
+  branches: Branch[];
+  currentUserId: number;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [role, setRole] = useState(user.role_code);
+  const [branchId, setBranchId] = useState(user.branch_id ? String(user.branch_id) : "");
+  const [fullName, setFullName] = useState(user.full_name);
+  const [username, setUsername] = useState(user.username);
+  const [active, setActive] = useState(Boolean(user.active));
+  const [newPassword, setNewPassword] = useState("");
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [saving, setSaving] = useState(false);
+  const needsBranch = ["CASHIER", "BRANCH_ADMIN"].includes(role);
+  const isSelf = user.id === currentUserId;
+
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true); setError(""); setMessage("");
+    try {
+      await api(`/api/admin/users/${user.id}/update`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          roleCode: role,
+          branchId: needsBranch ? Number(branchId) : null,
+          fullName,
+          username,
+          active
+        })
+      });
+      setMessage("Usuario actualizado.");
+      await onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo actualizar el usuario");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function resetPassword() {
+    setSaving(true); setError(""); setMessage("");
+    try {
+      await api(`/api/admin/users/${user.id}/reset-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: newPassword })
+      });
+      setNewPassword("");
+      setMessage("Contraseña restablecida. Las sesiones anteriores fueron cerradas.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo restablecer la contraseña");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return <div className="modal-backdrop"><form className="modal" onSubmit={save}>
+    <div className="modal-head"><div><h2>Editar usuario</h2><p>{user.full_name} · @{user.username}</p></div><button type="button" className="icon-btn" onClick={onClose}><X size={18}/></button></div>
+    <div className="field-grid"><label>Nombre completo<input value={fullName} onChange={(e)=>setFullName(e.target.value)} required /></label><label>Usuario<input value={username} onChange={(e)=>setUsername(e.target.value)} required /></label></div>
+    <div className="field-grid">
+      <label>Rol<select value={role} onChange={(e)=>setRole(e.target.value)} disabled={isSelf}><option value="CASHIER">Cajero / Encargado</option><option value="BRANCH_ADMIN">Administrador de filial</option><option value="PARTNER">Socio</option><option value="AUDITOR">Auditor</option><option value="OWNER">Propietario</option></select></label>
+      <label>Filial<select value={branchId} onChange={(e)=>setBranchId(e.target.value)} disabled={!needsBranch}>{needsBranch ? branches.map((b)=><option value={b.id} key={b.id}>{b.name}</option>) : <option value="">Acceso global</option>}</select></label>
+    </div>
+    <label className="active-toggle"><input type="checkbox" checked={active} onChange={(e)=>setActive(e.target.checked)} disabled={isSelf} /> Cuenta activa</label>
+    <div className="password-reset-box">
+      <div><KeyRound size={17}/><div><strong>Restablecer contraseña</strong><span>Cierra las demás sesiones del usuario.</span></div></div>
+      <div className="password-reset-row"><input type="password" value={newPassword} onChange={(e)=>setNewPassword(e.target.value)} placeholder="Nueva contraseña segura" /><button type="button" className="soft" disabled={saving || !newPassword} onClick={() => void resetPassword()}>Restablecer</button></div>
+    </div>
+    {error && <div className="modal-error">{error}</div>}
+    {message && <div className="success-message">{message}</div>}
+    <div className="modal-actions"><button type="button" className="ghost-button" onClick={onClose}>Cerrar</button><button className="primary" disabled={saving}>{saving ? "Guardando…" : "Guardar usuario"}</button></div>
+  </form></div>;
+}
+
+function BranchDetailModal({
+  branchId,
+  onClose,
+  onChanged
+}: {
+  branchId: number;
+  onClose: () => void;
+  onChanged: () => Promise<void>;
+}) {
+  const [detail, setDetail] = useState<BranchDetail | null>(null);
+  const [tab, setTab] = useState<"overview"|"operations"|"users"|"closures">("overview");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [code, setCode] = useState("");
+  const [name, setName] = useState("");
+  const [address, setAddress] = useState("");
+  const [active, setActive] = useState(true);
+  const [maxAmount, setMaxAmount] = useState("");
+  const [commissionType, setCommissionType] = useState<"FLAT"|"PERCENT">("FLAT");
+  const [commissionValue, setCommissionValue] = useState("");
+  const [staffShare, setStaffShare] = useState("");
+  const [partnerShare, setPartnerShare] = useState("");
+
+  async function loadDetail() {
+    setLoading(true); setError("");
+    try {
+      const data = await api<BranchDetail>(`/api/admin/branches/${branchId}/detail`);
+      setDetail(data);
+      setCode(data.branch.code);
+      setName(data.branch.name);
+      setAddress(data.branch.address ?? "");
+      setActive(data.branch.active);
+      setMaxAmount(String(data.branch.settings.maxOperationAmount));
+      setCommissionType(data.branch.settings.commissionType);
+      setCommissionValue(String(data.branch.settings.commissionValue));
+      setStaffShare(data.branch.settings.staffSharePct == null ? "" : String(data.branch.settings.staffSharePct));
+      setPartnerShare(data.branch.settings.partnerSharePct == null ? "" : String(data.branch.settings.partnerSharePct));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo cargar la filial");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { void loadDetail(); }, [branchId]);
+
+  async function saveBranch(event: FormEvent) {
+    event.preventDefault(); setSaving(true); setError(""); setMessage("");
+    try {
+      await api(`/api/admin/branches/${branchId}/update`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code, name, address: address || null, active })
+      });
+      await api(`/api/admin/branches/${branchId}/settings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          maxOperationAmount: Number(maxAmount),
+          commissionType,
+          commissionValue: Number(commissionValue),
+          staffSharePct: staffShare === "" ? null : Number(staffShare),
+          partnerSharePct: partnerShare === "" ? null : Number(partnerShare)
+        })
+      });
+      setMessage("Filial actualizada correctamente.");
+      await Promise.all([loadDetail(), onChanged()]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo guardar la filial");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return <div className="modal-backdrop branch-detail-backdrop">
+    <div className="branch-detail-modal">
+      <div className="branch-detail-header">
+        <div>
+          <div className="branch-detail-title"><div className="branch-monogram big">{detail?.branch.code.slice(0,2) ?? "--"}</div><div><h2>{detail?.branch.name ?? "Filial"}</h2><span>{detail?.branch.code ?? ""} · {detail?.branch.active ? "Activa" : "Inactiva"}</span></div></div>
+          <p>{detail?.branch.address ?? "Sin dirección registrada"}</p>
+        </div>
+        <button className="icon-btn" onClick={onClose}><X size={19}/></button>
+      </div>
+
+      <div className="branch-detail-tabs">
+        <button className={tab==="overview"?"active":""} onClick={()=>setTab("overview")}>Resumen</button>
+        <button className={tab==="operations"?"active":""} onClick={()=>setTab("operations")}>Operaciones</button>
+        <button className={tab==="users"?"active":""} onClick={()=>setTab("users")}>Usuarios</button>
+        <button className={tab==="closures"?"active":""} onClick={()=>setTab("closures")}>Cierres</button>
+      </div>
+
+      {loading && <div className="branch-detail-loading">Cargando filial…</div>}
+      {error && <div className="modal-error branch-detail-error">{error}</div>}
+
+      {!loading && detail && tab==="overview" && <div className="branch-detail-body">
+        <div className="branch-detail-kpis">
+          <div><span>Operaciones hoy</span><strong>{detail.today.operations}</strong></div>
+          <div><span>Monto movilizado hoy</span><strong>{currency(detail.today.amount)}</strong></div>
+          <div><span>Comisión hoy</span><strong>{currency(detail.today.commission)}</strong></div>
+          <div><span>Usuarios asignados</span><strong>{detail.users.length}</strong></div>
+          <div><span>Estado de caja</span><strong className={detail.cashSessions[0]?.status==="OPEN"?"green-text":"red-text"}>{detail.cashSessions[0]?.status==="OPEN"?"ABIERTA":"CERRADA"}</strong></div>
+        </div>
+
+        <form className="branch-detail-form card" onSubmit={saveBranch}>
+          <div className="card-head"><div><strong>Datos y configuración</strong><span>Edita la filial sin salir de su ficha</span></div><Pencil size={16}/></div>
+          <div className="branch-form-content">
+            <div className="field-grid"><label>Código<input value={code} onChange={(e)=>setCode(e.target.value)} required /></label><label>Nombre<input value={name} onChange={(e)=>setName(e.target.value)} required /></label></div>
+            <label>Dirección<input value={address} onChange={(e)=>setAddress(e.target.value)} /></label>
+            <label className="active-toggle"><input type="checkbox" checked={active} onChange={(e)=>setActive(e.target.checked)} /> Filial activa</label>
+            <div className="section-divider">Regla de operación</div>
+            <div className="field-grid"><label>Límite por operación<div className="input-prefix"><span>S/</span><input value={maxAmount} onChange={(e)=>setMaxAmount(e.target.value)} required /></div></label><label>Tipo de comisión<select value={commissionType} onChange={(e)=>setCommissionType(e.target.value as "FLAT"|"PERCENT")}><option value="FLAT">Monto fijo</option><option value="PERCENT">Porcentaje</option></select></label></div>
+            <label>Valor de comisión<div className="input-prefix"><span>{commissionType==="FLAT"?"S/":"%"}</span><input value={commissionValue} onChange={(e)=>setCommissionValue(e.target.value)} required /></div></label>
+            <div className="field-grid"><label>% Encargado<input value={staffShare} onChange={(e)=>setStaffShare(e.target.value)} /></label><label>% Socio<input value={partnerShare} onChange={(e)=>setPartnerShare(e.target.value)} /></label></div>
+            {message && <div className="success-message">{message}</div>}
+            <div className="modal-actions"><button className="primary" disabled={saving}>{saving?"Guardando…":"Guardar cambios"}</button></div>
+          </div>
+        </form>
+
+        <section className="card branch-live-card">
+          <div className="card-head"><div><strong>Turnos de caja recientes</strong><span>Últimos {detail.cashSessions.length}</span></div></div>
+          <div className="branch-mini-list">
+            {detail.cashSessions.slice(0,5).map((item)=><div key={item.id}><span className={item.status==="OPEN"?"branch-status open":"branch-status closed"}>{item.status==="OPEN"?"ABIERTA":"CERRADA"}</span><div><strong>{dateTime(item.started_at)}</strong><span>Inicial: {currency(item.initial_cash)} efectivo · {currency(item.initial_wallet)} Yape</span></div></div>)}
+            {!detail.cashSessions.length && <div className="empty-cell">Sin turnos.</div>}
+          </div>
+        </section>
+      </div>}
+
+      {!loading && detail && tab==="operations" && <div className="branch-detail-table"><div className="table-wrap"><table className="admin-table"><thead><tr><th>Fecha</th><th>Tipo</th><th>Cliente</th><th>Referencia</th><th>Monto</th><th>Comisión</th><th>Entregado</th><th>Registró</th><th>Estado</th></tr></thead><tbody>
+        {detail.recentOperations.map((op)=><tr key={op.id}><td>{dateTime(op.created_at)}</td><td><span className={`type-pill ${op.operation_type==="YAPE_TO_CASH"?"yape":"cash"}`}>{op.operation_type==="YAPE_TO_CASH"?"Yape → Efectivo":"Efectivo → Yape"}</span></td><td>{op.customer_name??"—"}</td><td>{op.reference_code??"—"}</td><td>{currency(op.amount)}</td><td>{currency(op.commission)}</td><td>{currency(op.net_amount)}</td><td>{op.registered_by??"—"}</td><td>{op.status}</td></tr>)}
+        {!detail.recentOperations.length && <tr><td colSpan={9} className="empty-cell">Sin operaciones.</td></tr>}
+      </tbody></table></div></div>}
+
+      {!loading && detail && tab==="users" && <div className="branch-detail-table"><div className="table-wrap"><table className="admin-table"><thead><tr><th>Nombre</th><th>Usuario</th><th>Rol</th><th>Último acceso</th><th>Estado</th></tr></thead><tbody>
+        {detail.users.map((item)=><tr key={item.id}><td><strong>{item.full_name}</strong></td><td>{item.username}</td><td>{item.role_name}</td><td>{dateTime(item.last_login_at)}</td><td><span className={item.active?"branch-status open":"branch-status closed"}>{item.active?"Activo":"Inactivo"}</span></td></tr>)}
+        {!detail.users.length && <tr><td colSpan={5} className="empty-cell">No hay usuarios asignados.</td></tr>}
+      </tbody></table></div></div>}
+
+      {!loading && detail && tab==="closures" && <div className="branch-detail-table"><div className="table-wrap"><table className="admin-table"><thead><tr><th>Fecha</th><th>Caja esperada</th><th>Caja declarada</th><th>Diferencia caja</th><th>Yape esperado</th><th>Yape declarado</th><th>Diferencia Yape</th></tr></thead><tbody>
+        {detail.closures.map((item)=><tr key={item.id}><td>{dateTime(item.closed_at)}</td><td>{currency(item.expected_cash)}</td><td>{currency(item.declared_cash)}</td><td className={Number(item.difference_cash)===0?"green-text":"red-text"}>{currency(item.difference_cash)}</td><td>{currency(item.expected_wallet)}</td><td>{currency(item.declared_wallet)}</td><td className={Number(item.difference_wallet)===0?"green-text":"red-text"}>{currency(item.difference_wallet)}</td></tr>)}
+        {!detail.closures.length && <tr><td colSpan={7} className="empty-cell">Todavía no hay cierres.</td></tr>}
+      </tbody></table></div></div>}
+    </div>
+  </div>;
+}
