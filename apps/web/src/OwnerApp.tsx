@@ -10,6 +10,7 @@ import {
   CircleDollarSign,
   ClipboardCheck,
   FileSearch,
+  Download,
   Home,
   Landmark,
   LockKeyhole,
@@ -80,12 +81,16 @@ type GlobalOperation = {
   customer_name: string | null;
   amount: number;
   commission: number;
+  staff_share_amount?: number;
+  partner_share_amount?: number;
   net_amount: number;
   status: string;
   created_at: string;
   branch_id: number;
   branch_name: string;
   registered_by: string | null;
+  receipt_series?: string | null;
+  receipt_number?: number | null;
 };
 
 type Overview = {
@@ -117,6 +122,10 @@ type AdminUser = {
 
 type Closure = {
   id: number;
+  operation_count?: number;
+  commission_total?: number;
+  staff_share_total?: number;
+  partner_share_total?: number;
   expected_cash: number;
   declared_cash: number;
   expected_wallet: number;
@@ -139,6 +148,30 @@ type AuditRow = {
   branch_name: string | null;
   user_name: string | null;
   username: string | null;
+};
+
+type FinancialReport = {
+  filters: { branchId: number | null; from: string | null; to: string | null };
+  summary: {
+    operationCount: number;
+    amountTotal: number;
+    commissionTotal: number;
+    staffShareTotal: number;
+    partnerShareTotal: number;
+    unassignedCommission: number;
+    yapeToCashCount: number;
+    cashToYapeCount: number;
+  };
+  branches: Array<{
+    id: number;
+    code: string;
+    name: string;
+    operationCount: number;
+    amountTotal: number;
+    commissionTotal: number;
+    staffShareTotal: number;
+    partnerShareTotal: number;
+  }>;
 };
 
 type BranchDetail = {
@@ -178,13 +211,21 @@ type BranchDetail = {
     customer_name: string | null;
     amount: number;
     commission: number;
+    staff_share_amount?: number;
+    partner_share_amount?: number;
     net_amount: number;
     status: string;
     created_at: string;
     registered_by: string | null;
+    receipt_series?: string | null;
+    receipt_number?: number | null;
   }>;
   closures: Array<{
     id: number;
+    operation_count?: number;
+    commission_total?: number;
+    staff_share_total?: number;
+    partner_share_total?: number;
     expected_cash: number;
     declared_cash: number;
     expected_wallet: number;
@@ -552,7 +593,7 @@ function GlobalOperationsTable({ operations }: { operations: GlobalOperation[] }
               <td>{currency(op.commission)}</td>
               <td>{currency(op.net_amount)}</td>
               <td>{op.registered_by ?? "—"}</td>
-              <td><span className={`status ${op.status === "COMPLETED" ? "ok" : "pending"}`}><i />{op.status === "COMPLETED" ? "Completada" : op.status}</span></td>
+              <td><span className={`status ${op.status === "COMPLETED" ? "ok" : "pending"}`}><i />{op.status === "COMPLETED" ? "Completada" : op.status === "IN_PROGRESS" ? "En proceso" : op.status === "CANCELLED" ? "Anulada" : op.status === "REVERSED" ? "Revertida" : op.status}</span></td>
             </tr>
           ))}
           {!operations.length && <tr><td colSpan={10} className="empty-cell">No hay operaciones.</td></tr>}
@@ -690,31 +731,86 @@ function CommissionsPage({ branches, onSettings }: { branches: Branch[]; onSetti
   );
 }
 
-function AdminReports({ overview, operations, closures }: { overview: Overview; operations: GlobalOperation[]; closures: Closure[] }) {
-  const totalMoved = operations.reduce((sum, item) => sum + Number(item.amount), 0);
-  const totalCommission = operations.reduce((sum, item) => sum + Number(item.commission), 0);
-  const differences = closures.reduce((sum, item) => sum + Math.abs(Number(item.difference_cash)) + Math.abs(Number(item.difference_wallet)), 0);
+function AdminReports({ overview }: { overview: Overview; operations: GlobalOperation[]; closures: Closure[] }) {
+  const now = new Date();
+  const localToday = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0,10);
+  const [from, setFrom] = useState(localToday.slice(0,8) + "01");
+  const [to, setTo] = useState(localToday);
+  const [branch, setBranch] = useState("ALL");
+  const [report, setReport] = useState<FinancialReport | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  function queryString() {
+    const p = new URLSearchParams();
+    if (branch !== "ALL") p.set("branchId", branch);
+    if (from) p.set("from", from);
+    if (to) p.set("to", to);
+    return p.toString();
+  }
+
+  async function loadReport() {
+    setLoading(true); setError("");
+    try {
+      setReport(await api<FinancialReport>(`/api/admin/reports/summary?${queryString()}`));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo generar el reporte");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { void loadReport(); }, [from, to, branch]);
+
+  const maxAmount = Math.max(...(report?.branches.map((x) => x.amountTotal) ?? [1]), 1);
+
+  function download(kind: "xlsx" | "pdf") {
+    window.open(`/api/admin/reports/export.${kind}?${queryString()}`, "_blank");
+  }
 
   return (
     <>
-      <div className="owner-kpis reports-owner-kpis">
-        <OwnerKpi icon={<ReceiptText />} tone="blue" label="Operaciones cargadas" value={String(operations.length)} />
-        <OwnerKpi icon={<BadgeDollarSign />} tone="green" label="Monto movilizado" value={currency(totalMoved)} />
-        <OwnerKpi icon={<CircleDollarSign />} tone="orange" label="Comisión acumulada" value={currency(totalCommission)} />
-        <OwnerKpi icon={<ScaleIcon />} tone="purple" label="Diferencias cierres" value={currency(differences)} />
-        <OwnerKpi icon={<Building2 />} tone="cyan" label="Filiales activas" value={String(overview.metrics.activeBranches)} />
-      </div>
-      <section className="card page-card">
-        <div className="card-head"><div><strong>Comparativo por filial</strong><span>Actividad de hoy</span></div></div>
-        <div className="report-bars owner-report-bars">
-          {overview.branches.map((branch) => (
-            <div className="report-bar-row" key={branch.id}>
-              <div><strong>{branch.name}</strong><span>{branch.operationsToday} operaciones · {currency(branch.commissionToday)}</span></div>
-              <div className="progress"><i className="purple" style={{ width: `${Math.max(3, (branch.operationsToday / Math.max(...overview.branches.map((x) => x.operationsToday), 1)) * 100)}%` }} /></div>
-            </div>
-          ))}
+      <section className="card report-toolbar">
+        <div className="report-toolbar-title"><BarChart3 size={19}/><div><strong>Reporte financiero</strong><span>Filtra el periodo y exporta el resultado.</span></div></div>
+        <div className="admin-filters admin-filters-wide">
+          <select value={branch} onChange={(e)=>setBranch(e.target.value)}>
+            <option value="ALL">Todas las filiales</option>
+            {overview.branches.map((item)=><option value={item.id} key={item.id}>{item.name}</option>)}
+          </select>
+          <label className="date-filter"><span>Desde</span><input type="date" value={from} onChange={(e)=>setFrom(e.target.value)} /></label>
+          <label className="date-filter"><span>Hasta</span><input type="date" value={to} onChange={(e)=>setTo(e.target.value)} /></label>
+          <button className="soft export-button" onClick={()=>download("pdf")}><Download size={14}/> PDF</button>
+          <button className="primary export-button" onClick={()=>download("xlsx")}><Download size={14}/> Excel</button>
         </div>
       </section>
+
+      {error && <div className="error-banner">{error}</div>}
+      {loading && !report && <div className="owner-loading">Calculando reporte…</div>}
+
+      {report && <>
+        <div className="owner-kpis reports-owner-kpis stage3-kpis">
+          <OwnerKpi icon={<ReceiptText />} tone="blue" label="Operaciones" value={String(report.summary.operationCount)} />
+          <OwnerKpi icon={<BadgeDollarSign />} tone="green" label="Monto movilizado" value={currency(report.summary.amountTotal)} />
+          <OwnerKpi icon={<CircleDollarSign />} tone="orange" label="Comisión total" value={currency(report.summary.commissionTotal)} />
+          <OwnerKpi icon={<UserCog />} tone="purple" label="Parte encargado" value={currency(report.summary.staffShareTotal)} />
+          <OwnerKpi icon={<Landmark />} tone="cyan" label="Parte socio" value={currency(report.summary.partnerShareTotal)} />
+          <OwnerKpi icon={<Activity />} tone="blue" label="Sin reparto" value={currency(report.summary.unassignedCommission)} />
+        </div>
+
+        <section className="card page-card">
+          <div className="card-head"><div><strong>Comparativo por filial</strong><span>{from || "Inicio"} → {to || "Hoy"}</span></div></div>
+          <div className="report-bars owner-report-bars">
+            {report.branches.map((item) => (
+              <div className="report-bar-row" key={item.id}>
+                <div><strong>{item.name}</strong><span>{item.operationCount} operaciones · {currency(item.amountTotal)} · Comisión {currency(item.commissionTotal)}</span></div>
+                <div className="progress"><i className="purple" style={{ width: `${Math.max(3,(item.amountTotal/maxAmount)*100)}%` }} /></div>
+                <div className="split-report-line"><span>Encargado {currency(item.staffShareTotal)}</span><span>Socio {currency(item.partnerShareTotal)}</span></div>
+              </div>
+            ))}
+            {!report.branches.length && <div className="empty-cell">No hay operaciones en el periodo seleccionado.</div>}
+          </div>
+        </section>
+      </>}
     </>
   );
 }
@@ -1101,7 +1197,7 @@ function BranchDetailModal({
       </div>}
 
       {!loading && detail && tab==="operations" && <div className="branch-detail-table"><div className="table-wrap"><table className="admin-table"><thead><tr><th>Fecha</th><th>Tipo</th><th>Cliente</th><th>Referencia</th><th>Monto</th><th>Comisión</th><th>Entregado</th><th>Registró</th><th>Estado</th></tr></thead><tbody>
-        {detail.recentOperations.map((op)=><tr key={op.id}><td>{dateTime(op.created_at)}</td><td><span className={`type-pill ${op.operation_type==="YAPE_TO_CASH"?"yape":"cash"}`}>{op.operation_type==="YAPE_TO_CASH"?"Yape → Efectivo":"Efectivo → Yape"}</span></td><td>{op.customer_name??"—"}</td><td>{op.reference_code??"—"}</td><td>{currency(op.amount)}</td><td>{currency(op.commission)}</td><td>{currency(op.net_amount)}</td><td>{op.registered_by??"—"}</td><td>{op.status}</td></tr>)}
+        {detail.recentOperations.map((op)=><tr key={op.id}><td>{dateTime(op.created_at)}</td><td><span className={`type-pill ${op.operation_type==="YAPE_TO_CASH"?"yape":"cash"}`}>{op.operation_type==="YAPE_TO_CASH"?"Yape → Efectivo":"Efectivo → Yape"}</span></td><td>{op.customer_name??"—"}</td><td>{op.reference_code??"—"}</td><td>{currency(op.amount)}</td><td>{currency(op.commission)}</td><td>{currency(op.net_amount)}</td><td>{op.registered_by??"—"}</td><td><span className={`status ${op.status==="COMPLETED"?"ok":"pending"}`}><i />{op.status==="COMPLETED"?"Completada":op.status==="IN_PROGRESS"?"En proceso":op.status==="CANCELLED"?"Anulada":op.status==="REVERSED"?"Revertida":op.status}</span></td></tr>)}
         {!detail.recentOperations.length && <tr><td colSpan={9} className="empty-cell">Sin operaciones.</td></tr>}
       </tbody></table></div></div>}
 
