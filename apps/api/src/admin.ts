@@ -21,6 +21,12 @@ const createBranchBody = z.object({
   commissionValue: z.coerce.number().positive().default(1),
   staffSharePct: z.coerce.number().min(0).max(100).nullable().optional(),
   partnerSharePct: z.coerce.number().min(0).max(100).nullable().optional()
+}).superRefine((value, ctx) => {
+  if (value.staffSharePct != null && value.partnerSharePct != null) {
+    if (Math.abs(value.staffSharePct + value.partnerSharePct - 100) > 0.01) {
+      ctx.addIssue({ code: "custom", message: "El reparto encargado + socio debe sumar 100%" });
+    }
+  }
 });
 
 const updateBranchBody = z.object({
@@ -61,6 +67,27 @@ const createUserBody = z.object({
 
 const toggleUserBody = z.object({
   active: z.boolean()
+});
+
+const updateUserBody = z.object({
+  branchId: z.coerce.number().int().positive().nullable().optional(),
+  roleCode: z.enum(["OWNER", "PARTNER", "BRANCH_ADMIN", "CASHIER", "AUDITOR"]),
+  username: z.string().trim().min(3).max(80).regex(/^[A-Za-z0-9._-]+$/),
+  fullName: z.string().trim().min(3).max(140),
+  active: z.boolean()
+});
+
+const resetPasswordBody = z.object({
+  password: z.string().min(10).max(200)
+    .regex(/[A-Z]/, "La contraseña debe incluir una mayúscula")
+    .regex(/[a-z]/, "La contraseña debe incluir una minúscula")
+    .regex(/[0-9]/, "La contraseña debe incluir un número")
+});
+
+const historyQuery = z.object({
+  branchId: z.coerce.number().int().positive().optional(),
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()
 });
 
 async function requireOwner(request: FastifyRequest, reply: FastifyReply) {
@@ -515,6 +542,94 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     }
   });
 
+  app.post("/api/admin/users/:userId/update", async (request, reply) => {
+    const auth = await requireOwner(request, reply);
+    if (!auth) return;
+
+    const parsedParams = userParams.safeParse(request.params);
+    const parsedBody = updateUserBody.safeParse(request.body);
+    if (!parsedParams.success || !parsedBody.success) {
+      return reply.code(400).send({ error: parsedBody.success ? "Usuario inválido" : parsedBody.error.issues[0]?.message ?? "Datos inválidos" });
+    }
+
+    const { userId } = parsedParams.data;
+    const body = parsedBody.data;
+
+    if (userId === auth.userId && (!body.active || body.roleCode !== "OWNER")) {
+      return reply.code(400).send({ error: "No puedes quitar tu propio acceso de propietario" });
+    }
+
+    const branchRoles = ["BRANCH_ADMIN", "CASHIER"];
+    if (branchRoles.includes(body.roleCode) && !body.branchId) {
+      return reply.code(400).send({ error: "Ese rol requiere una filial asignada" });
+    }
+
+    const [roleRows] = await db.query<any[]>("SELECT id FROM roles WHERE code = ? LIMIT 1", [body.roleCode]);
+    if (!roleRows.length) return reply.code(400).send({ error: "Rol inválido" });
+
+    if (body.branchId) {
+      const [branchRows] = await db.query<any[]>("SELECT id FROM branches WHERE id = ? LIMIT 1", [body.branchId]);
+      if (!branchRows.length) return reply.code(400).send({ error: "Filial inválida" });
+    }
+
+    try {
+      const [result] = await db.execute<any>(
+        `UPDATE users
+         SET branch_id = ?, role_id = ?, username = ?, full_name = ?, active = ?
+         WHERE id = ?`,
+        [
+          branchRoles.includes(body.roleCode) ? body.branchId ?? null : null,
+          roleRows[0].id,
+          body.username.toLowerCase(),
+          body.fullName,
+          body.active ? 1 : 0,
+          userId
+        ]
+      );
+
+      if (!result.affectedRows) return reply.code(404).send({ error: "Usuario no encontrado" });
+
+      if (!body.active) {
+        await db.execute("UPDATE auth_sessions SET revoked_at = NOW() WHERE user_id = ? AND revoked_at IS NULL", [userId]);
+      }
+
+      await db.execute(
+        `INSERT INTO audit_logs (branch_id, user_id, action, entity_type, entity_id, details)
+         VALUES (?, ?, 'USER_UPDATED', 'USER', ?, JSON_OBJECT('username', ?, 'role', ?, 'active', ?))`,
+        [branchRoles.includes(body.roleCode) ? body.branchId ?? null : null, auth.userId, userId, body.username.toLowerCase(), body.roleCode, body.active]
+      );
+
+      return { ok: true };
+    } catch (error: any) {
+      if (error?.code === "ER_DUP_ENTRY") return reply.code(409).send({ error: "Ese nombre de usuario ya existe" });
+      throw error;
+    }
+  });
+
+  app.post("/api/admin/users/:userId/reset-password", async (request, reply) => {
+    const auth = await requireOwner(request, reply);
+    if (!auth) return;
+
+    const parsedParams = userParams.safeParse(request.params);
+    const parsedBody = resetPasswordBody.safeParse(request.body);
+    if (!parsedParams.success || !parsedBody.success) {
+      return reply.code(400).send({ error: parsedBody.success ? "Usuario inválido" : parsedBody.error.issues[0]?.message ?? "Contraseña inválida" });
+    }
+
+    const passwordHash = await bcrypt.hash(parsedBody.data.password, 12);
+    const [result] = await db.execute<any>("UPDATE users SET password_hash = ? WHERE id = ?", [passwordHash, parsedParams.data.userId]);
+    if (!result.affectedRows) return reply.code(404).send({ error: "Usuario no encontrado" });
+
+    await db.execute("UPDATE auth_sessions SET revoked_at = NOW() WHERE user_id = ? AND revoked_at IS NULL", [parsedParams.data.userId]);
+    await db.execute(
+      `INSERT INTO audit_logs (user_id, action, entity_type, entity_id)
+       VALUES (?, 'USER_PASSWORD_RESET', 'USER', ?)`,
+      [auth.userId, parsedParams.data.userId]
+    );
+
+    return { ok: true };
+  });
+
   app.post("/api/admin/users/:userId/status", async (request, reply) => {
     const auth = await requireOwner(request, reply);
     if (!auth) return;
@@ -554,6 +669,16 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     const auth = await requireOwner(request, reply);
     if (!auth) return;
 
+    const parsed = historyQuery.safeParse(request.query ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "Filtros inválidos" });
+
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    if (parsed.data.branchId) { conditions.push("o.branch_id = ?"); params.push(parsed.data.branchId); }
+    if (parsed.data.from) { conditions.push("DATE(o.created_at) >= ?"); params.push(parsed.data.from); }
+    if (parsed.data.to) { conditions.push("DATE(o.created_at) <= ?"); params.push(parsed.data.to); }
+    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+
     const [rows] = await db.query<any[]>(`
       SELECT o.id, o.operation_type, o.reference_code, o.customer_name, o.amount,
              o.commission, o.net_amount, o.status,
@@ -563,9 +688,10 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       FROM operations o
       JOIN branches b ON b.id = o.branch_id
       LEFT JOIN users u ON u.id = o.user_id
+      ${where}
       ORDER BY o.created_at DESC
-      LIMIT 500
-    `);
+      LIMIT 1000
+    `, params);
 
     return { operations: rows };
   });
@@ -574,6 +700,16 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     const auth = await requireOwner(request, reply);
     if (!auth) return;
 
+    const parsed = historyQuery.safeParse(request.query ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "Filtros inválidos" });
+
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    if (parsed.data.branchId) { conditions.push("dc.branch_id = ?"); params.push(parsed.data.branchId); }
+    if (parsed.data.from) { conditions.push("DATE(dc.closed_at) >= ?"); params.push(parsed.data.from); }
+    if (parsed.data.to) { conditions.push("DATE(dc.closed_at) <= ?"); params.push(parsed.data.to); }
+    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+
     const [rows] = await db.query<any[]>(`
       SELECT dc.id, dc.expected_cash, dc.declared_cash, dc.expected_wallet,
              dc.declared_wallet, dc.difference_cash, dc.difference_wallet,
@@ -581,9 +717,10 @@ export async function registerAdminRoutes(app: FastifyInstance) {
              b.id AS branch_id, b.name AS branch_name
       FROM daily_closures dc
       JOIN branches b ON b.id = dc.branch_id
+      ${where}
       ORDER BY dc.closed_at DESC
-      LIMIT 200
-    `);
+      LIMIT 500
+    `, params);
 
     return { closures: rows };
   });
