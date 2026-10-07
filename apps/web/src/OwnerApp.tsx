@@ -763,7 +763,10 @@ function CreateBranchModal({ onClose, onCreated }: { onClose: () => void; onCrea
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
   const [maxAmount, setMaxAmount] = useState("50");
+  const [commissionType, setCommissionType] = useState<"FLAT" | "PERCENT">("FLAT");
   const [commission, setCommission] = useState("1");
+  const [staffShare, setStaffShare] = useState("");
+  const [partnerShare, setPartnerShare] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -774,10 +777,14 @@ function CreateBranchModal({ onClose, onCreated }: { onClose: () => void; onCrea
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          code, name, address: address || undefined,
+          code,
+          name,
+          address: address || undefined,
           maxOperationAmount: Number(maxAmount),
-          commissionType: "FLAT",
-          commissionValue: Number(commission)
+          commissionType,
+          commissionValue: Number(commission),
+          staffSharePct: staffShare === "" ? null : Number(staffShare),
+          partnerSharePct: partnerShare === "" ? null : Number(partnerShare)
         })
       });
       onCreated();
@@ -785,11 +792,17 @@ function CreateBranchModal({ onClose, onCreated }: { onClose: () => void; onCrea
     finally { setSaving(false); }
   }
 
-  return <div className="modal-backdrop"><form className="modal" onSubmit={submit}>
-    <div className="modal-head"><div><h2>Nueva filial</h2><p>Crea un nuevo punto de operación.</p></div><button type="button" className="icon-btn" onClick={onClose}><X size={18}/></button></div>
+  return <div className="modal-backdrop"><form className="modal branch-create-modal" onSubmit={submit}>
+    <div className="modal-head"><div><h2>Nueva filial</h2><p>Crea el punto de operación y deja lista su regla comercial.</p></div><button type="button" className="icon-btn" onClick={onClose}><X size={18}/></button></div>
     <div className="field-grid"><label>Código<input value={code} onChange={(e)=>setCode(e.target.value)} placeholder="Ej. TRU01" required /></label><label>Nombre<input value={name} onChange={(e)=>setName(e.target.value)} placeholder="Ej. Trujillo Centro" required /></label></div>
     <label>Dirección<input value={address} onChange={(e)=>setAddress(e.target.value)} placeholder="Opcional" /></label>
-    <div className="field-grid"><label>Límite por operación<div className="input-prefix"><span>S/</span><input value={maxAmount} onChange={(e)=>setMaxAmount(e.target.value)} inputMode="decimal" required /></div></label><label>Comisión fija<div className="input-prefix"><span>S/</span><input value={commission} onChange={(e)=>setCommission(e.target.value)} inputMode="decimal" required /></div></label></div>
+    <div className="field-grid">
+      <label>Límite por operación<div className="input-prefix"><span>S/</span><input value={maxAmount} onChange={(e)=>setMaxAmount(e.target.value)} inputMode="decimal" required /></div></label>
+      <label>Tipo de comisión<select value={commissionType} onChange={(e)=>setCommissionType(e.target.value as "FLAT"|"PERCENT")}><option value="FLAT">Monto fijo</option><option value="PERCENT">Porcentaje</option></select></label>
+    </div>
+    <label>Valor de comisión<div className="input-prefix"><span>{commissionType === "FLAT" ? "S/" : "%"}</span><input value={commission} onChange={(e)=>setCommission(e.target.value)} inputMode="decimal" required /></div></label>
+    <div className="field-grid"><label>% Encargado<input value={staffShare} onChange={(e)=>setStaffShare(e.target.value)} placeholder="Ej. 30" /></label><label>% Socio<input value={partnerShare} onChange={(e)=>setPartnerShare(e.target.value)} placeholder="Ej. 70" /></label></div>
+    <small>El reparto es opcional al crear. Si completas ambos porcentajes deben sumar 100%.</small>
     {error && <div className="modal-error">{error}</div>}
     <div className="modal-actions"><button type="button" className="ghost-button" onClick={onClose}>Cancelar</button><button className="primary" disabled={saving}>{saving ? "Creando…" : "Crear filial"}</button></div>
   </form></div>;
