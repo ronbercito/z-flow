@@ -53,9 +53,9 @@ export async function issueInternalReceipt(
 
   await connection.execute(
     `INSERT INTO receipt_sequences (branch_id, next_number)
-     VALUES (?, 1)
+     VALUES (?, COALESCE((SELECT MAX(sequence_number) + 1 FROM receipts WHERE branch_id = ?), 1))
      ON DUPLICATE KEY UPDATE branch_id = VALUES(branch_id)`,
-    [branchId]
+    [branchId, branchId]
   );
 
   const [sequenceRows] = await connection.query<any[]>(
