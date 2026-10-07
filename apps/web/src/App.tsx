@@ -1080,6 +1080,11 @@ function CloseCashModal({ branchId, dashboard, onClose, onClosed }: { branchId: 
   const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [result, setResult] = useState<null | {
+    expectedCash: number; declaredCash: number; differenceCash: number;
+    expectedWallet: number; declaredWallet: number; differenceWallet: number;
+    operationCount: number; commissionTotal: number; staffShareTotal: number; partnerShareTotal: number;
+  }>(null);
 
   const cashDiff = Number(cash || 0) - dashboard.metrics.cashCurrent;
   const walletDiff = Number(wallet || 0) - dashboard.metrics.walletCurrent;
@@ -1094,14 +1099,33 @@ function CloseCashModal({ branchId, dashboard, onClose, onClosed }: { branchId: 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ declaredCash: Number(cash || 0), declaredWallet: Number(wallet || 0), notes: notes || undefined })
       });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error ?? "No se pudo cerrar la caja");
-      onClosed();
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "No se pudo cerrar la caja");
+      setResult(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al cerrar caja");
     } finally {
       setSaving(false);
     }
+  }
+
+  if (result) {
+    return (
+      <div className="modal-backdrop">
+        <div className="modal closure-result-modal">
+          <div className="closure-success"><Check size={24}/><div><h2>Caja cerrada correctamente</h2><p>El cierre quedó registrado y ya no admite nuevas operaciones en este turno.</p></div></div>
+          <div className="closure-result-grid">
+            <div><span>Operaciones</span><strong>{result.operationCount}</strong></div>
+            <div><span>Comisión total</span><strong>{currency(result.commissionTotal)}</strong></div>
+            <div><span>Parte encargado</span><strong>{currency(result.staffShareTotal)}</strong></div>
+            <div><span>Parte socio</span><strong>{currency(result.partnerShareTotal)}</strong></div>
+            <div><span>Diferencia efectivo</span><strong className={result.differenceCash===0?"green-text":"red-text"}>{currency(result.differenceCash)}</strong></div>
+            <div><span>Diferencia Yape</span><strong className={result.differenceWallet===0?"green-text":"red-text"}>{currency(result.differenceWallet)}</strong></div>
+          </div>
+          <div className="modal-actions"><button className="primary" onClick={onClosed}>Finalizar cierre</button></div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -1111,12 +1135,15 @@ function CloseCashModal({ branchId, dashboard, onClose, onClosed }: { branchId: 
         <div className="calculation">
           <div><span>Efectivo esperado</span><strong>{currency(dashboard.metrics.cashCurrent)}</strong></div>
           <div><span>Yape esperado</span><strong>{currency(dashboard.metrics.walletCurrent)}</strong></div>
+          <div><span>Operaciones de hoy</span><strong>{dashboard.metrics.operationsToday}</strong></div>
+          <div><span>Comisión acumulada</span><strong>{currency(dashboard.metrics.commissionTotal)}</strong></div>
         </div>
         <div className="field-grid">
           <label>Efectivo declarado<div className="input-prefix"><span>S/</span><input value={cash} onChange={(e) => setCash(e.target.value)} inputMode="decimal" required /></div><small>Diferencia: {currency(cashDiff)}</small></label>
           <label>Yape declarado<div className="input-prefix"><span>S/</span><input value={wallet} onChange={(e) => setWallet(e.target.value)} inputMode="decimal" required /></div><small>Diferencia: {currency(walletDiff)}</small></label>
         </div>
         <label>Observación<input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Opcional" /></label>
+        <div className="closure-warning"><LockKeyhole size={16}/><span>Al confirmar, el turno quedará cerrado. Para registrar nuevas operaciones será necesario abrir una nueva caja.</span></div>
         {error && <div className="modal-error">{error}</div>}
         <div className="modal-actions"><button type="button" className="ghost-button" onClick={onClose}>Cancelar</button><button className="soft danger" disabled={saving}>{saving ? "Cerrando…" : "Confirmar cierre"}</button></div>
       </form>
