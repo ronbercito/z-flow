@@ -11,6 +11,7 @@ import {
   FileText,
   Home,
   LockKeyhole,
+  LogOut,
   Menu,
   Plus,
   Printer,
@@ -74,6 +75,17 @@ type Settings = {
   partner_share_pct?: number | null;
 };
 
+type AuthUser = {
+  id: number;
+  username: string;
+  fullName: string;
+  role: { code: "OWNER" | "PARTNER" | "BRANCH_ADMIN" | "CASHIER" | "AUDITOR"; name: string };
+  permissions: string[];
+  branch: { id: number; code: string; name: string; address: string | null } | null;
+  defaultBranch: { id: number; code: string; name: string; address: string | null } | null;
+  lastLoginAt: string | null;
+};
+
 const sidebar: Array<{ page: Page; label: string; icon: typeof Home }> = [
   { page: "home", label: "Inicio", icon: Home },
   { page: "operations", label: "Operaciones", icon: ReceiptText },
@@ -105,6 +117,8 @@ function formatDate(value: string) {
 }
 
 function App() {
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
   const [page, setPage] = useState<Page>("home");
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -117,15 +131,50 @@ function App() {
   const [closeCashModal, setCloseCashModal] = useState(false);
   const [receipt, setReceipt] = useState<Operation | null>(null);
 
+  const branchId = authUser?.branch?.id ?? authUser?.defaultBranch?.id ?? null;
+  const canWrite = Boolean(authUser?.permissions.includes("BRANCH_WRITE") || authUser?.permissions.includes("GLOBAL_WRITE"));
+
+  async function checkAuth() {
+    try {
+      const response = await fetch("/api/auth/me", { credentials: "same-origin" });
+      if (!response.ok) {
+        setAuthUser(null);
+        return;
+      }
+      const result = await response.json();
+      setAuthUser(result.user ?? null);
+    } catch {
+      setAuthUser(null);
+    } finally {
+      setAuthChecked(true);
+    }
+  }
+
+  async function logout() {
+    await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" }).catch(() => undefined);
+    setAuthUser(null);
+    setDashboard(null);
+    setSettings(null);
+    setOperations([]);
+    setPage("home");
+  }
+
   async function load() {
+    if (!branchId) return;
     setLoading(true);
     setApiError("");
     try {
       const [dashboardRes, settingsRes, operationsRes] = await Promise.all([
-        fetch("/api/branches/1/dashboard"),
-        fetch("/api/branches/1/settings"),
-        fetch("/api/branches/1/operations")
+        fetch(`/api/branches/${branchId}/dashboard`, { credentials: "same-origin" }),
+        fetch(`/api/branches/${branchId}/settings`, { credentials: "same-origin" }),
+        fetch(`/api/branches/${branchId}/operations`, { credentials: "same-origin" })
       ]);
+
+      if ([dashboardRes, settingsRes, operationsRes].some((response) => response.status === 401)) {
+        setAuthUser(null);
+        setDashboard(null);
+        return;
+      }
 
       if (!dashboardRes.ok || !settingsRes.ok || !operationsRes.ok) {
         throw new Error("No se pudo obtener la información de la filial");
@@ -143,8 +192,12 @@ function App() {
   }
 
   useEffect(() => {
-    void load();
+    void checkAuth();
   }, []);
+
+  useEffect(() => {
+    if (authUser && branchId) void load();
+  }, [authUser?.id, branchId]);
 
   const hourlyData = useMemo(() => {
     const count: Record<string, number> = Object.fromEntries(demoHours.map((hour) => [hour, 0]));
@@ -166,11 +219,29 @@ function App() {
     setMobileNav(false);
   }
 
+  if (!authChecked) {
+    return <div className="splash">Verificando sesión Z-FLOW…</div>;
+  }
+
+  if (!authUser) {
+    return <LoginScreen onLogin={(user) => setAuthUser(user)} />;
+  }
+
+  if (!branchId) {
+    return (
+      <div className="splash">
+        Tu usuario no tiene una filial disponible. Contacta al administrador.
+        <button className="ghost-button" onClick={() => void logout()}>Cerrar sesión</button>
+      </div>
+    );
+  }
+
   if (loading && !dashboard) {
     return <div className="splash">Cargando Z-FLOW…</div>;
   }
 
-  const branchName = dashboard?.branch.name ?? "Miraflores";
+  const branchName = dashboard?.branch.name ?? authUser.branch?.name ?? authUser.defaultBranch?.name ?? "Filial";
+  const initials = authUser.fullName.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
   const pageMeta: Record<Page, [string, string]> = {
     home: [`Panel de filial - ${branchName}`, "Resumen operativo del día"],
     operations: ["Operaciones", "Registra y consulta movimientos de esta filial"],
@@ -229,12 +300,13 @@ function App() {
           <div className="top-actions">
             <button className="icon-btn" title="Actualizar" onClick={() => void load()}><Bell size={19} /><i /></button>
             <button className="user-chip user-button" onClick={() => navigate("profile")}>
-              <div className="avatar">JP</div>
+              <div className="avatar">{initials || "ZF"}</div>
               <div>
-                <strong>Juan Pérez</strong>
-                <span>Encargado - {branchName}</span>
+                <strong>{authUser.fullName}</strong>
+                <span>{authUser.role.name} · {branchName}</span>
               </div>
             </button>
+            <button className="icon-btn" title="Cerrar sesión" onClick={() => void logout()}><LogOut size={18} /></button>
           </div>
         </header>
 
@@ -244,15 +316,15 @@ function App() {
             <div>
               <div className="title-line">
                 <h1>{pageMeta[page][0]}</h1>
-                <span className="restricted"><LockKeyhole size={13} /> Vista restringida</span>
+                <span className="restricted"><LockKeyhole size={13} /> {authUser.role.code === "OWNER" ? "Acceso propietario" : "Vista restringida"}</span>
               </div>
               <p>{pageMeta[page][1]}</p>
             </div>
             <div className="page-actions">
-              {(page === "home" || page === "operations") && (
+              {canWrite && (page === "home" || page === "operations") && (
                 <button className="primary" onClick={() => setOperationModal("YAPE_TO_CASH")}><Plus size={18} /> Nueva operación</button>
               )}
-              {(page === "home" || page === "cash") && (
+              {canWrite && (page === "home" || page === "cash") && (
                 <button
                   className={`soft ${dashboard?.session ? "success" : ""}`}
                   onClick={() => dashboard?.session ? navigate("cash") : setOpenCashModal(true)}
@@ -260,7 +332,7 @@ function App() {
                   <WalletCards size={17} /> {dashboard?.session ? "Caja abierta" : "Abrir caja"}
                 </button>
               )}
-              {(page === "home" || page === "cash" || page === "close") && dashboard?.session && (
+              {canWrite && (page === "home" || page === "cash" || page === "close") && dashboard?.session && (
                 <button className="soft danger" onClick={() => setCloseCashModal(true)}><LockKeyhole size={17} /> Cerrar caja</button>
               )}
             </div>
@@ -305,7 +377,7 @@ function App() {
 
           {page === "reports" && <ReportsPage dashboard={dashboard} operations={operations} />}
 
-          {page === "profile" && <ProfilePage dashboard={dashboard} />}
+          {page === "profile" && <ProfilePage dashboard={dashboard} user={authUser} />}
 
           {page === "help" && <HelpPage onNavigate={navigate} />}
         </section>
@@ -313,6 +385,7 @@ function App() {
 
       {operationModal && (
         <OperationModal
+          branchId={branchId}
           initialType={operationModal}
           settings={settings}
           onClose={() => setOperationModal(null)}
@@ -325,6 +398,7 @@ function App() {
 
       {openCashModal && (
         <OpenCashModal
+          branchId={branchId}
           onClose={() => setOpenCashModal(false)}
           onOpened={async () => {
             setOpenCashModal(false);
@@ -335,6 +409,7 @@ function App() {
 
       {closeCashModal && dashboard && (
         <CloseCashModal
+          branchId={branchId}
           dashboard={dashboard}
           onClose={() => setCloseCashModal(false)}
           onClosed={async () => {
@@ -346,6 +421,67 @@ function App() {
       )}
 
       {receipt && <ReceiptModal operation={receipt} branchName={branchName} onClose={() => setReceipt(null)} />}
+    </div>
+  );
+}
+
+function LoginScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [remember, setRemember] = useState(true);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ username, password, remember })
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "No se pudo iniciar sesión");
+      onLogin(result.user);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al iniciar sesión");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="login-page">
+      <div className="login-brand">
+        <div className="brand-mark large"><BadgeDollarSign size={28} /></div>
+        <div><strong>Z-FLOW</strong><span>Gestión segura de cajas y filiales</span></div>
+      </div>
+      <div className="login-layout">
+        <section className="login-card">
+          <span className="login-kicker">ACCESO SEGURO</span>
+          <h1>Inicia sesión</h1>
+          <p>Ingresa con la cuenta asignada por el administrador de Z-FLOW.</p>
+          <form onSubmit={submit}>
+            <label>Usuario<input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" placeholder="Tu usuario" required /></label>
+            <label>Contraseña<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" placeholder="Tu contraseña" required /></label>
+            <label className="remember"><input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> Mantener sesión iniciada</label>
+            {error && <div className="modal-error">{error}</div>}
+            <button className="primary login-button" disabled={saving}>{saving ? "Ingresando…" : "Ingresar a Z-FLOW"}</button>
+          </form>
+        </section>
+        <aside className="login-info">
+          <div className="login-shield"><LockKeyhole size={28} /></div>
+          <h2>Acceso según tu rol</h2>
+          <p>Cada empleado entra únicamente a la filial y funciones autorizadas para su cuenta.</p>
+          <div className="login-feature"><Check size={16} /><span>Sesiones protegidas con cookie HttpOnly</span></div>
+          <div className="login-feature"><Check size={16} /><span>Contraseñas almacenadas con hash seguro</span></div>
+          <div className="login-feature"><Check size={16} /><span>El backend bloquea accesos a otras filiales</span></div>
+          <small>Entorno local · acceso por IP</small>
+        </aside>
+      </div>
     </div>
   );
 }
@@ -588,25 +724,56 @@ function ReportsPage({ dashboard, operations }: { dashboard: Dashboard | null; o
   );
 }
 
-function ProfilePage({ dashboard }: { dashboard: Dashboard | null }) {
+function ProfilePage({ dashboard, user }: { dashboard: Dashboard | null; user: AuthUser }) {
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  async function changePassword(event: FormEvent) {
+    event.preventDefault();
+    setMessage("");
+    setError("");
+    const response = await fetch("/api/auth/change-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ currentPassword, newPassword })
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      setError(result.error ?? "No se pudo cambiar la contraseña");
+      return;
+    }
+    setCurrentPassword("");
+    setNewPassword("");
+    setMessage("Contraseña actualizada correctamente.");
+  }
+
   return (
     <div className="detail-grid">
       <section className="card large-panel">
         <div className="profile-head">
-          <div className="avatar big">JP</div>
-          <div><h2>Juan Pérez</h2><p>Encargado de filial</p></div>
+          <div className="avatar big">{user.fullName.split(/\s+/).filter(Boolean).slice(0,2).map((p) => p[0]).join("").toUpperCase()}</div>
+          <div><h2>{user.fullName}</h2><p>{user.role.name}</p></div>
         </div>
         <div className="profile-details">
-          <div><span>Filial asignada</span><strong>{dashboard?.branch.name ?? "Miraflores"}</strong></div>
-          <div><span>Código de filial</span><strong>{dashboard?.branch.code ?? "MIR"}</strong></div>
-          <div><span>Dirección</span><strong>{dashboard?.branch.address ?? "Sin dirección"}</strong></div>
-          <div><span>Permisos</span><strong>Operación de filial</strong></div>
+          <div><span>Usuario</span><strong>{user.username}</strong></div>
+          <div><span>Rol</span><strong>{user.role.name}</strong></div>
+          <div><span>Filial visible</span><strong>{dashboard?.branch.name ?? user.branch?.name ?? user.defaultBranch?.name ?? "—"}</strong></div>
+          <div><span>Permisos</span><strong>{user.permissions.includes("GLOBAL_WRITE") ? "Acceso global" : "Acceso por filial"}</strong></div>
         </div>
       </section>
       <section className="card action-panel">
-        <h3>Acceso restringido</h3>
-        <p>Tu cuenta solo puede consultar y modificar información de esta filial.</p>
-        <span className="restricted"><LockKeyhole size={13} /> Seguridad por filial</span>
+        <h3>Cambiar contraseña</h3>
+        <p>Usa al menos 10 caracteres, una mayúscula, una minúscula y un número.</p>
+        <form className="password-form" onSubmit={changePassword}>
+          <input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} placeholder="Contraseña actual" required />
+          <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Nueva contraseña" minLength={10} required />
+          {error && <div className="modal-error">{error}</div>}
+          {message && <div className="success-message">{message}</div>}
+          <button className="primary full">Actualizar contraseña</button>
+        </form>
       </section>
     </div>
   );
@@ -704,11 +871,13 @@ function ReportBar({ label, value, total, tone }: { label: string; value: number
 }
 
 function OperationModal({
+  branchId,
   initialType,
   settings,
   onClose,
   onCreated
 }: {
+  branchId: number;
   initialType: "YAPE_TO_CASH" | "CASH_TO_YAPE";
   settings: Settings | null;
   onClose: () => void;
@@ -734,7 +903,7 @@ function OperationModal({
     setSaving(true);
     setError("");
     try {
-      const response = await fetch("/api/branches/1/operations", {
+      const response = await fetch(`/api/branches/${branchId}/operations`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -792,7 +961,7 @@ function OperationModal({
   );
 }
 
-function OpenCashModal({ onClose, onOpened }: { onClose: () => void; onOpened: () => void }) {
+function OpenCashModal({ branchId, onClose, onOpened }: { branchId: number; onClose: () => void; onOpened: () => void }) {
   const [cash, setCash] = useState("");
   const [wallet, setWallet] = useState("");
   const [error, setError] = useState("");
@@ -803,7 +972,7 @@ function OpenCashModal({ onClose, onOpened }: { onClose: () => void; onOpened: (
     setSaving(true);
     setError("");
     try {
-      const response = await fetch("/api/branches/1/cash/open", {
+      const response = await fetch(`/api/branches/${branchId}/cash/open`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ initialCash: Number(cash || 0), initialWallet: Number(wallet || 0) })
@@ -833,7 +1002,7 @@ function OpenCashModal({ onClose, onOpened }: { onClose: () => void; onOpened: (
   );
 }
 
-function CloseCashModal({ dashboard, onClose, onClosed }: { dashboard: Dashboard; onClose: () => void; onClosed: () => void }) {
+function CloseCashModal({ branchId, dashboard, onClose, onClosed }: { branchId: number; dashboard: Dashboard; onClose: () => void; onClosed: () => void }) {
   const [cash, setCash] = useState(String(dashboard.metrics.cashCurrent));
   const [wallet, setWallet] = useState(String(dashboard.metrics.walletCurrent));
   const [notes, setNotes] = useState("");
@@ -848,7 +1017,7 @@ function CloseCashModal({ dashboard, onClose, onClosed }: { dashboard: Dashboard
     setSaving(true);
     setError("");
     try {
-      const response = await fetch("/api/branches/1/cash/close", {
+      const response = await fetch(`/api/branches/${branchId}/cash/close`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ declaredCash: Number(cash || 0), declaredWallet: Number(wallet || 0), notes: notes || undefined })
