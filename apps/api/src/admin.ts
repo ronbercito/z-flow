@@ -96,17 +96,31 @@ export async function registerAdminRoutes(app: FastifyInstance) {
         b.id, b.code, b.name, b.address, b.active,
         bs.max_operation_amount, bs.commission_type, bs.commission_value,
         bs.staff_share_pct, bs.partner_share_pct,
-        COUNT(DISTINCT CASE WHEN DATE(o.created_at) = CURDATE() THEN o.id END) AS operations_today,
-        COALESCE(SUM(CASE WHEN DATE(o.created_at) = CURDATE() AND o.status = 'COMPLETED' THEN o.commission ELSE 0 END), 0) AS commission_today,
-        MAX(CASE WHEN cs.status = 'OPEN' THEN 1 ELSE 0 END) AS cash_open,
-        MAX(CASE WHEN cs.status = 'OPEN' THEN cs.started_at ELSE NULL END) AS cash_started_at
+        COALESCE(op.operations_today, 0) AS operations_today,
+        COALESCE(op.commission_today, 0) AS commission_today,
+        CASE WHEN cs.id IS NULL THEN 0 ELSE 1 END AS cash_open,
+        cs.started_at AS cash_started_at
       FROM branches b
       LEFT JOIN branch_settings bs ON bs.branch_id = b.id
-      LEFT JOIN operations o ON o.branch_id = b.id
-      LEFT JOIN cash_sessions cs ON cs.branch_id = b.id
-      GROUP BY b.id, b.code, b.name, b.address, b.active,
-               bs.max_operation_amount, bs.commission_type, bs.commission_value,
-               bs.staff_share_pct, bs.partner_share_pct
+      LEFT JOIN (
+        SELECT branch_id,
+               COUNT(*) AS operations_today,
+               COALESCE(SUM(CASE WHEN status = 'COMPLETED' THEN commission ELSE 0 END), 0) AS commission_today
+        FROM operations
+        WHERE DATE(created_at) = CURDATE()
+        GROUP BY branch_id
+      ) op ON op.branch_id = b.id
+      LEFT JOIN (
+        SELECT c1.id, c1.branch_id, c1.started_at
+        FROM cash_sessions c1
+        INNER JOIN (
+          SELECT branch_id, MAX(started_at) AS max_started
+          FROM cash_sessions
+          WHERE status = 'OPEN'
+          GROUP BY branch_id
+        ) latest ON latest.branch_id = c1.branch_id AND latest.max_started = c1.started_at
+        WHERE c1.status = 'OPEN'
+      ) cs ON cs.branch_id = b.id
       ORDER BY b.name
     `);
 
