@@ -17,14 +17,22 @@
 - [x] Usuarios y roles
 - [x] Configuración de comisiones
 - [x] Reparto encargado/socio
-- [ ] Reportes implementados; exportaciones pendientes
+- [x] Reportes y exportaciones PDF/Excel
 - [x] Auditoría administrativa inicial
 
 ## Fase 3
+- [x] Reportes por rango de fechas
+- [x] Exportación PDF
+- [x] Exportación Excel
+- [x] Reparto histórico encargado/socio guardado por operación
+- [x] Cierre diario con totales de comisión y reparto
+- [x] Comprobante interno correlativo y PDF 80 mm
+- [x] Backup local y restauración
+- [x] Backup local automático diario
+- [ ] Backup externo fuera del LXC
 - [ ] Despliegue en nube
 - [ ] Dominio y HTTPS
-- [ ] Backups externos
-- [ ] Integración tributaria/electrónica una vez definida contablemente
+- [ ] Integración tributaria/electrónica SUNAT una vez definida contablemente
 
 
 ## Fase 2.1
