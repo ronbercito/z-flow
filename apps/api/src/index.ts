@@ -4,6 +4,13 @@ import cookie from "@fastify/cookie";
 import { z } from "zod";
 import { db } from "./db.js";
 import { registerAdminRoutes } from "./admin.js";
+import { registerReportRoutes } from "./reports.js";
+import {
+  backfillMissingReceipts,
+  calculateCommissionShares,
+  ensureBusinessSchema,
+  issueInternalReceipt
+} from "./business.js";
 import {
   bootstrapUsersIfEmpty,
   canReadBranch,
@@ -256,14 +263,17 @@ app.get("/api/branches/:branchId/operations", async (request, reply) => {
 
   const [rows] = await db.query<any[]>(
     `SELECT o.id, o.operation_type, o.reference_code, o.customer_name, o.amount,
-            o.commission, o.net_amount, o.notes, o.status,
+            o.commission, o.staff_share_amount, o.partner_share_amount,
+            o.net_amount, o.notes, o.status,
             DATE_FORMAT(o.created_at, '%Y-%m-%dT%H:%i:%s') AS created_at,
-            u.full_name AS registered_by
+            u.full_name AS registered_by,
+            r.series AS receipt_series, r.sequence_number AS receipt_number
      FROM operations o
      LEFT JOIN users u ON u.id = o.user_id
+     LEFT JOIN receipts r ON r.operation_id = o.id
      WHERE o.branch_id = ?
      ORDER BY o.created_at DESC
-     LIMIT 100`,
+     LIMIT 500`,
     [parsed.data.branchId]
   );
 
@@ -348,7 +358,11 @@ app.post("/api/branches/:branchId/cash/close", async (request, reply) => {
        COALESCE(SUM(CASE WHEN operation_type = 'YAPE_TO_CASH' AND status = 'COMPLETED' THEN amount ELSE 0 END), 0) AS yape_received,
        COALESCE(SUM(CASE WHEN operation_type = 'YAPE_TO_CASH' AND status = 'COMPLETED' THEN net_amount ELSE 0 END), 0) AS cash_delivered,
        COALESCE(SUM(CASE WHEN operation_type = 'CASH_TO_YAPE' AND status = 'COMPLETED' THEN amount ELSE 0 END), 0) AS cash_received,
-       COALESCE(SUM(CASE WHEN operation_type = 'CASH_TO_YAPE' AND status = 'COMPLETED' THEN net_amount ELSE 0 END), 0) AS yape_sent
+       COALESCE(SUM(CASE WHEN operation_type = 'CASH_TO_YAPE' AND status = 'COMPLETED' THEN net_amount ELSE 0 END), 0) AS yape_sent,
+       COUNT(CASE WHEN status = 'COMPLETED' THEN 1 END) AS operation_count,
+       COALESCE(SUM(CASE WHEN status = 'COMPLETED' THEN commission ELSE 0 END), 0) AS commission_total,
+       COALESCE(SUM(CASE WHEN status = 'COMPLETED' THEN staff_share_amount ELSE 0 END), 0) AS staff_share_total,
+       COALESCE(SUM(CASE WHEN status = 'COMPLETED' THEN partner_share_amount ELSE 0 END), 0) AS partner_share_total
      FROM operations
      WHERE branch_id = ? AND cash_session_id = ?`,
     [branchId, session.id]
@@ -371,14 +385,24 @@ app.post("/api/branches/:branchId/cash/close", async (request, reply) => {
   try {
     await connection.beginTransaction();
 
+    const operationCount = Number(s.operation_count ?? 0);
+    const commissionTotal = money(Number(s.commission_total ?? 0));
+    const staffShareTotal = money(Number(s.staff_share_total ?? 0));
+    const partnerShareTotal = money(Number(s.partner_share_total ?? 0));
+
     const [closure] = await connection.execute<any>(
       `INSERT INTO daily_closures
-       (branch_id, cash_session_id, expected_cash, declared_cash, expected_wallet,
-        declared_wallet, difference_cash, difference_wallet, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (branch_id, cash_session_id, operation_count, commission_total,
+        staff_share_total, partner_share_total, expected_cash, declared_cash,
+        expected_wallet, declared_wallet, difference_cash, difference_wallet, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         branchId,
         session.id,
+        operationCount,
+        commissionTotal,
+        staffShareTotal,
+        partnerShareTotal,
         expectedCash,
         declaredCash,
         expectedWallet,
@@ -424,7 +448,11 @@ app.post("/api/branches/:branchId/cash/close", async (request, reply) => {
     differenceCash,
     expectedWallet,
     declaredWallet,
-    differenceWallet
+    differenceWallet,
+    operationCount: Number(s.operation_count ?? 0),
+    commissionTotal: money(Number(s.commission_total ?? 0)),
+    staffShareTotal: money(Number(s.staff_share_total ?? 0)),
+    partnerShareTotal: money(Number(s.partner_share_total ?? 0))
   };
 });
 
@@ -466,9 +494,11 @@ app.post("/api/branches/:branchId/operations", async (request, reply) => {
 
   const body = parsedBody.data;
   const [settingsRows] = await db.query<any[]>(
-    `SELECT max_operation_amount, commission_type, commission_value
-     FROM branch_settings
-     WHERE branch_id = ? LIMIT 1`,
+    `SELECT bs.max_operation_amount, bs.commission_type, bs.commission_value,
+            bs.staff_share_pct, bs.partner_share_pct, b.code AS branch_code
+     FROM branch_settings bs
+     JOIN branches b ON b.id = bs.branch_id
+     WHERE bs.branch_id = ? LIMIT 1`,
     [branchId]
   );
 
@@ -517,12 +547,22 @@ app.post("/api/branches/:branchId/operations", async (request, reply) => {
     });
   }
 
+  const shares = calculateCommissionShares(
+    commission,
+    settings.staff_share_pct == null ? null : Number(settings.staff_share_pct),
+    settings.partner_share_pct == null ? null : Number(settings.partner_share_pct)
+  );
+
+  const connection = await db.getConnection();
   try {
-    const [result] = await db.execute<any>(
+    await connection.beginTransaction();
+
+    const [result] = await connection.execute<any>(
       `INSERT INTO operations
        (branch_id, cash_session_id, user_id, operation_type, reference_code,
-        customer_name, amount, commission, net_amount, notes, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'COMPLETED')`,
+        customer_name, amount, commission, staff_share_amount, partner_share_amount,
+        net_amount, notes, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'COMPLETED')`,
       [
         branchId,
         sessionRows[0].id,
@@ -532,40 +572,64 @@ app.post("/api/branches/:branchId/operations", async (request, reply) => {
         body.customerName ?? null,
         money(body.amount),
         commission,
+        shares.staffShareAmount,
+        shares.partnerShareAmount,
         netAmount,
         body.notes ?? null
       ]
     );
 
-    await db.execute(
+    const operationId = Number(result.insertId);
+    const receipt = await issueInternalReceipt(
+      connection,
+      branchId,
+      String(settings.branch_code),
+      operationId
+    );
+
+    await connection.execute(
       `INSERT INTO audit_logs (branch_id, user_id, action, entity_type, entity_id, details)
        VALUES (?, ?, 'OPERATION_CREATED', 'OPERATION', ?,
-         JSON_OBJECT('type', ?, 'amount', ?, 'commission', ?))`,
+         JSON_OBJECT('type', ?, 'amount', ?, 'commission', ?, 'staff_share', ?, 'partner_share', ?))`,
       [
         branchId,
         auth.userId,
-        Number(result.insertId),
+        operationId,
         body.operationType,
         money(body.amount),
-        commission
+        commission,
+        shares.staffShareAmount,
+        shares.partnerShareAmount
       ]
     );
 
+    await connection.commit();
+
     return reply.code(201).send({
-      id: Number(result.insertId),
+      id: operationId,
       operationType: body.operationType,
       amount: money(body.amount),
       commission,
+      staffShareAmount: shares.staffShareAmount,
+      partnerShareAmount: shares.partnerShareAmount,
+      unassignedCommission: shares.unassignedAmount,
       netAmount,
-      referenceCode: body.referenceCode ?? null
+      referenceCode: body.referenceCode ?? null,
+      receipt: {
+        series: receipt.series,
+        number: Number(receipt.sequence_number)
+      }
     });
   } catch (error: any) {
+    await connection.rollback();
     if (error?.code === "ER_DUP_ENTRY") {
       return reply.code(409).send({
         error: "Ese código/referencia ya fue registrado en esta filial"
       });
     }
     throw error;
+  } finally {
+    connection.release();
   }
 });
 
@@ -575,8 +639,11 @@ app.setErrorHandler((error, _request, reply) => {
 });
 
 await ensureAuthSchema();
+await ensureBusinessSchema();
 await bootstrapUsersIfEmpty(app.log);
+await backfillMissingReceipts();
 await registerAdminRoutes(app);
+await registerReportRoutes(app);
 
 const port = Number(process.env.PORT ?? 3001);
 await app.listen({ host: "0.0.0.0", port });
