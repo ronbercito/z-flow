@@ -640,18 +640,19 @@ function CashAdminPage({ branches, closures }: { branches: Branch[]; closures: C
         </div>
         <div className="table-wrap">
           <table className="admin-table">
-            <thead><tr><th>Fecha</th><th>Filial</th><th>Caja esperada</th><th>Caja declarada</th><th>Diferencia caja</th><th>Yape esperado</th><th>Yape declarado</th><th>Diferencia Yape</th></tr></thead>
+            <thead><tr><th>Fecha</th><th>Filial</th><th>Ops.</th><th>Comisión</th><th>Encargado</th><th>Socio</th><th>Caja esperada</th><th>Caja declarada</th><th>Diferencia caja</th><th>Yape esperado</th><th>Yape declarado</th><th>Diferencia Yape</th></tr></thead>
             <tbody>
               {filteredClosures.map((item) => (
                 <tr key={item.id}>
                   <td>{dateTime(item.closed_at)}</td><td><strong>{item.branch_name}</strong></td>
+                  <td>{item.operation_count ?? 0}</td><td>{currency(item.commission_total)}</td><td>{currency(item.staff_share_total)}</td><td>{currency(item.partner_share_total)}</td>
                   <td>{currency(item.expected_cash)}</td><td>{currency(item.declared_cash)}</td>
                   <td className={Number(item.difference_cash) === 0 ? "green-text" : "red-text"}>{currency(item.difference_cash)}</td>
                   <td>{currency(item.expected_wallet)}</td><td>{currency(item.declared_wallet)}</td>
                   <td className={Number(item.difference_wallet) === 0 ? "green-text" : "red-text"}>{currency(item.difference_wallet)}</td>
                 </tr>
               ))}
-              {!filteredClosures.length && <tr><td colSpan={8} className="empty-cell">No hay cierres para esos filtros.</td></tr>}
+              {!filteredClosures.length && <tr><td colSpan={12} className="empty-cell">No hay cierres para esos filtros.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -1206,9 +1207,9 @@ function BranchDetailModal({
         {!detail.users.length && <tr><td colSpan={5} className="empty-cell">No hay usuarios asignados.</td></tr>}
       </tbody></table></div></div>}
 
-      {!loading && detail && tab==="closures" && <div className="branch-detail-table"><div className="table-wrap"><table className="admin-table"><thead><tr><th>Fecha</th><th>Caja esperada</th><th>Caja declarada</th><th>Diferencia caja</th><th>Yape esperado</th><th>Yape declarado</th><th>Diferencia Yape</th></tr></thead><tbody>
-        {detail.closures.map((item)=><tr key={item.id}><td>{dateTime(item.closed_at)}</td><td>{currency(item.expected_cash)}</td><td>{currency(item.declared_cash)}</td><td className={Number(item.difference_cash)===0?"green-text":"red-text"}>{currency(item.difference_cash)}</td><td>{currency(item.expected_wallet)}</td><td>{currency(item.declared_wallet)}</td><td className={Number(item.difference_wallet)===0?"green-text":"red-text"}>{currency(item.difference_wallet)}</td></tr>)}
-        {!detail.closures.length && <tr><td colSpan={7} className="empty-cell">Todavía no hay cierres.</td></tr>}
+      {!loading && detail && tab==="closures" && <div className="branch-detail-table"><div className="table-wrap"><table className="admin-table"><thead><tr><th>Fecha</th><th>Ops.</th><th>Comisión</th><th>Encargado</th><th>Socio</th><th>Caja esperada</th><th>Caja declarada</th><th>Diferencia caja</th><th>Yape esperado</th><th>Yape declarado</th><th>Diferencia Yape</th></tr></thead><tbody>
+        {detail.closures.map((item)=><tr key={item.id}><td>{dateTime(item.closed_at)}</td><td>{item.operation_count ?? 0}</td><td>{currency(item.commission_total)}</td><td>{currency(item.staff_share_total)}</td><td>{currency(item.partner_share_total)}</td><td>{currency(item.expected_cash)}</td><td>{currency(item.declared_cash)}</td><td className={Number(item.difference_cash)===0?"green-text":"red-text"}>{currency(item.difference_cash)}</td><td>{currency(item.expected_wallet)}</td><td>{currency(item.declared_wallet)}</td><td className={Number(item.difference_wallet)===0?"green-text":"red-text"}>{currency(item.difference_wallet)}</td></tr>)}
+        {!detail.closures.length && <tr><td colSpan={11} className="empty-cell">Todavía no hay cierres.</td></tr>}
       </tbody></table></div></div>}
     </div>
   </div>;
