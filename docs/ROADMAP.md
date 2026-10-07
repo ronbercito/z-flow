@@ -7,18 +7,18 @@
 - [x] Dashboard restringido de filial
 - [x] Login y sesiones
 - [x] RBAC por rol y aislamiento de filial en backend
-- [ ] Nueva operación real
-- [ ] Apertura y cierre de caja
-- [ ] Ticket interno PDF/58-80 mm
+- [x] Nueva operación real
+- [x] Apertura y cierre de caja
+- [x] Ticket interno imprimible (PDF/58-80 mm pendiente de ajuste final)
 
 ## Fase 2
-- [ ] Dashboard propietario
-- [ ] Gestión de filiales
-- [ ] Usuarios y roles
-- [ ] Configuración de comisiones
-- [ ] Reparto encargado/socio
-- [ ] Reportes y exportaciones
-- [ ] Auditoría avanzada
+- [x] Dashboard propietario
+- [x] Gestión de filiales
+- [x] Usuarios y roles
+- [x] Configuración de comisiones
+- [x] Reparto encargado/socio
+- [ ] Reportes implementados; exportaciones pendientes
+- [x] Auditoría administrativa inicial
 
 ## Fase 3
 - [ ] Despliegue en nube
