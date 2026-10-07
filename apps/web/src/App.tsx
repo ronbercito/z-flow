@@ -1,4 +1,5 @@
 import { FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
+import OwnerApp from "./OwnerApp";
 import {
   BadgeDollarSign,
   BarChart3,
@@ -196,8 +197,8 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (authUser && branchId) void load();
-  }, [authUser?.id, branchId]);
+    if (authUser && authUser.role.code !== "OWNER" && branchId) void load();
+  }, [authUser?.id, authUser?.role.code, branchId]);
 
   const hourlyData = useMemo(() => {
     const count: Record<string, number> = Object.fromEntries(demoHours.map((hour) => [hour, 0]));
@@ -225,6 +226,10 @@ function App() {
 
   if (!authUser) {
     return <LoginScreen onLogin={(user) => setAuthUser(user)} />;
+  }
+
+  if (authUser.role.code === "OWNER") {
+    return <OwnerApp user={authUser} onLogout={logout} />;
   }
 
   if (!branchId) {
