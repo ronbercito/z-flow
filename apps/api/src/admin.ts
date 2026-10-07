@@ -23,6 +23,13 @@ const createBranchBody = z.object({
   partnerSharePct: z.coerce.number().min(0).max(100).nullable().optional()
 });
 
+const updateBranchBody = z.object({
+  code: z.string().trim().min(2).max(20).regex(/^[A-Za-z0-9_-]+$/),
+  name: z.string().trim().min(2).max(120),
+  address: z.string().trim().max(255).nullable().optional(),
+  active: z.boolean()
+});
+
 const branchSettingsBody = z.object({
   maxOperationAmount: z.coerce.number().positive(),
   commissionType: z.enum(["FLAT", "PERCENT"]),
@@ -241,6 +248,140 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       throw error;
     } finally {
       connection.release();
+    }
+  });
+
+  app.get("/api/admin/branches/:branchId/detail", async (request, reply) => {
+    const auth = await requireOwner(request, reply);
+    if (!auth) return;
+
+    const parsed = branchParams.safeParse(request.params);
+    if (!parsed.success) return reply.code(400).send({ error: "Filial inválida" });
+
+    const { branchId } = parsed.data;
+    const [branchRows] = await db.query<any[]>(`
+      SELECT b.id, b.code, b.name, b.address, b.active, b.created_at,
+             bs.max_operation_amount, bs.commission_type, bs.commission_value,
+             bs.staff_share_pct, bs.partner_share_pct
+      FROM branches b
+      LEFT JOIN branch_settings bs ON bs.branch_id = b.id
+      WHERE b.id = ?
+      LIMIT 1
+    `, [branchId]);
+
+    if (!branchRows.length) return reply.code(404).send({ error: "Filial no encontrada" });
+
+    const [cashRows] = await db.query<any[]>(`
+      SELECT id, user_id, initial_cash, initial_wallet, declared_cash, declared_wallet,
+             status, DATE_FORMAT(started_at, '%Y-%m-%dT%H:%i:%s') AS started_at,
+             DATE_FORMAT(ended_at, '%Y-%m-%dT%H:%i:%s') AS ended_at
+      FROM cash_sessions
+      WHERE branch_id = ?
+      ORDER BY started_at DESC
+      LIMIT 20
+    `, [branchId]);
+
+    const [userRows] = await db.query<any[]>(`
+      SELECT u.id, u.username, u.full_name, u.active, u.last_login_at,
+             r.code AS role_code, r.name AS role_name
+      FROM users u
+      JOIN roles r ON r.id = u.role_id
+      WHERE u.branch_id = ?
+      ORDER BY u.active DESC, u.full_name
+    `, [branchId]);
+
+    const [operationRows] = await db.query<any[]>(`
+      SELECT o.id, o.operation_type, o.reference_code, o.customer_name, o.amount,
+             o.commission, o.net_amount, o.status,
+             DATE_FORMAT(o.created_at, '%Y-%m-%dT%H:%i:%s') AS created_at,
+             u.full_name AS registered_by
+      FROM operations o
+      LEFT JOIN users u ON u.id = o.user_id
+      WHERE o.branch_id = ?
+      ORDER BY o.created_at DESC
+      LIMIT 20
+    `, [branchId]);
+
+    const [closureRows] = await db.query<any[]>(`
+      SELECT id, expected_cash, declared_cash, expected_wallet, declared_wallet,
+             difference_cash, difference_wallet, notes,
+             DATE_FORMAT(closed_at, '%Y-%m-%dT%H:%i:%s') AS closed_at
+      FROM daily_closures
+      WHERE branch_id = ?
+      ORDER BY closed_at DESC
+      LIMIT 20
+    `, [branchId]);
+
+    const [todayRows] = await db.query<any[]>(`
+      SELECT COUNT(*) AS operations_today,
+             COALESCE(SUM(CASE WHEN status='COMPLETED' THEN amount ELSE 0 END),0) AS amount_today,
+             COALESCE(SUM(CASE WHEN status='COMPLETED' THEN commission ELSE 0 END),0) AS commission_today
+      FROM operations
+      WHERE branch_id = ? AND DATE(created_at)=CURDATE()
+    `, [branchId]);
+
+    const b = branchRows[0];
+    return {
+      branch: {
+        id: Number(b.id),
+        code: b.code,
+        name: b.name,
+        address: b.address,
+        active: Boolean(b.active),
+        createdAt: b.created_at,
+        settings: {
+          maxOperationAmount: money(b.max_operation_amount),
+          commissionType: b.commission_type,
+          commissionValue: money(b.commission_value),
+          staffSharePct: b.staff_share_pct == null ? null : num(b.staff_share_pct),
+          partnerSharePct: b.partner_share_pct == null ? null : num(b.partner_share_pct)
+        }
+      },
+      today: {
+        operations: num(todayRows[0]?.operations_today),
+        amount: money(todayRows[0]?.amount_today),
+        commission: money(todayRows[0]?.commission_today)
+      },
+      users: userRows,
+      cashSessions: cashRows,
+      recentOperations: operationRows,
+      closures: closureRows
+    };
+  });
+
+  app.post("/api/admin/branches/:branchId/update", async (request, reply) => {
+    const auth = await requireOwner(request, reply);
+    if (!auth) return;
+
+    const parsedParams = branchParams.safeParse(request.params);
+    const parsedBody = updateBranchBody.safeParse(request.body);
+    if (!parsedParams.success || !parsedBody.success) {
+      return reply.code(400).send({ error: parsedBody.success ? "Filial inválida" : parsedBody.error.issues[0]?.message ?? "Datos inválidos" });
+    }
+
+    const { branchId } = parsedParams.data;
+    const body = parsedBody.data;
+
+    try {
+      const [result] = await db.execute<any>(
+        "UPDATE branches SET code = ?, name = ?, address = ?, active = ? WHERE id = ?",
+        [body.code.toUpperCase(), body.name, body.address ?? null, body.active ? 1 : 0, branchId]
+      );
+
+      if (!result.affectedRows) return reply.code(404).send({ error: "Filial no encontrada" });
+
+      await db.execute(
+        `INSERT INTO audit_logs (branch_id, user_id, action, entity_type, entity_id, details)
+         VALUES (?, ?, 'BRANCH_UPDATED', 'BRANCH', ?, JSON_OBJECT('name', ?, 'code', ?, 'active', ?))`,
+        [branchId, auth.userId, branchId, body.name, body.code.toUpperCase(), body.active]
+      );
+
+      return { ok: true };
+    } catch (error: any) {
+      if (error?.code === "ER_DUP_ENTRY") {
+        return reply.code(409).send({ error: "Ese código de filial ya existe" });
+      }
+      throw error;
     }
   });
 
