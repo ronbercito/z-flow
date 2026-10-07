@@ -82,7 +82,7 @@ app.get("/api/branches/:branchId/dashboard", async (request, reply) => {
        commission,
        net_amount,
        status,
-       created_at
+       DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%s') AS created_at
      FROM operations
      WHERE branch_id = ?
        AND DATE(created_at) = CURDATE()
