@@ -79,3 +79,31 @@ docker compose logs api | grep -A 5 "CREDENCIALES TEMPORALES"
 
 El usuario de filial queda restringido también en el backend: aunque cambie manualmente el ID de filial en una URL, recibirá HTTP 403.
 
+
+
+## Etapa 3 local
+
+Implementado en `develop`:
+
+- Reportes por rango de fechas.
+- Exportación PDF y Excel.
+- Reparto de comisión encargado/socio guardado por operación.
+- Cierre de caja con totales de comisión y reparto.
+- Comprobantes internos correlativos.
+- PDF de comprobante interno en formato aproximado de 80 mm.
+- Backup y restauración de MariaDB.
+- Backup automático diario opcional.
+
+> Los comprobantes internos de Z-FLOW no son comprobantes de pago electrónicos SUNAT. La integración tributaria se hará por separado cuando se definan proveedor, credenciales y flujo contable.
+
+### Activar backup automático local
+
+Después de actualizar el LXC:
+
+```bash
+cd /opt/z-flow
+bash scripts/backup.sh
+bash scripts/install-backup-cron.sh
+```
+
+Los backups quedan en `/opt/z-flow/backups` con retención local predeterminada de 14 días.
