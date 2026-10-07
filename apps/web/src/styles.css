@@ -1025,3 +1025,83 @@ tr:last-child td { border-bottom:0; }
   .branch-detail-header p { margin-left: 0; }
   .branch-detail-tabs { overflow-x: auto; }
 }
+
+
+/* Stage 3 - reports, exports and internal receipts */
+.report-toolbar {
+  margin-top: 16px;
+  padding: 13px 15px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+}
+.report-toolbar-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 220px;
+}
+.report-toolbar-title > svg { color: #2563eb; }
+.report-toolbar-title > div { display: grid; gap: 3px; }
+.report-toolbar-title strong { font-size: 11px; }
+.report-toolbar-title span { color: #8b98aa; font-size: 8px; }
+.export-button { height: 36px; white-space: nowrap; }
+.stage3-kpis { grid-template-columns: repeat(6,minmax(0,1fr)); }
+.split-report-line {
+  display: flex;
+  gap: 14px;
+  margin-top: 5px;
+  color: #697a91;
+  font-size: 8px;
+}
+.financial-split-grid {
+  padding: 18px;
+  display: grid;
+  grid-template-columns: repeat(3,1fr);
+  gap: 10px;
+}
+.financial-split-grid > div {
+  border: 1px solid #e8eef5;
+  background: #fafcfe;
+  border-radius: 10px;
+  padding: 14px;
+  display: grid;
+  gap: 5px;
+}
+.financial-split-grid span { color: #8492a5; font-size: 9px; }
+.financial-split-grid strong { color: #26334a; font-size: 15px; }
+
+.receipt-main-button {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  display: grid;
+  gap: 3px;
+  text-align: left;
+  min-width: 0;
+}
+.receipt-main-button strong { font-size: 10px; color: #28364d; }
+.receipt-main-button span { font-size: 8px; color: #8e9aab; }
+.receipt-actions { display: flex !important; gap: 5px !important; justify-content: flex-end; }
+.receipt-legal-note,
+.receipt-tax-note {
+  margin: 12px 16px 16px;
+  padding: 9px 11px;
+  border: 1px solid #e7edf5;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #7c899b;
+  font-size: 8px;
+  line-height: 1.45;
+}
+.receipt-tax-note { margin: 0; }
+
+@media (max-width: 1100px) {
+  .report-toolbar { align-items: stretch; flex-direction: column; }
+  .stage3-kpis { grid-template-columns: repeat(3,1fr); }
+}
+@media (max-width: 650px) {
+  .financial-split-grid, .stage3-kpis { grid-template-columns: 1fr; }
+  .receipt-actions { flex-direction: column; }
+}
