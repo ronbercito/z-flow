@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
 import {
   BadgeDollarSign,
   BarChart3,
@@ -13,6 +13,7 @@ import {
   LockKeyhole,
   Menu,
   Plus,
+  Printer,
   ReceiptText,
   RefreshCw,
   Scale,
@@ -23,6 +24,8 @@ import {
   WalletCards,
   X
 } from "lucide-react";
+
+type Page = "home" | "operations" | "cash" | "close" | "receipts" | "reports" | "profile" | "help";
 
 type Operation = {
   id: number;
@@ -67,17 +70,19 @@ type Settings = {
   max_operation_amount: number;
   commission_type: "FLAT" | "PERCENT";
   commission_value: number;
+  staff_share_pct?: number | null;
+  partner_share_pct?: number | null;
 };
 
-const sidebar = [
-  { label: "Inicio", icon: Home, active: true },
-  { label: "Operaciones", icon: ReceiptText },
-  { label: "Caja", icon: WalletCards },
-  { label: "Cierre diario", icon: ClipboardCheck },
-  { label: "Comprobantes", icon: FileText },
-  { label: "Reportes", icon: BarChart3 },
-  { label: "Mi perfil", icon: UserRound },
-  { label: "Ayuda", icon: CircleHelp }
+const sidebar: Array<{ page: Page; label: string; icon: typeof Home }> = [
+  { page: "home", label: "Inicio", icon: Home },
+  { page: "operations", label: "Operaciones", icon: ReceiptText },
+  { page: "cash", label: "Caja", icon: WalletCards },
+  { page: "close", label: "Cierre diario", icon: ClipboardCheck },
+  { page: "receipts", label: "Comprobantes", icon: FileText },
+  { page: "reports", label: "Reportes", icon: BarChart3 },
+  { page: "profile", label: "Mi perfil", icon: UserRound },
+  { page: "help", label: "Ayuda", icon: CircleHelp }
 ];
 
 const demoHours = ["08", "09", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19"];
@@ -90,29 +95,46 @@ function currency(value: number | string | null | undefined) {
   }).format(Number(value ?? 0));
 }
 
+function formatDate(value: string) {
+  return new Date(value).toLocaleString("es-PE", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
 function App() {
+  const [page, setPage] = useState<Page>("home");
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
+  const [operations, setOperations] = useState<Operation[]>([]);
   const [loading, setLoading] = useState(true);
   const [apiError, setApiError] = useState("");
-  const [modalOpen, setModalOpen] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
+  const [operationModal, setOperationModal] = useState<null | "YAPE_TO_CASH" | "CASH_TO_YAPE">(null);
+  const [openCashModal, setOpenCashModal] = useState(false);
+  const [closeCashModal, setCloseCashModal] = useState(false);
+  const [receipt, setReceipt] = useState<Operation | null>(null);
 
   async function load() {
     setLoading(true);
     setApiError("");
     try {
-      const [dashboardRes, settingsRes] = await Promise.all([
+      const [dashboardRes, settingsRes, operationsRes] = await Promise.all([
         fetch("/api/branches/1/dashboard"),
-        fetch("/api/branches/1/settings")
+        fetch("/api/branches/1/settings"),
+        fetch("/api/branches/1/operations")
       ]);
 
-      if (!dashboardRes.ok || !settingsRes.ok) {
+      if (!dashboardRes.ok || !settingsRes.ok || !operationsRes.ok) {
         throw new Error("No se pudo obtener la información de la filial");
       }
 
       setDashboard(await dashboardRes.json());
       setSettings(await settingsRes.json());
+      const all = await operationsRes.json();
+      setOperations(all.operations ?? []);
     } catch (error) {
       setApiError(error instanceof Error ? error.message : "Error de conexión");
     } finally {
@@ -125,11 +147,11 @@ function App() {
   }, []);
 
   const hourlyData = useMemo(() => {
-    const count = Object.fromEntries(demoHours.map((hour) => [hour, 0]));
-    for (const op of dashboard?.recentOperations ?? []) {
+    const count: Record<string, number> = Object.fromEntries(demoHours.map((hour) => [hour, 0]));
+    for (const op of operations) {
       const date = new Date(op.created_at);
       const hour = String(date.getHours()).padStart(2, "0");
-      if (hour in count) count[hour] += 1;
+      if (hour in count && date.toDateString() === new Date().toDateString()) count[hour] += 1;
     }
     const max = Math.max(...Object.values(count), 1);
     return demoHours.map((hour) => ({
@@ -137,11 +159,28 @@ function App() {
       value: count[hour],
       height: Math.max(12, (count[hour] / max) * 100)
     }));
-  }, [dashboard]);
+  }, [operations]);
+
+  function navigate(next: Page) {
+    setPage(next);
+    setMobileNav(false);
+  }
 
   if (loading && !dashboard) {
     return <div className="splash">Cargando Z-FLOW…</div>;
   }
+
+  const branchName = dashboard?.branch.name ?? "Miraflores";
+  const pageMeta: Record<Page, [string, string]> = {
+    home: [`Panel de filial - ${branchName}`, "Resumen operativo del día"],
+    operations: ["Operaciones", "Registra y consulta movimientos de esta filial"],
+    cash: ["Caja", "Control del efectivo y saldo digital del turno"],
+    close: ["Cierre diario", "Compara lo esperado contra lo declarado y cierra el turno"],
+    receipts: ["Comprobantes", "Consulta los comprobantes internos de las operaciones"],
+    reports: ["Reportes", "Resumen de actividad y comisiones de la filial"],
+    profile: ["Mi perfil", "Datos del usuario y filial asignada"],
+    help: ["Ayuda", "Guía rápida para operar Z-FLOW"]
+  };
 
   return (
     <div className="app-shell">
@@ -156,8 +195,12 @@ function App() {
         </div>
 
         <nav>
-          {sidebar.map(({ label, icon: Icon, active }) => (
-            <button className={`nav-item ${active ? "active" : ""}`} key={label}>
+          {sidebar.map(({ page: itemPage, label, icon: Icon }) => (
+            <button
+              className={`nav-item ${page === itemPage ? "active" : ""}`}
+              key={itemPage}
+              onClick={() => navigate(itemPage)}
+            >
               <Icon size={19} />
               <span>{label}</span>
             </button>
@@ -168,30 +211,30 @@ function App() {
           <CircleHelp size={22} />
           <strong>¿Necesitas ayuda?</strong>
           <span>Soporte para tu filial</span>
-          <button>Ver ayuda <ChevronRight size={14} /></button>
+          <button onClick={() => navigate("help")}>Ver ayuda <ChevronRight size={14} /></button>
         </div>
       </aside>
 
       <main className="main">
         <header className="topbar">
-          <div className="branch-lock">
+          <button className="branch-lock" onClick={() => navigate("profile")}>
             <Building2 size={18} />
             <div>
-              <strong>{dashboard?.branch.name ?? "Miraflores"}</strong>
+              <strong>{branchName}</strong>
               <span>Filial asignada</span>
             </div>
             <LockKeyhole size={15} />
-          </div>
+          </button>
 
           <div className="top-actions">
-            <button className="icon-btn"><Bell size={19} /><i /></button>
-            <div className="user-chip">
+            <button className="icon-btn" title="Actualizar" onClick={() => void load()}><Bell size={19} /><i /></button>
+            <button className="user-chip user-button" onClick={() => navigate("profile")}>
               <div className="avatar">JP</div>
               <div>
                 <strong>Juan Pérez</strong>
-                <span>Encargado - {dashboard?.branch.name ?? "Miraflores"}</span>
+                <span>Encargado - {branchName}</span>
               </div>
-            </div>
+            </button>
           </div>
         </header>
 
@@ -200,156 +243,436 @@ function App() {
             <button className="mobile-menu" onClick={() => setMobileNav(true)}><Menu size={20} /></button>
             <div>
               <div className="title-line">
-                <h1>Panel de filial - {dashboard?.branch.name ?? "Miraflores"}</h1>
+                <h1>{pageMeta[page][0]}</h1>
                 <span className="restricted"><LockKeyhole size={13} /> Vista restringida</span>
               </div>
-              <p>Resumen operativo del día</p>
+              <p>{pageMeta[page][1]}</p>
             </div>
             <div className="page-actions">
-              <button className="primary" onClick={() => setModalOpen(true)}><Plus size={18} /> Nueva operación</button>
-              <button className="soft success"><WalletCards size={17} /> {dashboard?.session ? "Caja abierta" : "Abrir caja"}</button>
-              <button className="soft danger"><LockKeyhole size={17} /> Cerrar caja</button>
+              {(page === "home" || page === "operations") && (
+                <button className="primary" onClick={() => setOperationModal("YAPE_TO_CASH")}><Plus size={18} /> Nueva operación</button>
+              )}
+              {(page === "home" || page === "cash") && (
+                <button
+                  className={`soft ${dashboard?.session ? "success" : ""}`}
+                  onClick={() => dashboard?.session ? navigate("cash") : setOpenCashModal(true)}
+                >
+                  <WalletCards size={17} /> {dashboard?.session ? "Caja abierta" : "Abrir caja"}
+                </button>
+              )}
+              {(page === "home" || page === "cash" || page === "close") && dashboard?.session && (
+                <button className="soft danger" onClick={() => setCloseCashModal(true)}><LockKeyhole size={17} /> Cerrar caja</button>
+              )}
             </div>
           </div>
 
-          <div className="scope-banner">
-            <LockKeyhole size={19} />
-            <div>
-              <strong>Solo puedes ver y gestionar la información de tu filial: {dashboard?.branch.name ?? "Miraflores"}</strong>
-              <span>No tienes acceso a otras filiales ni a configuraciones generales del sistema.</span>
+          {page === "home" && (
+            <div className="scope-banner">
+              <LockKeyhole size={19} />
+              <div>
+                <strong>Solo puedes ver y gestionar la información de tu filial: {branchName}</strong>
+                <span>No tienes acceso a otras filiales ni a configuraciones generales del sistema.</span>
+              </div>
             </div>
-          </div>
+          )}
 
           {apiError && <div className="error-banner">{apiError} <button onClick={() => void load()}><RefreshCw size={14} /> Reintentar</button></div>}
 
-          <div className="kpi-grid">
-            <Kpi icon={<ReceiptText />} tone="blue" label="Operaciones hoy" value={String(dashboard?.metrics.operationsToday ?? 0)} hint="Actividad de hoy" />
-            <Kpi icon={<Smartphone />} tone="purple" label="Yape recibido" value={currency(dashboard?.metrics.yapeReceived)} hint="Operaciones completadas" />
-            <Kpi icon={<WalletCards />} tone="green" label="Efectivo entregado" value={currency(dashboard?.metrics.cashDelivered)} hint="Operaciones completadas" />
-            <Kpi icon={<BadgeDollarSign />} tone="orange" label="Comisión del día" value={currency(dashboard?.metrics.commissionTotal)} hint="Acumulado" />
-            <Kpi icon={<WalletCards />} tone="cyan" label="Caja actual" value={currency(dashboard?.metrics.cashCurrent)} hint="Según operaciones" />
-            <Kpi icon={<Scale />} tone="purple" label="Diferencia de caja" value={currency(dashboard?.metrics.cashDifference)} hint="Cuadra" positive />
-          </div>
+          {page === "home" && (
+            <HomePage
+              dashboard={dashboard}
+              operations={operations}
+              hourlyData={hourlyData}
+              onNavigate={navigate}
+              onNewOperation={(type) => setOperationModal(type)}
+              onCloseCash={() => setCloseCashModal(true)}
+            />
+          )}
 
-          <div className="analytics-grid">
-            <section className="card chart-card">
-              <div className="card-head">
-                <div>
-                  <strong>Operaciones por hora</strong>
-                  <span>Actividad registrada hoy</span>
-                </div>
-                <button className="ghost">Hoy</button>
-              </div>
-              <div className="bars">
-                {hourlyData.map((item) => (
-                  <div className="bar-col" key={item.hour}>
-                    <div className="bar-track">
-                      <div className="bar-fill" style={{ height: `${item.height}%` }} title={`${item.value} operaciones`} />
-                    </div>
-                    <span>{item.hour}:00</span>
-                  </div>
-                ))}
-              </div>
-            </section>
+          {page === "operations" && (
+            <OperationsPage operations={operations} onNewOperation={(type) => setOperationModal(type)} onReceipt={setReceipt} />
+          )}
 
-            <section className="card summary-card">
-              <div className="card-head">
-                <div>
-                  <strong>Resumen del día</strong>
-                  <span>{dashboard?.branch.name ?? "Miraflores"}</span>
-                </div>
-                <RefreshCw size={16} className="muted" onClick={() => void load()} />
-              </div>
-              <SummaryRow icon={<ReceiptText />} label="Total de operaciones" value={String(dashboard?.metrics.operationsToday ?? 0)} />
-              <SummaryRow icon={<Smartphone />} label="Saldo Yape" value={currency(dashboard?.metrics.walletCurrent)} />
-              <SummaryRow icon={<WalletCards />} label="Caja actual" value={currency(dashboard?.metrics.cashCurrent)} />
-              <SummaryRow icon={<BadgeDollarSign />} label="Comisión generada" value={currency(dashboard?.metrics.commissionTotal)} />
-              <SummaryRow icon={<Scale />} label="Diferencia de caja" value={currency(dashboard?.metrics.cashDifference)} />
-            </section>
-          </div>
+          {page === "cash" && (
+            <CashPage dashboard={dashboard} onOpen={() => setOpenCashModal(true)} onClose={() => setCloseCashModal(true)} />
+          )}
 
-          <div className="bottom-grid">
-            <section className="card operations-card">
-              <div className="card-head">
-                <div>
-                  <strong>Operaciones recientes - {dashboard?.branch.name ?? "Miraflores"}</strong>
-                  <span>Solo movimientos de tu filial</span>
-                </div>
-                <button className="ghost">Ver todas</button>
-              </div>
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Fecha / Hora</th>
-                      <th>Tipo</th>
-                      <th>Cliente</th>
-                      <th>Código / Referencia</th>
-                      <th>Monto</th>
-                      <th>Comisión</th>
-                      <th>Entregado</th>
-                      <th>Estado</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(dashboard?.recentOperations ?? []).map((op) => (
-                      <tr key={op.id}>
-                        <td>{new Date(op.created_at).toLocaleString("es-PE", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</td>
-                        <td><span className={`type-pill ${op.operation_type === "YAPE_TO_CASH" ? "yape" : "cash"}`}>{op.operation_type === "YAPE_TO_CASH" ? "Yape → Efectivo" : "Efectivo → Yape"}</span></td>
-                        <td>{op.customer_name ?? "—"}</td>
-                        <td>{op.reference_code ?? "—"}</td>
-                        <td>{currency(op.amount)}</td>
-                        <td>{currency(op.commission)}</td>
-                        <td>{currency(op.net_amount)}</td>
-                        <td><span className={`status ${op.status === "COMPLETED" ? "ok" : "pending"}`}><i />{op.status === "COMPLETED" ? "Completada" : "En proceso"}</span></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
+          {page === "close" && (
+            <ClosePage dashboard={dashboard} onClose={() => setCloseCashModal(true)} onOpen={() => setOpenCashModal(true)} />
+          )}
 
-            <section className="card checklist">
-              <div className="card-head">
-                <div>
-                  <strong>Checklist de caja</strong>
-                  <span>Hoy</span>
-                </div>
-                <Settings2 size={17} className="muted" />
-              </div>
-              {[
-                ["Caja abierta", Boolean(dashboard?.session)],
-                ["Registrar operaciones", (dashboard?.metrics.operationsToday ?? 0) > 0],
-                ["Verificar comprobantes", true],
-                ["Revisar diferencia de caja", true],
-                ["Cierre diario", false]
-              ].map(([label, done]) => (
-                <div className="check-row" key={String(label)}>
-                  <span className={done ? "check done" : "check"}>{done && <Check size={13} />}</span>
-                  <div><strong>{String(label)}</strong><span>{done ? "Completado" : "Pendiente al final del día"}</span></div>
-                </div>
-              ))}
-              <button className="close-day"><LockKeyhole size={17} /> Cerrar caja</button>
-            </section>
-          </div>
+          {page === "receipts" && <ReceiptsPage operations={operations} onReceipt={setReceipt} />}
+
+          {page === "reports" && <ReportsPage dashboard={dashboard} operations={operations} />}
+
+          {page === "profile" && <ProfilePage dashboard={dashboard} />}
+
+          {page === "help" && <HelpPage onNavigate={navigate} />}
         </section>
       </main>
 
-      {modalOpen && (
+      {operationModal && (
         <OperationModal
+          initialType={operationModal}
           settings={settings}
-          onClose={() => setModalOpen(false)}
+          onClose={() => setOperationModal(null)}
           onCreated={async () => {
-            setModalOpen(false);
+            setOperationModal(null);
             await load();
           }}
         />
       )}
+
+      {openCashModal && (
+        <OpenCashModal
+          onClose={() => setOpenCashModal(false)}
+          onOpened={async () => {
+            setOpenCashModal(false);
+            await load();
+          }}
+        />
+      )}
+
+      {closeCashModal && dashboard && (
+        <CloseCashModal
+          dashboard={dashboard}
+          onClose={() => setCloseCashModal(false)}
+          onClosed={async () => {
+            setCloseCashModal(false);
+            await load();
+            setPage("home");
+          }}
+        />
+      )}
+
+      {receipt && <ReceiptModal operation={receipt} branchName={branchName} onClose={() => setReceipt(null)} />}
     </div>
   );
 }
 
-function Kpi({ icon, tone, label, value, hint, positive }: { icon: React.ReactNode; tone: string; label: string; value: string; hint: string; positive?: boolean }) {
+function HomePage({
+  dashboard,
+  operations,
+  hourlyData,
+  onNavigate,
+  onNewOperation,
+  onCloseCash
+}: {
+  dashboard: Dashboard | null;
+  operations: Operation[];
+  hourlyData: Array<{ hour: string; value: number; height: number }>;
+  onNavigate: (page: Page) => void;
+  onNewOperation: (type: "YAPE_TO_CASH" | "CASH_TO_YAPE") => void;
+  onCloseCash: () => void;
+}) {
+  return (
+    <>
+      <div className="quick-actions">
+        <button className="quick yape" onClick={() => onNewOperation("YAPE_TO_CASH")}><Smartphone size={20} /><div><strong>Yape → Efectivo</strong><span>Registrar recepción Yape</span></div><ChevronRight size={17} /></button>
+        <button className="quick cash" onClick={() => onNewOperation("CASH_TO_YAPE")}><Send size={20} /><div><strong>Efectivo → Yape</strong><span>Registrar envío Yape</span></div><ChevronRight size={17} /></button>
+      </div>
+
+      <div className="kpi-grid">
+        <Kpi icon={<ReceiptText />} tone="blue" label="Operaciones hoy" value={String(dashboard?.metrics.operationsToday ?? 0)} hint="Actividad de hoy" />
+        <Kpi icon={<Smartphone />} tone="purple" label="Yape recibido" value={currency(dashboard?.metrics.yapeReceived)} hint="Operaciones completadas" />
+        <Kpi icon={<WalletCards />} tone="green" label="Efectivo entregado" value={currency(dashboard?.metrics.cashDelivered)} hint="Operaciones completadas" />
+        <Kpi icon={<BadgeDollarSign />} tone="orange" label="Comisión del día" value={currency(dashboard?.metrics.commissionTotal)} hint="Acumulado" />
+        <Kpi icon={<WalletCards />} tone="cyan" label="Caja actual" value={currency(dashboard?.metrics.cashCurrent)} hint="Según operaciones" />
+        <Kpi icon={<Scale />} tone="purple" label="Diferencia de caja" value={currency(dashboard?.metrics.cashDifference)} hint="Cuadra" positive />
+      </div>
+
+      <div className="analytics-grid">
+        <section className="card chart-card">
+          <div className="card-head">
+            <div><strong>Operaciones por hora</strong><span>Actividad registrada hoy</span></div>
+            <button className="ghost" onClick={() => onNavigate("reports")}>Ver reporte</button>
+          </div>
+          <div className="bars">
+            {hourlyData.map((item) => (
+              <div className="bar-col" key={item.hour}>
+                <div className="bar-track"><div className="bar-fill" style={{ height: `${item.height}%` }} title={`${item.value} operaciones`} /></div>
+                <span>{item.hour}:00</span>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="card summary-card">
+          <div className="card-head">
+            <div><strong>Resumen del día</strong><span>{dashboard?.branch.name ?? "Miraflores"}</span></div>
+          </div>
+          <SummaryRow icon={<ReceiptText />} label="Total de operaciones" value={String(dashboard?.metrics.operationsToday ?? 0)} />
+          <SummaryRow icon={<Smartphone />} label="Saldo Yape" value={currency(dashboard?.metrics.walletCurrent)} />
+          <SummaryRow icon={<WalletCards />} label="Caja actual" value={currency(dashboard?.metrics.cashCurrent)} />
+          <SummaryRow icon={<BadgeDollarSign />} label="Comisión generada" value={currency(dashboard?.metrics.commissionTotal)} />
+          <SummaryRow icon={<Scale />} label="Diferencia de caja" value={currency(dashboard?.metrics.cashDifference)} />
+        </section>
+      </div>
+
+      <div className="bottom-grid">
+        <section className="card operations-card">
+          <div className="card-head">
+            <div><strong>Operaciones recientes - {dashboard?.branch.name ?? "Miraflores"}</strong><span>Solo movimientos de tu filial</span></div>
+            <button className="ghost" onClick={() => onNavigate("operations")}>Ver todas</button>
+          </div>
+          <OperationsTable operations={operations.slice(0, 8)} />
+        </section>
+
+        <section className="card checklist">
+          <div className="card-head">
+            <div><strong>Checklist de caja</strong><span>Hoy</span></div>
+            <Settings2 size={17} className="muted" />
+          </div>
+          {[
+            ["Caja abierta", Boolean(dashboard?.session)],
+            ["Registrar operaciones", (dashboard?.metrics.operationsToday ?? 0) > 0],
+            ["Verificar comprobantes", true],
+            ["Revisar diferencia de caja", true],
+            ["Cierre diario", !dashboard?.session]
+          ].map(([label, done]) => (
+            <div className="check-row" key={String(label)}>
+              <span className={done ? "check done" : "check"}>{done && <Check size={13} />}</span>
+              <div><strong>{String(label)}</strong><span>{done ? "Completado" : "Pendiente"}</span></div>
+            </div>
+          ))}
+          {dashboard?.session && <button className="close-day" onClick={onCloseCash}><LockKeyhole size={17} /> Cerrar caja</button>}
+        </section>
+      </div>
+    </>
+  );
+}
+
+function OperationsPage({
+  operations,
+  onNewOperation,
+  onReceipt
+}: {
+  operations: Operation[];
+  onNewOperation: (type: "YAPE_TO_CASH" | "CASH_TO_YAPE") => void;
+  onReceipt: (op: Operation) => void;
+}) {
+  const [filter, setFilter] = useState<"ALL" | "YAPE_TO_CASH" | "CASH_TO_YAPE">("ALL");
+  const filtered = filter === "ALL" ? operations : operations.filter((op) => op.operation_type === filter);
+
+  return (
+    <>
+      <div className="quick-actions">
+        <button className="quick yape" onClick={() => onNewOperation("YAPE_TO_CASH")}><Smartphone size={20} /><div><strong>Yape → Efectivo</strong><span>Cliente paga por Yape</span></div><Plus size={17} /></button>
+        <button className="quick cash" onClick={() => onNewOperation("CASH_TO_YAPE")}><Send size={20} /><div><strong>Efectivo → Yape</strong><span>Cliente entrega efectivo</span></div><Plus size={17} /></button>
+      </div>
+      <section className="card page-card">
+        <div className="card-head">
+          <div><strong>Historial de operaciones</strong><span>{filtered.length} registros cargados</span></div>
+          <div className="filter-group">
+            <button className={filter === "ALL" ? "filter active" : "filter"} onClick={() => setFilter("ALL")}>Todas</button>
+            <button className={filter === "YAPE_TO_CASH" ? "filter active" : "filter"} onClick={() => setFilter("YAPE_TO_CASH")}>Yape → Efectivo</button>
+            <button className={filter === "CASH_TO_YAPE" ? "filter active" : "filter"} onClick={() => setFilter("CASH_TO_YAPE")}>Efectivo → Yape</button>
+          </div>
+        </div>
+        <OperationsTable operations={filtered} onReceipt={onReceipt} />
+      </section>
+    </>
+  );
+}
+
+function CashPage({ dashboard, onOpen, onClose }: { dashboard: Dashboard | null; onOpen: () => void; onClose: () => void }) {
+  return (
+    <div className="detail-grid">
+      <section className="card large-panel">
+        <div className="panel-title"><WalletCards size={22} /><div><h2>Estado de caja</h2><p>{dashboard?.session ? "Turno activo" : "Caja cerrada"}</p></div></div>
+        <div className="cash-status">
+          <div><span>Estado</span><strong className={dashboard?.session ? "green-text" : "red-text"}>{dashboard?.session ? "ABIERTA" : "CERRADA"}</strong></div>
+          <div><span>Efectivo actual</span><strong>{currency(dashboard?.metrics.cashCurrent)}</strong></div>
+          <div><span>Saldo Yape</span><strong>{currency(dashboard?.metrics.walletCurrent)}</strong></div>
+          <div><span>Comisión del turno</span><strong>{currency(dashboard?.metrics.commissionTotal)}</strong></div>
+        </div>
+        {dashboard?.session ? (
+          <div className="info-box">
+            <strong>Turno iniciado</strong>
+            <span>{new Date(dashboard.session.started_at).toLocaleString("es-PE")}</span>
+            <span>Efectivo inicial: {currency(dashboard.session.initial_cash)}</span>
+            <span>Saldo Yape inicial: {currency(dashboard.session.initial_wallet)}</span>
+          </div>
+        ) : (
+          <div className="empty-state"><WalletCards size={28} /><strong>No hay caja abierta</strong><span>Abre una caja para empezar a registrar operaciones.</span></div>
+        )}
+      </section>
+      <section className="card action-panel">
+        <h3>Acciones de caja</h3>
+        {!dashboard?.session ? (
+          <button className="primary full" onClick={onOpen}><WalletCards size={17} /> Abrir caja</button>
+        ) : (
+          <button className="soft danger full" onClick={onClose}><LockKeyhole size={17} /> Cerrar caja</button>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function ClosePage({ dashboard, onClose, onOpen }: { dashboard: Dashboard | null; onClose: () => void; onOpen: () => void }) {
+  if (!dashboard?.session) {
+    return (
+      <section className="card empty-page">
+        <ClipboardCheck size={34} />
+        <h2>No hay un turno abierto</h2>
+        <p>Primero debes abrir caja para poder realizar un cierre diario.</p>
+        <button className="primary" onClick={onOpen}>Abrir caja</button>
+      </section>
+    );
+  }
+
+  return (
+    <div className="detail-grid">
+      <section className="card large-panel">
+        <div className="panel-title"><ClipboardCheck size={22} /><div><h2>Resumen para cierre</h2><p>Valores calculados automáticamente</p></div></div>
+        <div className="cash-status">
+          <div><span>Caja esperada</span><strong>{currency(dashboard.metrics.cashCurrent)}</strong></div>
+          <div><span>Yape esperado</span><strong>{currency(dashboard.metrics.walletCurrent)}</strong></div>
+          <div><span>Operaciones</span><strong>{dashboard.metrics.operationsToday}</strong></div>
+          <div><span>Comisión</span><strong>{currency(dashboard.metrics.commissionTotal)}</strong></div>
+        </div>
+        <div className="scope-banner compact"><Scale size={18} /><div><strong>El sistema comparará estos montos con lo que declares.</strong><span>Si existe una diferencia quedará guardada en el cierre.</span></div></div>
+      </section>
+      <section className="card action-panel">
+        <h3>Finalizar turno</h3>
+        <p>Cuenta el efectivo y confirma el saldo de Yape antes de continuar.</p>
+        <button className="soft danger full" onClick={onClose}><LockKeyhole size={17} /> Iniciar cierre</button>
+      </section>
+    </div>
+  );
+}
+
+function ReceiptsPage({ operations, onReceipt }: { operations: Operation[]; onReceipt: (op: Operation) => void }) {
+  const completed = operations.filter((op) => op.status === "COMPLETED");
+  return (
+    <section className="card page-card">
+      <div className="card-head"><div><strong>Comprobantes internos</strong><span>Se genera una vista por cada operación completada</span></div></div>
+      <div className="receipt-list">
+        {completed.map((op) => (
+          <button className="receipt-row" key={op.id} onClick={() => onReceipt(op)}>
+            <div className="receipt-icon"><ReceiptText size={18} /></div>
+            <div><strong>Z-{String(op.id).padStart(6, "0")}</strong><span>{formatDate(op.created_at)} · {op.customer_name ?? "Cliente"}</span></div>
+            <div><strong>{currency(op.amount)}</strong><span>Comisión {currency(op.commission)}</span></div>
+            <ChevronRight size={17} />
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ReportsPage({ dashboard, operations }: { dashboard: Dashboard | null; operations: Operation[] }) {
+  const yapeCount = operations.filter((op) => op.operation_type === "YAPE_TO_CASH").length;
+  const cashCount = operations.filter((op) => op.operation_type === "CASH_TO_YAPE").length;
+  const totalAmount = operations.reduce((sum, op) => sum + Number(op.amount), 0);
+  const totalCommission = operations.reduce((sum, op) => sum + Number(op.commission), 0);
+
+  return (
+    <>
+      <div className="kpi-grid reports-kpi">
+        <Kpi icon={<ReceiptText />} tone="blue" label="Operaciones cargadas" value={String(operations.length)} hint="Historial visible" />
+        <Kpi icon={<Smartphone />} tone="purple" label="Yape → Efectivo" value={String(yapeCount)} hint="Operaciones" />
+        <Kpi icon={<Send />} tone="green" label="Efectivo → Yape" value={String(cashCount)} hint="Operaciones" />
+        <Kpi icon={<BadgeDollarSign />} tone="orange" label="Monto movilizado" value={currency(totalAmount)} hint="Suma de operaciones" />
+        <Kpi icon={<BadgeDollarSign />} tone="cyan" label="Comisión total" value={currency(totalCommission)} hint="Historial cargado" />
+        <Kpi icon={<WalletCards />} tone="blue" label="Caja actual" value={currency(dashboard?.metrics.cashCurrent)} hint="Turno actual" />
+      </div>
+      <section className="card page-card report-panel">
+        <div className="card-head"><div><strong>Distribución de operaciones</strong><span>Resumen simple de la filial</span></div></div>
+        <div className="report-bars">
+          <ReportBar label="Yape → Efectivo" value={yapeCount} total={Math.max(operations.length, 1)} tone="purple" />
+          <ReportBar label="Efectivo → Yape" value={cashCount} total={Math.max(operations.length, 1)} tone="green" />
+        </div>
+      </section>
+    </>
+  );
+}
+
+function ProfilePage({ dashboard }: { dashboard: Dashboard | null }) {
+  return (
+    <div className="detail-grid">
+      <section className="card large-panel">
+        <div className="profile-head">
+          <div className="avatar big">JP</div>
+          <div><h2>Juan Pérez</h2><p>Encargado de filial</p></div>
+        </div>
+        <div className="profile-details">
+          <div><span>Filial asignada</span><strong>{dashboard?.branch.name ?? "Miraflores"}</strong></div>
+          <div><span>Código de filial</span><strong>{dashboard?.branch.code ?? "MIR"}</strong></div>
+          <div><span>Dirección</span><strong>{dashboard?.branch.address ?? "Sin dirección"}</strong></div>
+          <div><span>Permisos</span><strong>Operación de filial</strong></div>
+        </div>
+      </section>
+      <section className="card action-panel">
+        <h3>Acceso restringido</h3>
+        <p>Tu cuenta solo puede consultar y modificar información de esta filial.</p>
+        <span className="restricted"><LockKeyhole size={13} /> Seguridad por filial</span>
+      </section>
+    </div>
+  );
+}
+
+function HelpPage({ onNavigate }: { onNavigate: (page: Page) => void }) {
+  const items: Array<[string, string, Page]> = [
+    ["Registrar una operación", "Usa Operaciones y selecciona Yape → Efectivo o Efectivo → Yape.", "operations"],
+    ["Controlar la caja", "Revisa efectivo, saldo Yape y estado del turno.", "cash"],
+    ["Cerrar el día", "Declara los montos reales y compara la diferencia.", "close"],
+    ["Ver comprobantes", "Consulta el comprobante interno de cada movimiento.", "receipts"]
+  ];
+
+  return (
+    <div className="help-grid">
+      {items.map(([title, description, target]) => (
+        <button className="card help-card" key={title} onClick={() => onNavigate(target)}>
+          <CircleHelp size={22} />
+          <strong>{title}</strong>
+          <span>{description}</span>
+          <em>Ir a la sección <ChevronRight size={14} /></em>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function OperationsTable({ operations, onReceipt }: { operations: Operation[]; onReceipt?: (op: Operation) => void }) {
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Fecha / Hora</th>
+            <th>Tipo</th>
+            <th>Cliente</th>
+            <th>Código / Referencia</th>
+            <th>Monto</th>
+            <th>Comisión</th>
+            <th>Entregado</th>
+            <th>Estado</th>
+            {onReceipt && <th></th>}
+          </tr>
+        </thead>
+        <tbody>
+          {operations.map((op) => (
+            <tr key={op.id}>
+              <td>{formatDate(op.created_at)}</td>
+              <td><span className={`type-pill ${op.operation_type === "YAPE_TO_CASH" ? "yape" : "cash"}`}>{op.operation_type === "YAPE_TO_CASH" ? "Yape → Efectivo" : "Efectivo → Yape"}</span></td>
+              <td>{op.customer_name ?? "—"}</td>
+              <td>{op.reference_code ?? "—"}</td>
+              <td>{currency(op.amount)}</td>
+              <td>{currency(op.commission)}</td>
+              <td>{currency(op.net_amount)}</td>
+              <td><span className={`status ${op.status === "COMPLETED" ? "ok" : "pending"}`}><i />{op.status === "COMPLETED" ? "Completada" : "En proceso"}</span></td>
+              {onReceipt && <td><button className="mini-button" onClick={() => onReceipt(op)}><ReceiptText size={13} /> Ver</button></td>}
+            </tr>
+          ))}
+          {!operations.length && <tr><td colSpan={9} className="empty-cell">No hay operaciones para mostrar.</td></tr>}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function Kpi({ icon, tone, label, value, hint, positive }: { icon: ReactNode; tone: string; label: string; value: string; hint: string; positive?: boolean }) {
   return (
     <section className="card kpi">
       <div className={`kpi-icon ${tone}`}>{icon}</div>
@@ -360,7 +683,7 @@ function Kpi({ icon, tone, label, value, hint, positive }: { icon: React.ReactNo
   );
 }
 
-function SummaryRow({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+function SummaryRow({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
   return (
     <div className="summary-row">
       <span className="summary-icon">{icon}</span>
@@ -370,8 +693,28 @@ function SummaryRow({ icon, label, value }: { icon: React.ReactNode; label: stri
   );
 }
 
-function OperationModal({ settings, onClose, onCreated }: { settings: Settings | null; onClose: () => void; onCreated: () => void }) {
-  const [type, setType] = useState<"YAPE_TO_CASH" | "CASH_TO_YAPE">("YAPE_TO_CASH");
+function ReportBar({ label, value, total, tone }: { label: string; value: number; total: number; tone: string }) {
+  const pct = Math.round((value / total) * 100);
+  return (
+    <div className="report-bar-row">
+      <div><strong>{label}</strong><span>{value} operaciones · {pct}%</span></div>
+      <div className="progress"><i className={tone} style={{ width: `${pct}%` }} /></div>
+    </div>
+  );
+}
+
+function OperationModal({
+  initialType,
+  settings,
+  onClose,
+  onCreated
+}: {
+  initialType: "YAPE_TO_CASH" | "CASH_TO_YAPE";
+  settings: Settings | null;
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [type, setType] = useState<"YAPE_TO_CASH" | "CASH_TO_YAPE">(initialType);
   const [amount, setAmount] = useState("");
   const [reference, setReference] = useState("");
   const [customer, setCustomer] = useState("");
@@ -390,7 +733,6 @@ function OperationModal({ settings, onClose, onCreated }: { settings: Settings |
     event.preventDefault();
     setSaving(true);
     setError("");
-
     try {
       const response = await fetch("/api/branches/1/operations", {
         method: "POST",
@@ -402,7 +744,6 @@ function OperationModal({ settings, onClose, onCreated }: { settings: Settings |
           customerName: customer || undefined
         })
       });
-
       const result = await response.json();
       if (!response.ok) throw new Error(result.error ?? "No se pudo registrar la operación");
       onCreated();
@@ -417,19 +758,14 @@ function OperationModal({ settings, onClose, onCreated }: { settings: Settings |
     <div className="modal-backdrop">
       <form className="modal" onSubmit={submit}>
         <div className="modal-head">
-          <div>
-            <h2>Nueva operación</h2>
-            <p>La comisión se calcula automáticamente.</p>
-          </div>
+          <div><h2>Nueva operación</h2><p>La comisión se calcula automáticamente.</p></div>
           <button type="button" className="icon-btn" onClick={onClose}><X size={19} /></button>
         </div>
-
         <label>Tipo de operación</label>
         <div className="operation-types">
           <button type="button" className={type === "YAPE_TO_CASH" ? "selected yape" : ""} onClick={() => setType("YAPE_TO_CASH")}><Smartphone size={19} /> Yape → Efectivo</button>
           <button type="button" className={type === "CASH_TO_YAPE" ? "selected cash" : ""} onClick={() => setType("CASH_TO_YAPE")}><Send size={19} /> Efectivo → Yape</button>
         </div>
-
         <div className="field-grid">
           <label>Monto
             <div className="input-prefix"><span>S/</span><input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" placeholder="0.00" required /></div>
@@ -440,24 +776,134 @@ function OperationModal({ settings, onClose, onCreated }: { settings: Settings |
             <small>{type === "YAPE_TO_CASH" ? "Obligatorio para Yape → Efectivo" : "Opcional"}</small>
           </label>
         </div>
-
-        <label>Cliente
-          <input value={customer} onChange={(e) => setCustomer(e.target.value)} placeholder="Nombre opcional" />
-        </label>
-
+        <label>Cliente<input value={customer} onChange={(e) => setCustomer(e.target.value)} placeholder="Nombre opcional" /></label>
         <div className="calculation">
           <div><span>Monto</span><strong>{currency(numericAmount)}</strong></div>
           <div><span>Comisión</span><strong>- {currency(commission)}</strong></div>
           <div className="net"><span>Monto a entregar</span><strong>{currency(net)}</strong></div>
         </div>
-
         {error && <div className="modal-error">{error}</div>}
-
         <div className="modal-actions">
           <button type="button" className="ghost-button" onClick={onClose}>Cancelar</button>
           <button className="primary" disabled={saving}>{saving ? "Guardando…" : "Registrar operación"}</button>
         </div>
       </form>
+    </div>
+  );
+}
+
+function OpenCashModal({ onClose, onOpened }: { onClose: () => void; onOpened: () => void }) {
+  const [cash, setCash] = useState("");
+  const [wallet, setWallet] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      const response = await fetch("/api/branches/1/cash/open", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initialCash: Number(cash || 0), initialWallet: Number(wallet || 0) })
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "No se pudo abrir la caja");
+      onOpened();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al abrir caja");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop">
+      <form className="modal small-modal" onSubmit={submit}>
+        <div className="modal-head"><div><h2>Abrir caja</h2><p>Declara con cuánto inicia el turno.</p></div><button type="button" className="icon-btn" onClick={onClose}><X size={19} /></button></div>
+        <div className="field-grid">
+          <label>Efectivo inicial<div className="input-prefix"><span>S/</span><input value={cash} onChange={(e) => setCash(e.target.value)} inputMode="decimal" required /></div></label>
+          <label>Saldo Yape inicial<div className="input-prefix"><span>S/</span><input value={wallet} onChange={(e) => setWallet(e.target.value)} inputMode="decimal" required /></div></label>
+        </div>
+        {error && <div className="modal-error">{error}</div>}
+        <div className="modal-actions"><button type="button" className="ghost-button" onClick={onClose}>Cancelar</button><button className="primary" disabled={saving}>{saving ? "Abriendo…" : "Abrir caja"}</button></div>
+      </form>
+    </div>
+  );
+}
+
+function CloseCashModal({ dashboard, onClose, onClosed }: { dashboard: Dashboard; onClose: () => void; onClosed: () => void }) {
+  const [cash, setCash] = useState(String(dashboard.metrics.cashCurrent));
+  const [wallet, setWallet] = useState(String(dashboard.metrics.walletCurrent));
+  const [notes, setNotes] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const cashDiff = Number(cash || 0) - dashboard.metrics.cashCurrent;
+  const walletDiff = Number(wallet || 0) - dashboard.metrics.walletCurrent;
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      const response = await fetch("/api/branches/1/cash/close", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ declaredCash: Number(cash || 0), declaredWallet: Number(wallet || 0), notes: notes || undefined })
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "No se pudo cerrar la caja");
+      onClosed();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al cerrar caja");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop">
+      <form className="modal" onSubmit={submit}>
+        <div className="modal-head"><div><h2>Cierre de caja</h2><p>Ingresa lo que realmente tienes al finalizar.</p></div><button type="button" className="icon-btn" onClick={onClose}><X size={19} /></button></div>
+        <div className="calculation">
+          <div><span>Efectivo esperado</span><strong>{currency(dashboard.metrics.cashCurrent)}</strong></div>
+          <div><span>Yape esperado</span><strong>{currency(dashboard.metrics.walletCurrent)}</strong></div>
+        </div>
+        <div className="field-grid">
+          <label>Efectivo declarado<div className="input-prefix"><span>S/</span><input value={cash} onChange={(e) => setCash(e.target.value)} inputMode="decimal" required /></div><small>Diferencia: {currency(cashDiff)}</small></label>
+          <label>Yape declarado<div className="input-prefix"><span>S/</span><input value={wallet} onChange={(e) => setWallet(e.target.value)} inputMode="decimal" required /></div><small>Diferencia: {currency(walletDiff)}</small></label>
+        </div>
+        <label>Observación<input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Opcional" /></label>
+        {error && <div className="modal-error">{error}</div>}
+        <div className="modal-actions"><button type="button" className="ghost-button" onClick={onClose}>Cancelar</button><button className="soft danger" disabled={saving}>{saving ? "Cerrando…" : "Confirmar cierre"}</button></div>
+      </form>
+    </div>
+  );
+}
+
+function ReceiptModal({ operation, branchName, onClose }: { operation: Operation; branchName: string; onClose: () => void }) {
+  return (
+    <div className="modal-backdrop">
+      <div className="modal receipt-modal">
+        <div className="modal-head"><div><h2>Comprobante interno</h2><p>Z-{String(operation.id).padStart(6, "0")}</p></div><button className="icon-btn" onClick={onClose}><X size={19} /></button></div>
+        <div className="ticket">
+          <strong className="ticket-brand">Z-FLOW</strong>
+          <span>{branchName}</span>
+          <hr />
+          <div><span>Operación</span><strong>Z-{String(operation.id).padStart(6, "0")}</strong></div>
+          <div><span>Fecha</span><strong>{formatDate(operation.created_at)}</strong></div>
+          <div><span>Tipo</span><strong>{operation.operation_type === "YAPE_TO_CASH" ? "Yape → Efectivo" : "Efectivo → Yape"}</strong></div>
+          <div><span>Referencia</span><strong>{operation.reference_code ?? "—"}</strong></div>
+          <div><span>Cliente</span><strong>{operation.customer_name ?? "—"}</strong></div>
+          <hr />
+          <div><span>Monto</span><strong>{currency(operation.amount)}</strong></div>
+          <div><span>Comisión</span><strong>{currency(operation.commission)}</strong></div>
+          <div className="ticket-total"><span>Entregado</span><strong>{currency(operation.net_amount)}</strong></div>
+        </div>
+        <div className="modal-actions"><button className="ghost-button" onClick={onClose}>Cerrar</button><button className="primary" onClick={() => window.print()}><Printer size={16} /> Imprimir</button></div>
+      </div>
     </div>
   );
 }
