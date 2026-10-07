@@ -547,3 +547,258 @@ tr:last-child td { border-bottom:0; }
   .login-card, .login-info { padding: 32px 24px; }
   .login-info { border-left: 0; border-top: 1px solid #e1eaf5; }
 }
+
+/* Owner / administration panel */
+.owner-shell .main { background: #f5f8fc; }
+.owner-sidebar { overflow-y: auto; }
+.owner-badge {
+  margin: 0 4px 14px;
+  padding: 10px 11px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #295f9e;
+  background: #eef5ff;
+  border: 1px solid #d8e7fb;
+  border-radius: 10px;
+}
+.owner-badge div { display: grid; gap: 2px; }
+.owner-badge strong { font-size: 10px; }
+.owner-badge span { color: #7890ad; font-size: 8px; }
+.owner-context {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #465a75;
+}
+.owner-context > svg { color: #2563eb; }
+.owner-context div { display: grid; gap: 2px; }
+.owner-context strong { font-size: 12px; }
+.owner-context span { color: #91a0b2; font-size: 9px; }
+.owner-access {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 750;
+  color: #7050d1;
+  background: #f1edff;
+}
+.owner-loading {
+  margin-top: 16px;
+  min-height: 180px;
+  display: grid;
+  place-items: center;
+  color: #8290a2;
+  font-size: 11px;
+}
+.owner-kpis {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 17px;
+}
+.owner-kpi {
+  min-height: 112px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+.owner-kpi > span { font-size: 9px; color: #7e8b9d; margin-top: 2px; }
+.owner-kpi > strong { font-size: 17px; color: #26334a; margin-top: 6px; white-space: nowrap; }
+.kpi-icon.violet { background: #f1edff; color: #7759db; }
+.owner-dashboard-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(280px, .7fr);
+  gap: 12px;
+  margin-top: 12px;
+}
+.branch-performance { display: grid; }
+.branch-performance-row {
+  display: grid;
+  grid-template-columns: 40px minmax(0,1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 15px;
+  border-bottom: 1px solid #f0f3f7;
+}
+.branch-performance-row:last-child { border-bottom: 0; }
+.branch-monogram {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  background: #edf5ff;
+  color: #2563eb;
+  font-size: 10px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+.branch-monogram.big { width: 44px; height: 44px; border-radius: 12px; font-size: 12px; }
+.branch-performance-main { min-width: 0; display: grid; gap: 7px; }
+.branch-performance-main > div:first-child { display: flex; justify-content: space-between; gap: 10px; }
+.branch-performance-main strong { font-size: 10px; }
+.branch-performance-main span { color: #8c99aa; font-size: 8px; }
+.branch-progress { height: 6px; overflow: hidden; border-radius: 999px; background: #eff3f8; }
+.branch-progress i { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg,#4a8cf1,#7a5ce1); }
+.branch-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 23px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 8px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.branch-status.open { color: #157e4c; background: #eaf8f0; }
+.branch-status.closed { color: #a45555; background: #fff0f0; }
+.owner-summary-list { display: grid; padding: 6px 15px 8px; }
+.owner-summary-line {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid #f0f3f7;
+}
+.owner-summary-line:last-child { border-bottom: 0; }
+.owner-summary-line span { color: #78869a; font-size: 9px; }
+.owner-summary-line strong { font-size: 10px; color: #26334a; }
+.owner-report-button { width: calc(100% - 30px); margin: 8px 15px 15px; }
+
+.branch-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0,1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+.branch-admin-card { padding: 16px; }
+.branch-admin-head {
+  display: grid;
+  grid-template-columns: 44px minmax(0,1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+.branch-admin-head h3 { margin: 0; font-size: 13px; }
+.branch-admin-head span { color: #8794a7; font-size: 8px; }
+.branch-admin-card > p { color: #8391a4; font-size: 9px; min-height: 30px; line-height: 1.4; margin: 14px 0; }
+.branch-admin-stats {
+  display: grid;
+  grid-template-columns: repeat(2,1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.branch-admin-stats > div {
+  padding: 10px;
+  border-radius: 9px;
+  background: #f8fafc;
+  border: 1px solid #eef2f6;
+  display: grid;
+  gap: 3px;
+}
+.branch-admin-stats span { color: #8a97a8; font-size: 8px; }
+.branch-admin-stats strong { color: #2c3950; font-size: 10px; }
+
+.admin-filter-head { align-items: center; }
+.admin-filters { display: flex !important; gap: 7px; }
+.admin-filters select,
+.modal select {
+  height: 36px;
+  min-width: 145px;
+  border: 1px solid #dce5ef;
+  border-radius: 8px;
+  background: #fff;
+  padding: 0 9px;
+  color: #526278;
+  font-size: 9px;
+  outline: none;
+}
+.modal select { height: 40px; min-width: 0; width: 100%; }
+.admin-table { min-width: 1080px; }
+.admin-table small { color: #9aa7b8; font-size: 7px; }
+.danger-mini { color: #c54b4b; border-color: #efcaca; }
+
+.branch-cash-grid {
+  display: grid;
+  grid-template-columns: repeat(4,minmax(0,1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+.branch-cash-card {
+  padding: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 9px;
+}
+.branch-cash-card > div:first-child { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.branch-cash-card > div:first-child > div:last-child { display: grid; gap: 3px; min-width: 0; }
+.branch-cash-card strong { font-size: 10px; }
+.branch-cash-card span:not(.branch-status) { color: #8b98aa; font-size: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.partner-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; padding: 16px; }
+.partner-card {
+  border: 1px solid #e9eef5;
+  border-radius: 11px;
+  padding: 13px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.partner-card > div:last-child { display: grid; gap: 3px; }
+.partner-card strong { font-size: 10px; }
+.partner-card span, .partner-card small { color: #8a97a8; font-size: 8px; }
+.compact-empty { grid-column: 1/-1; min-height: 180px; }
+
+.commission-grid { display: grid; gap: 0; }
+.commission-card {
+  display: grid;
+  grid-template-columns: 40px minmax(0,1fr) auto;
+  gap: 11px;
+  align-items: center;
+  padding: 13px 16px;
+  border-bottom: 1px solid #eef2f6;
+}
+.commission-card:last-child { border-bottom: 0; }
+.commission-main { display: grid; gap: 3px; }
+.commission-main > strong { font-size: 10px; }
+.commission-main > span { color: #8b98aa; font-size: 8px; }
+.commission-value { font-size: 14px; font-weight: 800; margin-top: 2px; color: #26334a; }
+.commission-value small { color: #9aa6b6; font-size: 7px; font-weight: 600; }
+.share-line { display: flex; gap: 14px; color: #66778d; font-size: 8px; margin-top: 2px; }
+
+.reports-owner-kpis { grid-template-columns: repeat(5,minmax(0,1fr)); }
+.owner-report-bars { padding: 18px; }
+.audit-action {
+  display: inline-flex;
+  padding: 4px 6px;
+  border-radius: 6px;
+  background: #eef5ff;
+  color: #2f66a9;
+  font-size: 7px;
+  font-weight: 800;
+}
+
+@media (max-width: 1350px) {
+  .owner-kpis { grid-template-columns: repeat(4,1fr); }
+  .branch-cards-grid { grid-template-columns: repeat(2,1fr); }
+  .branch-cash-grid { grid-template-columns: repeat(2,1fr); }
+}
+@media (max-width: 950px) {
+  .owner-dashboard-grid { grid-template-columns: 1fr; }
+  .branch-cards-grid, .partner-grid { grid-template-columns: 1fr; }
+  .owner-kpis, .reports-owner-kpis { grid-template-columns: repeat(2,1fr); }
+}
+@media (max-width: 650px) {
+  .owner-kpis, .reports-owner-kpis, .branch-cash-grid { grid-template-columns: 1fr; }
+  .branch-performance-row { grid-template-columns: 34px 1fr; }
+  .branch-performance-row > .branch-status,
+  .branch-performance-row > .mini-button { grid-column: 2; justify-self: start; }
+  .admin-filters { flex-direction: column; }
+}
