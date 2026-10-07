@@ -15,6 +15,9 @@ import {
   LockKeyhole,
   LogOut,
   Menu,
+  Pencil,
+  KeyRound,
+  Eye,
   Plus,
   ReceiptText,
   RefreshCw,
@@ -138,6 +141,61 @@ type AuditRow = {
   username: string | null;
 };
 
+type BranchDetail = {
+  branch: {
+    id: number;
+    code: string;
+    name: string;
+    address: string | null;
+    active: boolean;
+    createdAt: string;
+    settings: Branch["settings"];
+  };
+  today: { operations: number; amount: number; commission: number };
+  users: Array<{
+    id: number;
+    username: string;
+    full_name: string;
+    active: number;
+    last_login_at: string | null;
+    role_code: string;
+    role_name: string;
+  }>;
+  cashSessions: Array<{
+    id: number;
+    initial_cash: number;
+    initial_wallet: number;
+    declared_cash: number | null;
+    declared_wallet: number | null;
+    status: "OPEN" | "CLOSED";
+    started_at: string;
+    ended_at: string | null;
+  }>;
+  recentOperations: Array<{
+    id: number;
+    operation_type: "YAPE_TO_CASH" | "CASH_TO_YAPE";
+    reference_code: string | null;
+    customer_name: string | null;
+    amount: number;
+    commission: number;
+    net_amount: number;
+    status: string;
+    created_at: string;
+    registered_by: string | null;
+  }>;
+  closures: Array<{
+    id: number;
+    expected_cash: number;
+    declared_cash: number;
+    expected_wallet: number;
+    declared_wallet: number;
+    difference_cash: number;
+    difference_wallet: number;
+    notes: string | null;
+    closed_at: string;
+  }>;
+};
+
 const nav: Array<{ page: AdminPage; label: string; icon: typeof Home }> = [
   { page: "dashboard", label: "Dashboard", icon: Home },
   { page: "branches", label: "Filiales", icon: Building2 },
@@ -192,6 +250,8 @@ export default function OwnerApp({ user, onLogout }: { user: AuthUser; onLogout:
   const [branchModal, setBranchModal] = useState(false);
   const [userModal, setUserModal] = useState(false);
   const [settingsBranch, setSettingsBranch] = useState<Branch | null>(null);
+  const [detailBranchId, setDetailBranchId] = useState<number | null>(null);
+  const [editingUser, setEditingUser] = useState<AdminUser | null>(null);
 
   const initials = user.fullName.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
 
@@ -316,10 +376,10 @@ export default function OwnerApp({ user, onLogout }: { user: AuthUser; onLogout:
           {loading && !overview ? <div className="owner-loading">Cargando información global…</div> : null}
 
           {page === "dashboard" && overview && <OwnerDashboard overview={overview} onPage={go} onSettings={setSettingsBranch} />}
-          {page === "branches" && overview && <BranchesPage branches={overview.branches} onSettings={setSettingsBranch} />}
+          {page === "branches" && overview && <BranchesPage branches={overview.branches} onSettings={setSettingsBranch} onDetail={(branch) => setDetailBranchId(branch.id)} />}
           {page === "operations" && <GlobalOperationsPage operations={operations} branches={overview?.branches ?? []} />}
           {page === "cash" && <CashAdminPage branches={overview?.branches ?? []} closures={closures} />}
-          {page === "users" && <UsersPage users={users} branches={overview?.branches ?? []} onRefresh={refreshAll} />}
+          {page === "users" && <UsersPage users={users} branches={overview?.branches ?? []} onRefresh={refreshAll} onEdit={setEditingUser} />}
           {page === "partners" && <PartnersPage users={users} />}
           {page === "commissions" && overview && <CommissionsPage branches={overview.branches} onSettings={setSettingsBranch} />}
           {page === "reports" && overview && <AdminReports overview={overview} operations={operations} closures={closures} />}
@@ -331,6 +391,8 @@ export default function OwnerApp({ user, onLogout }: { user: AuthUser; onLogout:
       {branchModal && <CreateBranchModal onClose={() => setBranchModal(false)} onCreated={async () => { setBranchModal(false); await refreshAll(); }} />}
       {userModal && <CreateUserModal branches={overview?.branches ?? []} onClose={() => setUserModal(false)} onCreated={async () => { setUserModal(false); await refreshAll(); }} />}
       {settingsBranch && <BranchSettingsModal branch={settingsBranch} onClose={() => setSettingsBranch(null)} onSaved={async () => { setSettingsBranch(null); await refreshAll(); }} />}
+      {detailBranchId && <BranchDetailModal branchId={detailBranchId} onClose={() => setDetailBranchId(null)} onChanged={refreshAll} />}
+      {editingUser && <EditUserModal user={editingUser} branches={overview?.branches ?? []} currentUserId={user.id} onClose={() => setEditingUser(null)} onSaved={async () => { setEditingUser(null); await refreshAll(); }} />}
     </div>
   );
 }
@@ -408,7 +470,7 @@ function SummaryLine({ label, value }: { label: string; value: string }) {
   return <div className="owner-summary-line"><span>{label}</span><strong>{value}</strong></div>;
 }
 
-function BranchesPage({ branches, onSettings }: { branches: Branch[]; onSettings: (branch: Branch) => void }) {
+function BranchesPage({ branches, onSettings, onDetail }: { branches: Branch[]; onSettings: (branch: Branch) => void; onDetail: (branch: Branch) => void }) {
   return (
     <div className="branch-cards-grid">
       {branches.map((branch) => (
@@ -425,7 +487,10 @@ function BranchesPage({ branches, onSettings }: { branches: Branch[]; onSettings
             <div><span>Límite operación</span><strong>{currency(branch.settings.maxOperationAmount)}</strong></div>
             <div><span>Comisión</span><strong>{branch.settings.commissionType === "FLAT" ? currency(branch.settings.commissionValue) : `${branch.settings.commissionValue}%`}</strong></div>
           </div>
-          <button className="soft full" onClick={() => onSettings(branch)}><Settings2 size={15} /> Configurar filial</button>
+          <div className="branch-card-actions">
+            <button className="soft full" onClick={() => onDetail(branch)}><Eye size={15} /> Ver filial</button>
+            <button className="soft full" onClick={() => onSettings(branch)}><Settings2 size={15} /> Configurar</button>
+          </div>
         </section>
       ))}
     </div>
@@ -520,7 +585,7 @@ function CashAdminPage({ branches, closures }: { branches: Branch[]; closures: C
   );
 }
 
-function UsersPage({ users, branches, onRefresh }: { users: AdminUser[]; branches: Branch[]; onRefresh: () => Promise<void> }) {
+function UsersPage({ users, branches, onRefresh, onEdit }: { users: AdminUser[]; branches: Branch[]; onRefresh: () => Promise<void>; onEdit: (user: AdminUser) => void }) {
   async function toggle(user: AdminUser) {
     await api(`/api/admin/users/${user.id}/status`, {
       method: "POST",
@@ -535,13 +600,13 @@ function UsersPage({ users, branches, onRefresh }: { users: AdminUser[]; branche
       <div className="card-head"><div><strong>Usuarios del sistema</strong><span>{users.length} cuentas registradas · {branches.length} filiales</span></div></div>
       <div className="table-wrap">
         <table className="admin-table">
-          <thead><tr><th>Nombre</th><th>Usuario</th><th>Rol</th><th>Filial</th><th>Último acceso</th><th>Estado</th><th>Acción</th></tr></thead>
+          <thead><tr><th>Nombre</th><th>Usuario</th><th>Rol</th><th>Filial</th><th>Último acceso</th><th>Estado</th><th>Acciones</th></tr></thead>
           <tbody>
             {users.map((item) => (
               <tr key={item.id}>
                 <td><strong>{item.full_name}</strong></td><td>{item.username}</td><td>{item.role_name}</td><td>{item.branch_name ?? "Global"}</td><td>{dateTime(item.last_login_at)}</td>
                 <td><span className={item.active ? "branch-status open" : "branch-status closed"}>{item.active ? "Activo" : "Inactivo"}</span></td>
-                <td><button className={item.active ? "mini-button danger-mini" : "mini-button"} onClick={() => void toggle(item)}>{item.active ? "Desactivar" : "Activar"}</button></td>
+                <td><div className="inline-actions"><button className="mini-button" onClick={() => onEdit(item)}><Pencil size={12} /> Editar</button><button className={item.active ? "mini-button danger-mini" : "mini-button"} onClick={() => void toggle(item)}>{item.active ? "Desactivar" : "Activar"}</button></div></td>
               </tr>
             ))}
           </tbody>
