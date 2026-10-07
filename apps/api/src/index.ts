@@ -1,17 +1,45 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import cookie from "@fastify/cookie";
 import { z } from "zod";
 import { db } from "./db.js";
+import {
+  bootstrapUsersIfEmpty,
+  canReadBranch,
+  canWriteBranch,
+  changeOwnPassword,
+  ensureAuthSchema,
+  loginUser,
+  logoutUser,
+  publicUserById,
+  requireAuth
+} from "./auth.js";
 
 const app = Fastify({ logger: true });
 
+await app.register(cookie);
 await app.register(cors, {
   origin: true,
+  credentials: true,
   methods: ["GET", "POST", "OPTIONS"]
 });
 
 const branchParams = z.object({
   branchId: z.coerce.number().int().positive()
+});
+
+const loginBody = z.object({
+  username: z.string().trim().min(1).max(80),
+  password: z.string().min(1).max(200),
+  remember: z.boolean().optional().default(false)
+});
+
+const changePasswordBody = z.object({
+  currentPassword: z.string().min(1).max(200),
+  newPassword: z.string().min(10).max(200)
+    .regex(/[A-Z]/, "Debe incluir una mayúscula")
+    .regex(/[a-z]/, "Debe incluir una minúscula")
+    .regex(/[0-9]/, "Debe incluir un número")
 });
 
 const operationBody = z.object({
@@ -37,10 +65,92 @@ function money(value: number) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
+async function authorizeBranch(
+  request: Parameters<typeof requireAuth>[0],
+  reply: Parameters<typeof requireAuth>[1],
+  branchId: number,
+  write = false
+) {
+  const auth = await requireAuth(request, reply);
+  if (!auth) return null;
+
+  const allowed = write ? canWriteBranch(auth, branchId) : canReadBranch(auth, branchId);
+  if (!allowed) {
+    reply.code(403).send({
+      error: "No tienes permiso para acceder a esta filial"
+    });
+    return null;
+  }
+
+  return auth;
+}
+
 app.get("/health", async () => {
   await db.query("SELECT 1");
-  return { ok: true, service: "z-flow-api" };
+  return { ok: true, service: "z-flow-api", auth: "enabled" };
 });
+
+/* Authentication */
+
+app.post("/api/auth/login", async (request, reply) => {
+  const parsed = loginBody.safeParse(request.body);
+  if (!parsed.success) {
+    return reply.code(400).send({ error: "Usuario o contraseña inválidos" });
+  }
+
+  return loginUser(
+    request,
+    reply,
+    parsed.data.username,
+    parsed.data.password,
+    parsed.data.remember
+  );
+});
+
+app.post("/api/auth/logout", async (request, reply) => {
+  return logoutUser(request, reply);
+});
+
+app.get("/api/auth/me", async (request, reply) => {
+  const auth = await requireAuth(request, reply);
+  if (!auth) return;
+  return {
+    authenticated: true,
+    user: await publicUserById(auth.userId)
+  };
+});
+
+app.post("/api/auth/change-password", async (request, reply) => {
+  const auth = await requireAuth(request, reply);
+  if (!auth) return;
+
+  const parsed = changePasswordBody.safeParse(request.body);
+  if (!parsed.success) {
+    return reply.code(400).send({
+      error: parsed.error.issues[0]?.message ?? "La nueva contraseña no cumple los requisitos"
+    });
+  }
+
+  const result = await changeOwnPassword(
+    auth,
+    parsed.data.currentPassword,
+    parsed.data.newPassword
+  );
+
+  if (!result.ok) {
+    return reply.code(400).send({ error: result.error });
+  }
+
+  await db.execute(
+    `INSERT INTO audit_logs (branch_id, user_id, action, entity_type, entity_id)
+     VALUES (?, ?, 'PASSWORD_CHANGED', 'USER', ?)`,
+    [auth.branchId, auth.userId, auth.userId]
+  );
+
+  return { ok: true };
+});
+
+/* Branch dashboard */
 
 app.get("/api/branches/:branchId/dashboard", async (request, reply) => {
   const parsed = branchParams.safeParse(request.params);
@@ -49,6 +159,8 @@ app.get("/api/branches/:branchId/dashboard", async (request, reply) => {
   }
 
   const { branchId } = parsed.data;
+  const auth = await authorizeBranch(request, reply, branchId);
+  if (!auth) return;
 
   const [branchRows] = await db.query<any[]>(
     "SELECT id, code, name, address, active FROM branches WHERE id = ? LIMIT 1",
@@ -60,7 +172,7 @@ app.get("/api/branches/:branchId/dashboard", async (request, reply) => {
   }
 
   const [sessionRows] = await db.query<any[]>(
-    `SELECT id, initial_cash, initial_wallet, status, started_at
+    `SELECT id, user_id, initial_cash, initial_wallet, status, started_at
      FROM cash_sessions
      WHERE branch_id = ? AND status = 'OPEN'
      ORDER BY started_at DESC
@@ -85,14 +197,8 @@ app.get("/api/branches/:branchId/dashboard", async (request, reply) => {
 
   const [recentRows] = await db.query<any[]>(
     `SELECT
-       id,
-       operation_type,
-       reference_code,
-       customer_name,
-       amount,
-       commission,
-       net_amount,
-       status,
+       id, operation_type, reference_code, customer_name, amount, commission,
+       net_amount, status,
        DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%s') AS created_at
      FROM operations
      WHERE branch_id = ?
@@ -104,9 +210,9 @@ app.get("/api/branches/:branchId/dashboard", async (request, reply) => {
 
   const summary = summaryRows[0] ?? {};
   const session = sessionRows[0] ?? null;
-
   const initialCash = Number(session?.initial_cash ?? 0);
   const initialWallet = Number(session?.initial_wallet ?? 0);
+
   const cashCurrent = money(
     initialCash +
       Number(summary.cash_received ?? 0) -
@@ -121,6 +227,10 @@ app.get("/api/branches/:branchId/dashboard", async (request, reply) => {
   return {
     branch: branchRows[0],
     session,
+    access: {
+      role: auth.roleCode,
+      canWrite: canWriteBranch(auth, branchId)
+    },
     metrics: {
       operationsToday: Number(summary.operations_today ?? 0),
       yapeReceived: money(Number(summary.yape_received ?? 0)),
@@ -134,20 +244,24 @@ app.get("/api/branches/:branchId/dashboard", async (request, reply) => {
   };
 });
 
-
 app.get("/api/branches/:branchId/operations", async (request, reply) => {
   const parsed = branchParams.safeParse(request.params);
   if (!parsed.success) {
     return reply.code(400).send({ error: "Filial inválida" });
   }
 
+  const auth = await authorizeBranch(request, reply, parsed.data.branchId);
+  if (!auth) return;
+
   const [rows] = await db.query<any[]>(
-    `SELECT id, operation_type, reference_code, customer_name, amount, commission,
-            net_amount, notes, status,
-            DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%s') AS created_at
-     FROM operations
-     WHERE branch_id = ?
-     ORDER BY created_at DESC
+    `SELECT o.id, o.operation_type, o.reference_code, o.customer_name, o.amount,
+            o.commission, o.net_amount, o.notes, o.status,
+            DATE_FORMAT(o.created_at, '%Y-%m-%dT%H:%i:%s') AS created_at,
+            u.full_name AS registered_by
+     FROM operations o
+     LEFT JOIN users u ON u.id = o.user_id
+     WHERE o.branch_id = ?
+     ORDER BY o.created_at DESC
      LIMIT 100`,
     [parsed.data.branchId]
   );
@@ -164,6 +278,9 @@ app.post("/api/branches/:branchId/cash/open", async (request, reply) => {
   }
 
   const { branchId } = parsedParams.data;
+  const auth = await authorizeBranch(request, reply, branchId, true);
+  if (!auth) return;
+
   const [existing] = await db.query<any[]>(
     "SELECT id FROM cash_sessions WHERE branch_id = ? AND status = 'OPEN' LIMIT 1",
     [branchId]
@@ -175,9 +292,26 @@ app.post("/api/branches/:branchId/cash/open", async (request, reply) => {
 
   const [result] = await db.execute<any>(
     `INSERT INTO cash_sessions
-      (branch_id, initial_cash, initial_wallet, status, started_at)
-     VALUES (?, ?, ?, 'OPEN', NOW())`,
-    [branchId, money(parsedBody.data.initialCash), money(parsedBody.data.initialWallet)]
+      (branch_id, user_id, initial_cash, initial_wallet, status, started_at)
+     VALUES (?, ?, ?, ?, 'OPEN', NOW())`,
+    [
+      branchId,
+      auth.userId,
+      money(parsedBody.data.initialCash),
+      money(parsedBody.data.initialWallet)
+    ]
+  );
+
+  await db.execute(
+    `INSERT INTO audit_logs (branch_id, user_id, action, entity_type, entity_id, details)
+     VALUES (?, ?, 'CASH_OPENED', 'CASH_SESSION', ?, JSON_OBJECT('initial_cash', ?, 'initial_wallet', ?))`,
+    [
+      branchId,
+      auth.userId,
+      Number(result.insertId),
+      money(parsedBody.data.initialCash),
+      money(parsedBody.data.initialWallet)
+    ]
   );
 
   return reply.code(201).send({ id: Number(result.insertId), status: "OPEN" });
@@ -192,6 +326,9 @@ app.post("/api/branches/:branchId/cash/close", async (request, reply) => {
   }
 
   const { branchId } = parsedParams.data;
+  const auth = await authorizeBranch(request, reply, branchId, true);
+  if (!auth) return;
+
   const [sessionRows] = await db.query<any[]>(
     `SELECT id, initial_cash, initial_wallet
      FROM cash_sessions
@@ -233,7 +370,7 @@ app.post("/api/branches/:branchId/cash/close", async (request, reply) => {
   try {
     await connection.beginTransaction();
 
-    await connection.execute(
+    const [closure] = await connection.execute<any>(
       `INSERT INTO daily_closures
        (branch_id, cash_session_id, expected_cash, declared_cash, expected_wallet,
         declared_wallet, difference_cash, difference_wallet, notes)
@@ -256,6 +393,19 @@ app.post("/api/branches/:branchId/cash/close", async (request, reply) => {
        SET declared_cash = ?, declared_wallet = ?, status = 'CLOSED', ended_at = NOW()
        WHERE id = ?`,
       [declaredCash, declaredWallet, session.id]
+    );
+
+    await connection.execute(
+      `INSERT INTO audit_logs (branch_id, user_id, action, entity_type, entity_id, details)
+       VALUES (?, ?, 'CASH_CLOSED', 'DAILY_CLOSURE', ?,
+         JSON_OBJECT('difference_cash', ?, 'difference_wallet', ?))`,
+      [
+        branchId,
+        auth.userId,
+        Number(closure.insertId),
+        differenceCash,
+        differenceWallet
+      ]
     );
 
     await connection.commit();
@@ -283,6 +433,9 @@ app.get("/api/branches/:branchId/settings", async (request, reply) => {
     return reply.code(400).send({ error: "Filial inválida" });
   }
 
+  const auth = await authorizeBranch(request, reply, parsed.data.branchId);
+  if (!auth) return;
+
   const [rows] = await db.query<any[]>(
     `SELECT max_operation_amount, commission_type, commission_value,
             staff_share_pct, partner_share_pct
@@ -307,8 +460,10 @@ app.post("/api/branches/:branchId/operations", async (request, reply) => {
   }
 
   const { branchId } = parsedParams.data;
-  const body = parsedBody.data;
+  const auth = await authorizeBranch(request, reply, branchId, true);
+  if (!auth) return;
 
+  const body = parsedBody.data;
   const [settingsRows] = await db.query<any[]>(
     `SELECT max_operation_amount, commission_type, commission_value
      FROM branch_settings
@@ -330,7 +485,9 @@ app.post("/api/branches/:branchId/operations", async (request, reply) => {
   }
 
   if (body.operationType === "YAPE_TO_CASH" && !body.referenceCode) {
-    return reply.code(422).send({ error: "El código/referencia es obligatorio para Yape → Efectivo" });
+    return reply.code(422).send({
+      error: "El código/referencia es obligatorio para Yape → Efectivo"
+    });
   }
 
   const commission =
@@ -341,7 +498,9 @@ app.post("/api/branches/:branchId/operations", async (request, reply) => {
   const netAmount = money(body.amount - commission);
 
   if (netAmount <= 0) {
-    return reply.code(422).send({ error: "La comisión no puede ser mayor o igual al monto" });
+    return reply.code(422).send({
+      error: "La comisión no puede ser mayor o igual al monto"
+    });
   }
 
   const [sessionRows] = await db.query<any[]>(
@@ -352,18 +511,21 @@ app.post("/api/branches/:branchId/operations", async (request, reply) => {
   );
 
   if (!sessionRows.length) {
-    return reply.code(409).send({ error: "Debes abrir la caja antes de registrar operaciones" });
+    return reply.code(409).send({
+      error: "Debes abrir la caja antes de registrar operaciones"
+    });
   }
 
   try {
     const [result] = await db.execute<any>(
       `INSERT INTO operations
-       (branch_id, cash_session_id, operation_type, reference_code, customer_name,
-        amount, commission, net_amount, notes, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'COMPLETED')`,
+       (branch_id, cash_session_id, user_id, operation_type, reference_code,
+        customer_name, amount, commission, net_amount, notes, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'COMPLETED')`,
       [
         branchId,
         sessionRows[0].id,
+        auth.userId,
         body.operationType,
         body.referenceCode ?? null,
         body.customerName ?? null,
@@ -371,6 +533,20 @@ app.post("/api/branches/:branchId/operations", async (request, reply) => {
         commission,
         netAmount,
         body.notes ?? null
+      ]
+    );
+
+    await db.execute(
+      `INSERT INTO audit_logs (branch_id, user_id, action, entity_type, entity_id, details)
+       VALUES (?, ?, 'OPERATION_CREATED', 'OPERATION', ?,
+         JSON_OBJECT('type', ?, 'amount', ?, 'commission', ?))`,
+      [
+        branchId,
+        auth.userId,
+        Number(result.insertId),
+        body.operationType,
+        money(body.amount),
+        commission
       ]
     );
 
@@ -384,7 +560,9 @@ app.post("/api/branches/:branchId/operations", async (request, reply) => {
     });
   } catch (error: any) {
     if (error?.code === "ER_DUP_ENTRY") {
-      return reply.code(409).send({ error: "Ese código/referencia ya fue registrado en esta filial" });
+      return reply.code(409).send({
+        error: "Ese código/referencia ya fue registrado en esta filial"
+      });
     }
     throw error;
   }
@@ -394,6 +572,9 @@ app.setErrorHandler((error, _request, reply) => {
   app.log.error(error);
   reply.code(500).send({ error: "Error interno de Z-FLOW" });
 });
+
+await ensureAuthSchema();
+await bootstrapUsersIfEmpty(app.log);
 
 const port = Number(process.env.PORT ?? 3001);
 await app.listen({ host: "0.0.0.0", port });
