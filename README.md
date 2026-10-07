@@ -1,16 +1,62 @@
 # Z-FLOW
 
-Sistema independiente para gestionar filiales, operaciones de Yape/efectivo, cajas, comisiones, cierres, comprobantes, reportes, usuarios y roles.
+Sistema independiente para gestionar filiales, operaciones Yape/efectivo, cajas, comisiones, cierres, comprobantes, reportes, usuarios y roles.
 
-## Entorno inicial
+## Etapa actual
 
-La primera etapa se ejecuta en un contenedor local y se accede por IP, sin dominio.
+Primera implementación para ejecutarse en un contenedor/servidor local y acceder por **IP**, sin dominio.
 
-Arquitectura inicial:
-- Web/PWA: Next.js
-- API: Node.js + TypeScript
-- Base de datos: MariaDB
-- ORM: Prisma
-- Despliegue local: Docker Compose
+### Stack
 
-El proyecto se desarrollará primero en la rama `develop` y luego se promoverá a producción.
+- Web: React + Vite
+- API: Fastify + TypeScript
+- Base de datos: MariaDB 11
+- Acceso a datos: mysql2
+- Web/proxy: Nginx
+- Despliegue: Docker Compose
+
+Se eligió un stack liviano para el entorno local, pero preparado para migrar luego a la nube.
+
+## Arranque local
+
+```bash
+git clone https://github.com/ronbercito/z-flow.git
+cd z-flow
+git checkout develop
+cp .env.example .env
+docker compose up -d --build
+```
+
+Abrir desde cualquier equipo de la misma red:
+
+```text
+http://IP_DEL_CONTENEDOR:8080
+```
+
+Comprobar API:
+
+```text
+http://IP_DEL_CONTENEDOR:3001/health
+```
+
+## Primera pantalla implementada
+
+Panel restringido de filial con:
+
+- Inicio
+- Operaciones
+- Caja
+- Cierre diario
+- Comprobantes
+- Reportes
+- Mi perfil
+- Ayuda
+
+También incluye el primer formulario funcional de **Nueva operación**, conectado a MariaDB mediante la API.
+
+> La autenticación y el RBAC completo se implementarán en el siguiente bloque. La restricción definitiva siempre se hará también en backend, no solamente ocultando menús.
+
+## Ramas
+
+- `main`: base estable.
+- `develop`: implementación activa.
