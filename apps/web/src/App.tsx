@@ -10,6 +10,7 @@ import {
   CircleHelp,
   ClipboardCheck,
   FileText,
+  Download,
   Home,
   LockKeyhole,
   LogOut,
@@ -36,9 +37,13 @@ type Operation = {
   customer_name: string | null;
   amount: number;
   commission: number;
+  staff_share_amount?: number;
+  partner_share_amount?: number;
   net_amount: number;
   status: string;
   created_at: string;
+  receipt_series?: string | null;
+  receipt_number?: number | null;
 };
 
 type Dashboard = {
@@ -85,6 +90,19 @@ type AuthUser = {
   branch: { id: number; code: string; name: string; address: string | null } | null;
   defaultBranch: { id: number; code: string; name: string; address: string | null } | null;
   lastLoginAt: string | null;
+};
+
+type BranchFinancialReport = {
+  summary: {
+    operationCount: number;
+    amountTotal: number;
+    commissionTotal: number;
+    staffShareTotal: number;
+    partnerShareTotal: number;
+    unassignedCommission: number;
+    yapeToCashCount: number;
+    cashToYapeCount: number;
+  };
 };
 
 const sidebar: Array<{ page: Page; label: string; icon: typeof Home }> = [
@@ -378,9 +396,9 @@ function App() {
             <ClosePage dashboard={dashboard} onClose={() => setCloseCashModal(true)} onOpen={() => setOpenCashModal(true)} />
           )}
 
-          {page === "receipts" && <ReceiptsPage operations={operations} onReceipt={setReceipt} />}
+          {page === "receipts" && <ReceiptsPage branchId={branchId} operations={operations} onReceipt={setReceipt} />}
 
-          {page === "reports" && <ReportsPage dashboard={dashboard} operations={operations} />}
+          {page === "reports" && <ReportsPage branchId={branchId} dashboard={dashboard} />}
 
           {page === "profile" && <ProfilePage dashboard={dashboard} user={authUser} />}
 
@@ -425,7 +443,7 @@ function App() {
         />
       )}
 
-      {receipt && <ReceiptModal operation={receipt} branchName={branchName} onClose={() => setReceipt(null)} />}
+      {receipt && <ReceiptModal branchId={branchId} operation={receipt} branchName={branchName} onClose={() => setReceipt(null)} />}
     </div>
   );
 }
@@ -683,46 +701,95 @@ function ClosePage({ dashboard, onClose, onOpen }: { dashboard: Dashboard | null
   );
 }
 
-function ReceiptsPage({ operations, onReceipt }: { operations: Operation[]; onReceipt: (op: Operation) => void }) {
+function ReceiptsPage({ branchId, operations, onReceipt }: { branchId: number; operations: Operation[]; onReceipt: (op: Operation) => void }) {
   const completed = operations.filter((op) => op.status === "COMPLETED");
+  function receiptNo(op: Operation) {
+    return op.receipt_series && op.receipt_number
+      ? `${op.receipt_series}-${String(op.receipt_number).padStart(6,"0")}`
+      : `Z-${String(op.id).padStart(6,"0")}`;
+  }
+
   return (
     <section className="card page-card">
-      <div className="card-head"><div><strong>Comprobantes internos</strong><span>Se genera una vista por cada operación completada</span></div></div>
+      <div className="card-head"><div><strong>Comprobantes internos</strong><span>Correlativo interno automático por cada operación completada</span></div></div>
       <div className="receipt-list">
         {completed.map((op) => (
-          <button className="receipt-row" key={op.id} onClick={() => onReceipt(op)}>
+          <div className="receipt-row" key={op.id}>
             <div className="receipt-icon"><ReceiptText size={18} /></div>
-            <div><strong>Z-{String(op.id).padStart(6, "0")}</strong><span>{formatDate(op.created_at)} · {op.customer_name ?? "Cliente"}</span></div>
+            <button className="receipt-main-button" onClick={() => onReceipt(op)}>
+              <strong>{receiptNo(op)}</strong><span>{formatDate(op.created_at)} · {op.customer_name ?? "Cliente"}</span>
+            </button>
             <div><strong>{currency(op.amount)}</strong><span>Comisión {currency(op.commission)}</span></div>
-            <ChevronRight size={17} />
-          </button>
+            <div className="receipt-actions">
+              <button className="mini-button" onClick={() => onReceipt(op)}>Ver</button>
+              <button className="mini-button" onClick={() => window.open(`/api/branches/${branchId}/receipts/${op.id}/pdf`, "_blank")}><Download size={12}/> PDF</button>
+            </div>
+          </div>
         ))}
+        {!completed.length && <div className="empty-cell">Todavía no hay comprobantes.</div>}
       </div>
+      <div className="receipt-legal-note">Los comprobantes mostrados aquí son documentos internos de control. No sustituyen un comprobante de pago electrónico SUNAT.</div>
     </section>
   );
 }
 
-function ReportsPage({ dashboard, operations }: { dashboard: Dashboard | null; operations: Operation[] }) {
-  const yapeCount = operations.filter((op) => op.operation_type === "YAPE_TO_CASH").length;
-  const cashCount = operations.filter((op) => op.operation_type === "CASH_TO_YAPE").length;
-  const totalAmount = operations.reduce((sum, op) => sum + Number(op.amount), 0);
-  const totalCommission = operations.reduce((sum, op) => sum + Number(op.commission), 0);
+function ReportsPage({ branchId, dashboard }: { branchId: number; dashboard: Dashboard | null }) {
+  const now = new Date();
+  const localToday = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0,10);
+  const [from, setFrom] = useState(localToday.slice(0,8) + "01");
+  const [to, setTo] = useState(localToday);
+  const [report, setReport] = useState<BranchFinancialReport | null>(null);
+  const [error, setError] = useState("");
+
+  function qs() {
+    const p = new URLSearchParams();
+    if (from) p.set("from", from);
+    if (to) p.set("to", to);
+    return p.toString();
+  }
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        setError("");
+        const response = await fetch(`/api/branches/${branchId}/reports/summary?${qs()}`, { credentials: "same-origin" });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error ?? "No se pudo generar el reporte");
+        setReport(result);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "No se pudo generar el reporte");
+      }
+    })();
+  }, [branchId, from, to]);
+
+  const summary = report?.summary;
 
   return (
     <>
+      <section className="card report-toolbar branch-report-toolbar">
+        <div className="report-toolbar-title"><BarChart3 size={19}/><div><strong>Reporte de filial</strong><span>Selecciona el periodo y exporta PDF o Excel.</span></div></div>
+        <div className="admin-filters admin-filters-wide">
+          <label className="date-filter"><span>Desde</span><input type="date" value={from} onChange={(e)=>setFrom(e.target.value)} /></label>
+          <label className="date-filter"><span>Hasta</span><input type="date" value={to} onChange={(e)=>setTo(e.target.value)} /></label>
+          <button className="soft export-button" onClick={()=>window.open(`/api/branches/${branchId}/reports/export.pdf?${qs()}`,"_blank")}><Download size={14}/> PDF</button>
+          <button className="primary export-button" onClick={()=>window.open(`/api/branches/${branchId}/reports/export.xlsx?${qs()}`,"_blank")}><Download size={14}/> Excel</button>
+        </div>
+      </section>
+      {error && <div className="error-banner">{error}</div>}
       <div className="kpi-grid reports-kpi">
-        <Kpi icon={<ReceiptText />} tone="blue" label="Operaciones cargadas" value={String(operations.length)} hint="Historial visible" />
-        <Kpi icon={<Smartphone />} tone="purple" label="Yape → Efectivo" value={String(yapeCount)} hint="Operaciones" />
-        <Kpi icon={<Send />} tone="green" label="Efectivo → Yape" value={String(cashCount)} hint="Operaciones" />
-        <Kpi icon={<BadgeDollarSign />} tone="orange" label="Monto movilizado" value={currency(totalAmount)} hint="Suma de operaciones" />
-        <Kpi icon={<BadgeDollarSign />} tone="cyan" label="Comisión total" value={currency(totalCommission)} hint="Historial cargado" />
+        <Kpi icon={<ReceiptText />} tone="blue" label="Operaciones" value={String(summary?.operationCount ?? 0)} hint="Periodo seleccionado" />
+        <Kpi icon={<Smartphone />} tone="purple" label="Yape → Efectivo" value={String(summary?.yapeToCashCount ?? 0)} hint="Operaciones" />
+        <Kpi icon={<Send />} tone="green" label="Efectivo → Yape" value={String(summary?.cashToYapeCount ?? 0)} hint="Operaciones" />
+        <Kpi icon={<BadgeDollarSign />} tone="orange" label="Monto movilizado" value={currency(summary?.amountTotal)} hint="Periodo seleccionado" />
+        <Kpi icon={<BadgeDollarSign />} tone="cyan" label="Comisión total" value={currency(summary?.commissionTotal)} hint="Generada" />
         <Kpi icon={<WalletCards />} tone="blue" label="Caja actual" value={currency(dashboard?.metrics.cashCurrent)} hint="Turno actual" />
       </div>
       <section className="card page-card report-panel">
-        <div className="card-head"><div><strong>Distribución de operaciones</strong><span>Resumen simple de la filial</span></div></div>
-        <div className="report-bars">
-          <ReportBar label="Yape → Efectivo" value={yapeCount} total={Math.max(operations.length, 1)} tone="purple" />
-          <ReportBar label="Efectivo → Yape" value={cashCount} total={Math.max(operations.length, 1)} tone="green" />
+        <div className="card-head"><div><strong>Reparto de comisión</strong><span>Según la regla guardada al momento de cada operación</span></div></div>
+        <div className="financial-split-grid">
+          <div><span>Para encargado</span><strong>{currency(summary?.staffShareTotal)}</strong></div>
+          <div><span>Para socio</span><strong>{currency(summary?.partnerShareTotal)}</strong></div>
+          <div><span>Sin reparto configurado</span><strong>{currency(summary?.unassignedCommission)}</strong></div>
         </div>
       </section>
     </>
@@ -1057,16 +1124,19 @@ function CloseCashModal({ branchId, dashboard, onClose, onClosed }: { branchId: 
   );
 }
 
-function ReceiptModal({ operation, branchName, onClose }: { operation: Operation; branchName: string; onClose: () => void }) {
+function ReceiptModal({ branchId, operation, branchName, onClose }: { branchId: number; operation: Operation; branchName: string; onClose: () => void }) {
+  const receiptNumber = operation.receipt_series && operation.receipt_number
+    ? `${operation.receipt_series}-${String(operation.receipt_number).padStart(6,"0")}`
+    : `Z-${String(operation.id).padStart(6,"0")}`;
   return (
     <div className="modal-backdrop">
       <div className="modal receipt-modal">
-        <div className="modal-head"><div><h2>Comprobante interno</h2><p>Z-{String(operation.id).padStart(6, "0")}</p></div><button className="icon-btn" onClick={onClose}><X size={19} /></button></div>
+        <div className="modal-head"><div><h2>Comprobante interno</h2><p>{receiptNumber}</p></div><button className="icon-btn" onClick={onClose}><X size={19} /></button></div>
         <div className="ticket">
           <strong className="ticket-brand">Z-FLOW</strong>
           <span>{branchName}</span>
           <hr />
-          <div><span>Operación</span><strong>Z-{String(operation.id).padStart(6, "0")}</strong></div>
+          <div><span>Comprobante</span><strong>{receiptNumber}</strong></div>
           <div><span>Fecha</span><strong>{formatDate(operation.created_at)}</strong></div>
           <div><span>Tipo</span><strong>{operation.operation_type === "YAPE_TO_CASH" ? "Yape → Efectivo" : "Efectivo → Yape"}</strong></div>
           <div><span>Referencia</span><strong>{operation.reference_code ?? "—"}</strong></div>
@@ -1076,7 +1146,8 @@ function ReceiptModal({ operation, branchName, onClose }: { operation: Operation
           <div><span>Comisión</span><strong>{currency(operation.commission)}</strong></div>
           <div className="ticket-total"><span>Entregado</span><strong>{currency(operation.net_amount)}</strong></div>
         </div>
-        <div className="modal-actions"><button className="ghost-button" onClick={onClose}>Cerrar</button><button className="primary" onClick={() => window.print()}><Printer size={16} /> Imprimir</button></div>
+        <div className="receipt-tax-note">Documento interno de control. No es comprobante de pago electrónico SUNAT.</div>
+        <div className="modal-actions"><button className="ghost-button" onClick={onClose}>Cerrar</button><button className="soft" onClick={() => window.open(`/api/branches/${branchId}/receipts/${operation.id}/pdf`, "_blank")}><Download size={16} /> PDF 80 mm</button><button className="primary" onClick={() => window.print()}><Printer size={16} /> Imprimir</button></div>
       </div>
     </div>
   );
