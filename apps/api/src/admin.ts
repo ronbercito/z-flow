@@ -90,6 +90,11 @@ const historyQuery = z.object({
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()
 });
 
+const dashboardQuery = z.object({
+  branchId: z.coerce.number().int().positive().optional(),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()
+});
+
 async function requireOwner(request: FastifyRequest, reply: FastifyReply) {
   const auth = await requireAuth(request, reply);
   if (!auth) return null;
@@ -109,6 +114,169 @@ function money(value: unknown) {
 }
 
 export async function registerAdminRoutes(app: FastifyInstance) {
+  app.get("/api/admin/dashboard", async (request, reply) => {
+    const auth = await requireOwner(request, reply);
+    if (!auth) return;
+
+    const parsed = dashboardQuery.safeParse(request.query ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "Filtros inválidos" });
+
+    const date = parsed.data.date ?? new Date().toISOString().slice(0, 10);
+    const branchId = parsed.data.branchId;
+    const branchFilter = branchId ? " AND o.branch_id = ?" : "";
+    const branchParams: unknown[] = branchId ? [branchId] : [];
+    const previousDateExpr = "DATE_SUB(?, INTERVAL 1 DAY)";
+
+    const [metricRows] = await db.query<any[]>(`
+      SELECT
+        COUNT(*) AS operations,
+        COALESCE(SUM(CASE WHEN o.operation_type='YAPE_TO_CASH' THEN o.amount ELSE 0 END),0) AS yape_received,
+        COALESCE(SUM(CASE WHEN o.operation_type='YAPE_TO_CASH' THEN o.net_amount ELSE 0 END),0) AS cash_delivered,
+        COALESCE(SUM(o.commission),0) AS commission_total,
+        COALESCE(SUM(o.staff_share_amount),0) AS staff_share_total,
+        COALESCE(SUM(o.partner_share_amount),0) AS partner_share_total
+      FROM operations o
+      WHERE DATE(o.created_at)=? AND o.status='COMPLETED'${branchFilter}
+    `, [date, ...branchParams]);
+
+    const [previousRows] = await db.query<any[]>(`
+      SELECT
+        COUNT(*) AS operations,
+        COALESCE(SUM(CASE WHEN o.operation_type='YAPE_TO_CASH' THEN o.amount ELSE 0 END),0) AS yape_received,
+        COALESCE(SUM(CASE WHEN o.operation_type='YAPE_TO_CASH' THEN o.net_amount ELSE 0 END),0) AS cash_delivered,
+        COALESCE(SUM(o.commission),0) AS commission_total,
+        COALESCE(SUM(o.staff_share_amount),0) AS staff_share_total,
+        COALESCE(SUM(o.partner_share_amount),0) AS partner_share_total
+      FROM operations o
+      WHERE DATE(o.created_at)=${previousDateExpr} AND o.status='COMPLETED'${branchFilter}
+    `, [date, ...branchParams]);
+
+    const [hourRows] = await db.query<any[]>(`
+      SELECT HOUR(o.created_at) AS hour, COUNT(*) AS operation_count
+      FROM operations o
+      WHERE DATE(o.created_at)=? AND o.status='COMPLETED'${branchFilter}
+      GROUP BY HOUR(o.created_at)
+      ORDER BY hour
+    `, [date, ...branchParams]);
+
+    const branchWhere = branchId ? " AND b.id = ?" : "";
+    const [branchRows] = await db.query<any[]>(`
+      SELECT b.id, b.code, b.name,
+             COUNT(o.id) AS operations,
+             COALESCE(SUM(CASE WHEN o.operation_type='YAPE_TO_CASH' THEN o.amount ELSE 0 END),0) AS yape_received,
+             COALESCE(SUM(CASE WHEN o.operation_type='YAPE_TO_CASH' THEN o.net_amount ELSE 0 END),0) AS cash_delivered,
+             COALESCE(SUM(o.amount),0) AS amount_total,
+             COALESCE(SUM(o.commission),0) AS commission_total
+      FROM branches b
+      LEFT JOIN operations o
+        ON o.branch_id=b.id
+       AND DATE(o.created_at)=?
+       AND o.status='COMPLETED'
+      WHERE b.active=1${branchWhere}
+      GROUP BY b.id,b.code,b.name
+      ORDER BY amount_total DESC, b.name
+    `, [date, ...(branchId ? [branchId] : [])]);
+
+    const [recentRows] = await db.query<any[]>(`
+      SELECT o.id, o.operation_type, o.reference_code, o.customer_name, o.amount,
+             o.commission, o.staff_share_amount, o.partner_share_amount,
+             o.net_amount, o.status,
+             DATE_FORMAT(o.created_at, '%Y-%m-%dT%H:%i:%s') AS created_at,
+             b.id AS branch_id, b.name AS branch_name,
+             u.full_name AS registered_by,
+             r.series AS receipt_series, r.sequence_number AS receipt_number
+      FROM operations o
+      JOIN branches b ON b.id=o.branch_id
+      LEFT JOIN users u ON u.id=o.user_id
+      LEFT JOIN receipts r ON r.operation_id=o.id
+      WHERE DATE(o.created_at)=?${branchFilter}
+      ORDER BY o.created_at DESC
+      LIMIT 10
+    `, [date, ...branchParams]);
+
+    const [closureRows] = await db.query<any[]>(`
+      SELECT
+        COALESCE(SUM(dc.difference_cash),0) AS difference_cash,
+        COALESCE(SUM(dc.difference_wallet),0) AS difference_wallet
+      FROM daily_closures dc
+      WHERE DATE(dc.closed_at)=?
+      ${branchId ? "AND dc.branch_id = ?" : ""}
+    `, [date, ...(branchId ? [branchId] : [])]);
+
+    const [cashRows] = await db.query<any[]>(`
+      SELECT COALESCE(SUM(
+        cs.initial_cash
+        + COALESCE(m.cash_received,0)
+        - COALESCE(m.cash_delivered,0)
+      ),0) AS cash_expected
+      FROM cash_sessions cs
+      LEFT JOIN (
+        SELECT o.cash_session_id,
+               SUM(CASE WHEN o.operation_type='CASH_TO_YAPE' AND o.status='COMPLETED' THEN o.amount ELSE 0 END) AS cash_received,
+               SUM(CASE WHEN o.operation_type='YAPE_TO_CASH' AND o.status='COMPLETED' THEN o.net_amount ELSE 0 END) AS cash_delivered
+        FROM operations o
+        GROUP BY o.cash_session_id
+      ) m ON m.cash_session_id=cs.id
+      WHERE cs.status='OPEN'
+      ${branchId ? "AND cs.branch_id = ?" : ""}
+    `, branchId ? [branchId] : []);
+
+    const current = metricRows[0] ?? {};
+    const previous = previousRows[0] ?? {};
+    const closure = closureRows[0] ?? {};
+    const cash = cashRows[0] ?? {};
+
+    const percentChange = (now: unknown, before: unknown) => {
+      const a = num(now); const b = num(before);
+      if (b === 0) return a === 0 ? 0 : 100;
+      return Math.round(((a - b) / Math.abs(b)) * 1000) / 10;
+    };
+
+    const hourlyMap = new Map(hourRows.map((row) => [Number(row.hour), Number(row.operation_count)]));
+    const hours = Array.from({ length: 13 }, (_, index) => 8 + index).map((hour) => ({
+      hour,
+      label: `${String(hour).padStart(2,"0")}:00`,
+      operations: hourlyMap.get(hour) ?? 0
+    }));
+
+    return {
+      date,
+      branchId: branchId ?? null,
+      updatedAt: new Date().toISOString(),
+      metrics: {
+        operations: num(current.operations),
+        yapeReceived: money(current.yape_received),
+        cashDelivered: money(current.cash_delivered),
+        commissionTotal: money(current.commission_total),
+        staffShareTotal: money(current.staff_share_total),
+        partnerShareTotal: money(current.partner_share_total),
+        cashExpected: money(cash.cash_expected),
+        cashDifference: money(closure.difference_cash)
+      },
+      comparison: {
+        operations: percentChange(current.operations, previous.operations),
+        yapeReceived: percentChange(current.yape_received, previous.yape_received),
+        cashDelivered: percentChange(current.cash_delivered, previous.cash_delivered),
+        commissionTotal: percentChange(current.commission_total, previous.commission_total),
+        staffShareTotal: percentChange(current.staff_share_total, previous.staff_share_total),
+        partnerShareTotal: percentChange(current.partner_share_total, previous.partner_share_total)
+      },
+      hours,
+      branches: branchRows.map((row) => ({
+        id: num(row.id),
+        code: row.code,
+        name: row.name,
+        operations: num(row.operations),
+        yapeReceived: money(row.yape_received),
+        cashDelivered: money(row.cash_delivered),
+        amountTotal: money(row.amount_total),
+        commissionTotal: money(row.commission_total)
+      })),
+      recentOperations: recentRows,
+      differenceWallet: money(closure.difference_wallet)
+    };
+  });
+
   app.get("/api/admin/overview", async (request, reply) => {
     const auth = await requireOwner(request, reply);
     if (!auth) return;
