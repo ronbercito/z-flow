@@ -500,13 +500,22 @@ function BranchesPage({ branches, onSettings, onDetail }: { branches: Branch[]; 
 function GlobalOperationsPage({ operations, branches }: { operations: GlobalOperation[]; branches: Branch[] }) {
   const [branch, setBranch] = useState("ALL");
   const [type, setType] = useState("ALL");
-  const filtered = operations.filter((op) => (branch === "ALL" || String(op.branch_id) === branch) && (type === "ALL" || op.operation_type === type));
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+
+  const filtered = operations.filter((op) => {
+    const day = op.created_at.slice(0, 10);
+    return (branch === "ALL" || String(op.branch_id) === branch)
+      && (type === "ALL" || op.operation_type === type)
+      && (!from || day >= from)
+      && (!to || day <= to);
+  });
 
   return (
     <section className="card page-card">
       <div className="card-head admin-filter-head">
         <div><strong>Historial consolidado</strong><span>{filtered.length} movimientos</span></div>
-        <div className="admin-filters">
+        <div className="admin-filters admin-filters-wide">
           <select value={branch} onChange={(e) => setBranch(e.target.value)}>
             <option value="ALL">Todas las filiales</option>
             {branches.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}
@@ -516,6 +525,9 @@ function GlobalOperationsPage({ operations, branches }: { operations: GlobalOper
             <option value="YAPE_TO_CASH">Yape → Efectivo</option>
             <option value="CASH_TO_YAPE">Efectivo → Yape</option>
           </select>
+          <label className="date-filter"><span>Desde</span><input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
+          <label className="date-filter"><span>Hasta</span><input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
+          <button className="filter-clear" onClick={() => { setBranch("ALL"); setType("ALL"); setFrom(""); setTo(""); }}>Limpiar</button>
         </div>
       </div>
       <GlobalOperationsTable operations={filtered} />
@@ -551,23 +563,45 @@ function GlobalOperationsTable({ operations }: { operations: GlobalOperation[] }
 }
 
 function CashAdminPage({ branches, closures }: { branches: Branch[]; closures: Closure[] }) {
+  const [branch, setBranch] = useState("ALL");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+
+  const filteredClosures = closures.filter((item) => {
+    const day = item.closed_at.slice(0, 10);
+    return (branch === "ALL" || String(item.branch_id) === branch)
+      && (!from || day >= from)
+      && (!to || day <= to);
+  });
+
   return (
     <>
       <div className="branch-cash-grid">
-        {branches.map((branch) => (
-          <section className="card branch-cash-card" key={branch.id}>
-            <div><div className="branch-monogram">{branch.code.slice(0,2)}</div><div><strong>{branch.name}</strong><span>{branch.address ?? "Sin dirección"}</span></div></div>
-            <span className={branch.cashOpen ? "branch-status open" : "branch-status closed"}>{branch.cashOpen ? "ABIERTA" : "CERRADA"}</span>
+        {branches.map((item) => (
+          <section className="card branch-cash-card" key={item.id}>
+            <div><div className="branch-monogram">{item.code.slice(0,2)}</div><div><strong>{item.name}</strong><span>{item.address ?? "Sin dirección"}</span></div></div>
+            <span className={item.cashOpen ? "branch-status open" : "branch-status closed"}>{item.cashOpen ? "ABIERTA" : "CERRADA"}</span>
           </section>
         ))}
       </div>
       <section className="card page-card">
-        <div className="card-head"><div><strong>Últimos cierres</strong><span>Conciliación de todas las filiales</span></div></div>
+        <div className="card-head admin-filter-head">
+          <div><strong>Historial de cierres</strong><span>{filteredClosures.length} cierres encontrados</span></div>
+          <div className="admin-filters admin-filters-wide">
+            <select value={branch} onChange={(e) => setBranch(e.target.value)}>
+              <option value="ALL">Todas las filiales</option>
+              {branches.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}
+            </select>
+            <label className="date-filter"><span>Desde</span><input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
+            <label className="date-filter"><span>Hasta</span><input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
+            <button className="filter-clear" onClick={() => { setBranch("ALL"); setFrom(""); setTo(""); }}>Limpiar</button>
+          </div>
+        </div>
         <div className="table-wrap">
           <table className="admin-table">
             <thead><tr><th>Fecha</th><th>Filial</th><th>Caja esperada</th><th>Caja declarada</th><th>Diferencia caja</th><th>Yape esperado</th><th>Yape declarado</th><th>Diferencia Yape</th></tr></thead>
             <tbody>
-              {closures.map((item) => (
+              {filteredClosures.map((item) => (
                 <tr key={item.id}>
                   <td>{dateTime(item.closed_at)}</td><td><strong>{item.branch_name}</strong></td>
                   <td>{currency(item.expected_cash)}</td><td>{currency(item.declared_cash)}</td>
@@ -576,7 +610,7 @@ function CashAdminPage({ branches, closures }: { branches: Branch[]; closures: C
                   <td className={Number(item.difference_wallet) === 0 ? "green-text" : "red-text"}>{currency(item.difference_wallet)}</td>
                 </tr>
               ))}
-              {!closures.length && <tr><td colSpan={8} className="empty-cell">Todavía no hay cierres registrados.</td></tr>}
+              {!filteredClosures.length && <tr><td colSpan={8} className="empty-cell">No hay cierres para esos filtros.</td></tr>}
             </tbody>
           </table>
         </div>
