@@ -160,13 +160,16 @@ export async function registerAdminRoutes(app: FastifyInstance) {
 
     const [recentRows] = await db.query<any[]>(`
       SELECT o.id, o.operation_type, o.reference_code, o.customer_name, o.amount,
-             o.commission, o.net_amount, o.status,
+             o.commission, o.staff_share_amount, o.partner_share_amount,
+             o.net_amount, o.status,
              DATE_FORMAT(o.created_at, '%Y-%m-%dT%H:%i:%s') AS created_at,
              b.id AS branch_id, b.name AS branch_name,
-             u.full_name AS registered_by
+             u.full_name AS registered_by,
+             r.series AS receipt_series, r.sequence_number AS receipt_number
       FROM operations o
       JOIN branches b ON b.id = o.branch_id
       LEFT JOIN users u ON u.id = o.user_id
+      LEFT JOIN receipts r ON r.operation_id = o.id
       ORDER BY o.created_at DESC
       LIMIT 15
     `);
@@ -319,18 +322,22 @@ export async function registerAdminRoutes(app: FastifyInstance) {
 
     const [operationRows] = await db.query<any[]>(`
       SELECT o.id, o.operation_type, o.reference_code, o.customer_name, o.amount,
-             o.commission, o.net_amount, o.status,
+             o.commission, o.staff_share_amount, o.partner_share_amount,
+             o.net_amount, o.status,
              DATE_FORMAT(o.created_at, '%Y-%m-%dT%H:%i:%s') AS created_at,
-             u.full_name AS registered_by
+             u.full_name AS registered_by,
+             r.series AS receipt_series, r.sequence_number AS receipt_number
       FROM operations o
       LEFT JOIN users u ON u.id = o.user_id
+      LEFT JOIN receipts r ON r.operation_id = o.id
       WHERE o.branch_id = ?
       ORDER BY o.created_at DESC
       LIMIT 20
     `, [branchId]);
 
     const [closureRows] = await db.query<any[]>(`
-      SELECT id, expected_cash, declared_cash, expected_wallet, declared_wallet,
+      SELECT id, operation_count, commission_total, staff_share_total, partner_share_total,
+             expected_cash, declared_cash, expected_wallet, declared_wallet,
              difference_cash, difference_wallet, notes,
              DATE_FORMAT(closed_at, '%Y-%m-%dT%H:%i:%s') AS closed_at
       FROM daily_closures
@@ -681,13 +688,16 @@ export async function registerAdminRoutes(app: FastifyInstance) {
 
     const [rows] = await db.query<any[]>(`
       SELECT o.id, o.operation_type, o.reference_code, o.customer_name, o.amount,
-             o.commission, o.net_amount, o.status,
+             o.commission, o.staff_share_amount, o.partner_share_amount,
+             o.net_amount, o.status,
              DATE_FORMAT(o.created_at, '%Y-%m-%dT%H:%i:%s') AS created_at,
              b.id AS branch_id, b.name AS branch_name,
-             u.full_name AS registered_by
+             u.full_name AS registered_by,
+             r.series AS receipt_series, r.sequence_number AS receipt_number
       FROM operations o
       JOIN branches b ON b.id = o.branch_id
       LEFT JOIN users u ON u.id = o.user_id
+      LEFT JOIN receipts r ON r.operation_id = o.id
       ${where}
       ORDER BY o.created_at DESC
       LIMIT 1000
@@ -711,7 +721,9 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
 
     const [rows] = await db.query<any[]>(`
-      SELECT dc.id, dc.expected_cash, dc.declared_cash, dc.expected_wallet,
+      SELECT dc.id, dc.operation_count, dc.commission_total,
+             dc.staff_share_total, dc.partner_share_total,
+             dc.expected_cash, dc.declared_cash, dc.expected_wallet,
              dc.declared_wallet, dc.difference_cash, dc.difference_wallet,
              dc.notes, DATE_FORMAT(dc.closed_at, '%Y-%m-%dT%H:%i:%s') AS closed_at,
              b.id AS branch_id, b.name AS branch_name
