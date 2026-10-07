@@ -3,6 +3,7 @@ import cors from "@fastify/cors";
 import cookie from "@fastify/cookie";
 import { z } from "zod";
 import { db } from "./db.js";
+import { registerAdminRoutes } from "./admin.js";
 import {
   bootstrapUsersIfEmpty,
   canReadBranch,
@@ -575,6 +576,7 @@ app.setErrorHandler((error, _request, reply) => {
 
 await ensureAuthSchema();
 await bootstrapUsersIfEmpty(app.log);
+await registerAdminRoutes(app);
 
 const port = Number(process.env.PORT ?? 3001);
 await app.listen({ host: "0.0.0.0", port });
