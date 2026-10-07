@@ -5,6 +5,12 @@ import {
   BarChart3,
   Bell,
   Building2,
+  CalendarDays,
+  Smartphone,
+  Banknote,
+  Percent,
+  Scale,
+  TrendingUp,
   CheckCircle2,
   ChevronRight,
   CircleDollarSign,
@@ -105,6 +111,43 @@ type Overview = {
   };
   branches: Branch[];
   recentOperations: GlobalOperation[];
+};
+
+type DashboardData = {
+  date: string;
+  branchId: number | null;
+  updatedAt: string;
+  metrics: {
+    operations: number;
+    yapeReceived: number;
+    cashDelivered: number;
+    commissionTotal: number;
+    staffShareTotal: number;
+    partnerShareTotal: number;
+    cashExpected: number;
+    cashDifference: number;
+  };
+  comparison: {
+    operations: number;
+    yapeReceived: number;
+    cashDelivered: number;
+    commissionTotal: number;
+    staffShareTotal: number;
+    partnerShareTotal: number;
+  };
+  hours: Array<{ hour: number; label: string; operations: number }>;
+  branches: Array<{
+    id: number;
+    code: string;
+    name: string;
+    operations: number;
+    yapeReceived: number;
+    cashDelivered: number;
+    amountTotal: number;
+    commissionTotal: number;
+  }>;
+  recentOperations: GlobalOperation[];
+  differenceWallet: number;
 };
 
 type AdminUser = {
@@ -398,7 +441,7 @@ export default function OwnerApp({ user, onLogout }: { user: AuthUser; onLogout:
         </header>
 
         <section className="content owner-content">
-          <div className="page-title-row">
+          {page !== "dashboard" && <div className="page-title-row">
             <button className="mobile-menu" onClick={() => setMobileNav(true)}><Menu size={20} /></button>
             <div>
               <div className="title-line">
@@ -411,12 +454,12 @@ export default function OwnerApp({ user, onLogout }: { user: AuthUser; onLogout:
               {page === "branches" && <button className="primary" onClick={() => setBranchModal(true)}><Plus size={17} /> Nueva filial</button>}
               {(page === "users" || page === "partners") && <button className="primary" onClick={() => setUserModal(true)}><Plus size={17} /> Nuevo usuario</button>}
             </div>
-          </div>
+          </div>}
 
           {error && <div className="error-banner">{error}<button onClick={() => void refreshAll()}><RefreshCw size={14} /> Reintentar</button></div>}
           {loading && !overview ? <div className="owner-loading">Cargando información global…</div> : null}
 
-          {page === "dashboard" && overview && <OwnerDashboard overview={overview} onPage={go} onSettings={setSettingsBranch} />}
+          {page === "dashboard" && overview && <OwnerDashboard user={user} overview={overview} onPage={go} />}
           {page === "branches" && overview && <BranchesPage branches={overview.branches} onSettings={setSettingsBranch} onDetail={(branch) => setDetailBranchId(branch.id)} />}
           {page === "operations" && <GlobalOperationsPage operations={operations} branches={overview?.branches ?? []} />}
           {page === "cash" && <CashAdminPage branches={overview?.branches ?? []} closures={closures} />}
@@ -438,77 +481,147 @@ export default function OwnerApp({ user, onLogout }: { user: AuthUser; onLogout:
   );
 }
 
-function OwnerDashboard({ overview, onPage, onSettings }: { overview: Overview; onPage: (page: AdminPage) => void; onSettings: (branch: Branch) => void }) {
-  const maxOps = Math.max(...overview.branches.map((branch) => branch.operationsToday), 1);
+function OwnerDashboard({ user, overview, onPage }: { user: AuthUser; overview: Overview; onPage: (page: AdminPage) => void }) {
+  const now = new Date();
+  const today = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  const [selectedBranch, setSelectedBranch] = useState("ALL");
+  const [selectedDate, setSelectedDate] = useState(today);
+  const [data, setData] = useState<DashboardData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  function query() {
+    const p = new URLSearchParams({ date: selectedDate });
+    if (selectedBranch !== "ALL") p.set("branchId", selectedBranch);
+    return p.toString();
+  }
+
+  async function loadDashboard() {
+    setLoading(true); setError("");
+    try {
+      setData(await api<DashboardData>(`/api/admin/dashboard?${query()}`));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo cargar el dashboard");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { void loadDashboard(); }, [selectedBranch, selectedDate]);
+
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? "Buenos días" : hour < 19 ? "Buenas tardes" : "Buenas noches";
+  const firstName = user.fullName.split(/\s+/)[0] || "Administrador";
+  const maxHour = Math.max(...(data?.hours.map((item) => item.operations) ?? [1]), 1);
+  const maxBranch = Math.max(...(data?.branches.map((item) => item.yapeReceived + item.cashDelivered) ?? [1]), 1);
+  const rankMax = Math.max(...(data?.branches.map((item) => item.amountTotal) ?? [1]), 1);
+  const displayDate = new Date(`${selectedDate}T12:00:00`).toLocaleDateString("es-PE", { day: "2-digit", month: "short", year: "numeric" });
+
   return (
-    <>
-      <div className="owner-kpis">
-        <OwnerKpi icon={<Building2 />} tone="blue" label="Filiales activas" value={String(overview.metrics.activeBranches)} />
-        <OwnerKpi icon={<ReceiptText />} tone="purple" label="Operaciones hoy" value={String(overview.metrics.operationsToday)} />
-        <OwnerKpi icon={<SmartValue />} tone="violet" label="Yape recibido" value={currency(overview.metrics.yapeReceived)} />
-        <OwnerKpi icon={<WalletCards />} tone="green" label="Efectivo entregado" value={currency(overview.metrics.cashDelivered)} />
-        <OwnerKpi icon={<BadgeDollarSign />} tone="orange" label="Comisión hoy" value={currency(overview.metrics.commissionToday)} />
-        <OwnerKpi icon={<Users />} tone="cyan" label="Usuarios activos" value={String(overview.metrics.activeUsers)} />
-        <OwnerKpi icon={<WalletCards />} tone="blue" label="Cajas abiertas" value={String(overview.metrics.openCashSessions)} />
+    <div className="graphic-dashboard">
+      <div className="dashboard-top-controls">
+        <button className="mobile-menu" onClick={() => undefined}><Menu size={20} /></button>
+        <label className="dashboard-selector"><Building2 size={16}/><select value={selectedBranch} onChange={(e)=>setSelectedBranch(e.target.value)}><option value="ALL">Todas las filiales</option>{overview.branches.map((item)=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+        <label className="dashboard-selector date"><CalendarDays size={16}/><input type="date" value={selectedDate} onChange={(e)=>setSelectedDate(e.target.value)} /></label>
       </div>
 
-      <div className="owner-dashboard-grid">
-        <section className="card owner-branches-card">
-          <div className="card-head">
-            <div><strong>Rendimiento por filial</strong><span>Operaciones registradas hoy</span></div>
-            <button className="ghost" onClick={() => onPage("branches")}>Ver filiales</button>
-          </div>
-          <div className="branch-performance">
-            {overview.branches.map((branch) => (
-              <div className="branch-performance-row" key={branch.id}>
-                <div className="branch-monogram">{branch.code.slice(0, 2)}</div>
-                <div className="branch-performance-main">
-                  <div><strong>{branch.name}</strong><span>{branch.operationsToday} operaciones · {currency(branch.commissionToday)} comisión</span></div>
-                  <div className="branch-progress"><i style={{ width: `${Math.max(4, (branch.operationsToday / maxOps) * 100)}%` }} /></div>
-                </div>
-                <span className={branch.cashOpen ? "branch-status open" : "branch-status closed"}>{branch.cashOpen ? "Caja abierta" : "Caja cerrada"}</span>
-                <button className="mini-button" onClick={() => onSettings(branch)}><Settings2 size={13} /> Configurar</button>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="card owner-summary-card">
-          <div className="card-head"><div><strong>Estado general</strong><span>Hoy</span></div></div>
-          <div className="owner-summary-list">
-            <SummaryLine label="Filiales operando" value={String(overview.branches.filter((b) => b.cashOpen).length)} />
-            <SummaryLine label="Filiales con caja cerrada" value={String(overview.branches.filter((b) => !b.cashOpen).length)} />
-            <SummaryLine label="Comisión consolidada" value={currency(overview.metrics.commissionToday)} />
-            <SummaryLine label="Operaciones del día" value={String(overview.metrics.operationsToday)} />
-          </div>
-          <button className="primary full owner-report-button" onClick={() => onPage("reports")}><BarChart3 size={16} /> Abrir reportes</button>
-        </section>
+      <div className="dashboard-welcome">
+        <div><h1>¡{greeting}, {firstName}!</h1><p>Aquí tienes el resumen de tus operaciones {selectedBranch === "ALL" ? "en todas las filiales" : "en la filial seleccionada"}.</p></div>
+        <div className="dashboard-live">
+          <span><i/> Sistema en línea</span>
+          <small>Última actualización: {data ? new Date(data.updatedAt).toLocaleString("es-PE", { hour:"2-digit", minute:"2-digit", day:"2-digit", month:"2-digit", year:"numeric" }) : "—"}</small>
+          <button className="icon-btn" onClick={() => void loadDashboard()} title="Actualizar"><RefreshCw size={17}/></button>
+        </div>
       </div>
 
-      <section className="card page-card">
-        <div className="card-head"><div><strong>Últimas operaciones</strong><span>Todas las filiales</span></div><button className="ghost" onClick={() => onPage("operations")}>Ver todas</button></div>
-        <GlobalOperationsTable operations={overview.recentOperations} />
-      </section>
-    </>
+      {error && <div className="error-banner">{error}<button onClick={() => void loadDashboard()}><RefreshCw size={14}/> Reintentar</button></div>}
+      {loading && !data && <div className="owner-loading">Actualizando dashboard…</div>}
+
+      {data && <>
+        <div className="dashboard-kpi-grid">
+          <GraphicKpi icon={<Activity/>} tone="blue" label="Operaciones" value={String(data.metrics.operations)} trend={data.comparison.operations} />
+          <GraphicKpi icon={<Smartphone/>} tone="purple" label="Yape recibido" value={currency(data.metrics.yapeReceived)} trend={data.comparison.yapeReceived} />
+          <GraphicKpi icon={<Banknote/>} tone="green" label="Efectivo entregado" value={currency(data.metrics.cashDelivered)} trend={data.comparison.cashDelivered} />
+          <GraphicKpi icon={<Percent/>} tone="orange" label="Comisión total" value={currency(data.metrics.commissionTotal)} trend={data.comparison.commissionTotal} />
+          <GraphicKpi icon={<UserCog/>} tone="pink" label="Ganancia encargados" value={currency(data.metrics.staffShareTotal)} trend={data.comparison.staffShareTotal} />
+          <GraphicKpi icon={<Users/>} tone="cyan" label="Ganancia socios" value={currency(data.metrics.partnerShareTotal)} trend={data.comparison.partnerShareTotal} />
+          <GraphicKpi icon={<WalletCards/>} tone="blue" label="Caja esperada" value={currency(data.metrics.cashExpected)} subtitle="Según cajas abiertas" />
+          <GraphicKpi icon={<Scale/>} tone={Math.abs(data.metrics.cashDifference) < 0.005 ? "green" : "red"} label="Diferencia de caja" value={currency(data.metrics.cashDifference)} subtitle={Math.abs(data.metrics.cashDifference) < 0.005 ? "✓ Cuadra" : "Revisar diferencia"} />
+        </div>
+
+        <div className="dashboard-visual-grid">
+          <section className="card dashboard-chart-card">
+            <div className="dashboard-card-head"><div><BarChart3 size={17}/><strong>Operaciones por hora</strong></div><span>{displayDate}</span></div>
+            <div className="hour-chart">
+              {data.hours.map((item) => <div className="hour-column" key={item.hour}>
+                <div className="hour-bar-track"><div className="hour-bar" style={{height:`${Math.max(item.operations ? 10 : 2,(item.operations/maxHour)*100)}%`}}><span>{item.operations || ""}</span></div></div>
+                <small>{item.label}</small>
+              </div>)}
+            </div>
+          </section>
+
+          <section className="card dashboard-chart-card branch-chart-card">
+            <div className="dashboard-card-head"><div><Activity size={17}/><strong>Operaciones por filial</strong></div><span>{displayDate}</span></div>
+            <div className="chart-legend"><span><i className="legend-blue"/>Yape recibido</span><span><i className="legend-green"/>Efectivo entregado</span></div>
+            <div className="branch-bar-chart">
+              {data.branches.map((item) => {
+                const total = item.yapeReceived + item.cashDelivered;
+                const height = Math.max(total ? 12 : 2,(total/maxBranch)*100);
+                const yapePct = total ? (item.yapeReceived/total)*100 : 50;
+                return <div className="branch-bar-column" key={item.id}>
+                  <strong>{currency(item.amountTotal)}</strong>
+                  <div className="stack-track" style={{height:`${height}%`}}><i className="stack-yape" style={{height:`${yapePct}%`}}/><i className="stack-cash" style={{height:`${100-yapePct}%`}}/></div>
+                  <small>{item.name}</small>
+                </div>;
+              })}
+              {!data.branches.length && <div className="empty-cell">Sin datos para este día.</div>}
+            </div>
+          </section>
+
+          <section className="card dashboard-day-summary">
+            <div className="dashboard-card-head"><div><CalendarDays size={17}/><strong>Resumen del día</strong></div></div>
+            <div className="day-summary-list">
+              <DashboardSummary icon={<ReceiptText/>} label="Total operaciones" value={String(data.metrics.operations)} />
+              <DashboardSummary icon={<Smartphone/>} label="Yape recibido" value={currency(data.metrics.yapeReceived)} />
+              <DashboardSummary icon={<Banknote/>} label="Efectivo entregado" value={currency(data.metrics.cashDelivered)} />
+              <DashboardSummary icon={<Percent/>} label="Comisión total" value={currency(data.metrics.commissionTotal)} />
+              <DashboardSummary icon={<UserCog/>} label="Ganancia encargados" value={currency(data.metrics.staffShareTotal)} />
+              <DashboardSummary icon={<Users/>} label="Ganancia socios" value={currency(data.metrics.partnerShareTotal)} />
+              <DashboardSummary icon={<WalletCards/>} label="Caja esperada" value={currency(data.metrics.cashExpected)} />
+              <DashboardSummary icon={<Scale/>} label="Diferencia de caja" value={currency(data.metrics.cashDifference)} />
+            </div>
+            <div className={Math.abs(data.metrics.cashDifference)<0.005 ? "cash-ok-box" : "cash-alert-box"}><CheckCircle2 size={20}/><div><strong>{Math.abs(data.metrics.cashDifference)<0.005 ? "La caja cuadra correctamente." : "Hay una diferencia por revisar."}</strong><span>{Math.abs(data.metrics.cashDifference)<0.005 ? "No se registran diferencias de efectivo." : `Diferencia: ${currency(data.metrics.cashDifference)}`}</span></div></div>
+          </section>
+        </div>
+
+        <div className="dashboard-bottom-grid">
+          <section className="card dashboard-recent">
+            <div className="dashboard-card-head"><div><ReceiptText size={17}/><strong>Operaciones recientes</strong></div><button className="ghost" onClick={()=>onPage("operations")}>Ver todas <ChevronRight size={13}/></button></div>
+            <div className="table-wrap"><table className="dashboard-table"><thead><tr><th>Fecha / Hora</th><th>Filial</th><th>Tipo</th><th>Código / Referencia</th><th>Monto</th><th>Comisión</th><th>Entregado</th><th>Estado</th></tr></thead><tbody>
+              {data.recentOperations.map((op)=><tr key={op.id}><td>{dateTime(op.created_at)}</td><td>{op.branch_name}</td><td><span className={`type-pill ${op.operation_type==="YAPE_TO_CASH"?"yape":"cash"}`}>{op.operation_type==="YAPE_TO_CASH"?"Yape":"Efectivo"}</span></td><td>{op.reference_code??"—"}</td><td>{currency(op.amount)}</td><td>{currency(op.commission)}</td><td>{currency(op.net_amount)}</td><td><span className={`status ${op.status==="COMPLETED"?"ok":"pending"}`}><i/>{op.status==="COMPLETED"?"Completada":"En proceso"}</span></td></tr>)}
+              {!data.recentOperations.length && <tr><td colSpan={8} className="empty-cell">No hay operaciones en la fecha seleccionada.</td></tr>}
+            </tbody></table></div>
+          </section>
+
+          <section className="card dashboard-ranking">
+            <div className="dashboard-card-head"><div><Building2 size={17}/><strong>Filiales ({displayDate})</strong></div><button className="ghost" onClick={()=>onPage("branches")}>Ver detalle <ChevronRight size={13}/></button></div>
+            <div className="ranking-list">
+              {data.branches.map((item,index)=><div className="ranking-row" key={item.id}><b>{index+1}</b><div><div><strong>{item.name}</strong><span>{item.operations} ops</span><em>{currency(item.amountTotal)}</em></div><div className="ranking-track"><i style={{width:`${Math.max(4,(item.amountTotal/rankMax)*100)}%`}}/></div></div></div>)}
+              {!data.branches.length && <div className="empty-cell">Sin actividad.</div>}
+            </div>
+          </section>
+        </div>
+      </>}
+    </div>
   );
 }
 
-function SmartValue() {
-  return <Activity />;
+function GraphicKpi({ icon, tone, label, value, trend, subtitle }: { icon: React.ReactNode; tone: string; label: string; value: string; trend?: number; subtitle?: string }) {
+  return <section className="card graphic-kpi"><div className={`graphic-kpi-icon ${tone}`}>{icon}</div><div><span>{label}</span><strong>{value}</strong>{trend !== undefined ? <small className={trend>=0?"trend-up":"trend-down"}><TrendingUp size={11}/> {trend>=0?"+":""}{trend}% <em>vs. día anterior</em></small> : <small className="kpi-subtitle">{subtitle}</small>}</div></section>;
 }
 
-function OwnerKpi({ icon, tone, label, value }: { icon: React.ReactNode; tone: string; label: string; value: string }) {
-  return (
-    <section className="card owner-kpi">
-      <div className={`kpi-icon ${tone}`}>{icon}</div>
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </section>
-  );
-}
-
-function SummaryLine({ label, value }: { label: string; value: string }) {
-  return <div className="owner-summary-line"><span>{label}</span><strong>{value}</strong></div>;
+function DashboardSummary({icon,label,value}:{icon:React.ReactNode;label:string;value:string}) {
+  return <div className="dashboard-summary-row"><span>{icon}</span><label>{label}</label><strong>{value}</strong></div>;
 }
 
 function BranchesPage({ branches, onSettings, onDetail }: { branches: Branch[]; onSettings: (branch: Branch) => void; onDetail: (branch: Branch) => void }) {
