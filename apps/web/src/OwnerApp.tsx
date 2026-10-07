@@ -520,7 +520,6 @@ function OwnerDashboard({ user, overview, onPage }: { user: AuthUser; overview: 
   return (
     <div className="graphic-dashboard">
       <div className="dashboard-top-controls">
-        <button className="mobile-menu" onClick={() => undefined}><Menu size={20} /></button>
         <label className="dashboard-selector"><Building2 size={16}/><select value={selectedBranch} onChange={(e)=>setSelectedBranch(e.target.value)}><option value="ALL">Todas las filiales</option>{overview.branches.map((item)=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
         <label className="dashboard-selector date"><CalendarDays size={16}/><input type="date" value={selectedDate} onChange={(e)=>setSelectedDate(e.target.value)} /></label>
       </div>
@@ -622,6 +621,17 @@ function GraphicKpi({ icon, tone, label, value, trend, subtitle }: { icon: React
 
 function DashboardSummary({icon,label,value}:{icon:React.ReactNode;label:string;value:string}) {
   return <div className="dashboard-summary-row"><span>{icon}</span><label>{label}</label><strong>{value}</strong></div>;
+}
+
+
+function OwnerKpi({ icon, tone, label, value }: { icon: React.ReactNode; tone: string; label: string; value: string }) {
+  return (
+    <section className="card owner-kpi">
+      <div className={`kpi-icon ${tone}`}>{icon}</div>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </section>
+  );
 }
 
 function BranchesPage({ branches, onSettings, onDetail }: { branches: Branch[]; onSettings: (branch: Branch) => void; onDetail: (branch: Branch) => void }) {
