@@ -5,8 +5,8 @@
 - [x] MariaDB y esquema inicial
 - [x] API base
 - [x] Dashboard restringido de filial
-- [ ] Login y sesiones
-- [ ] RBAC completo en backend
+- [x] Login y sesiones
+- [x] RBAC por rol y aislamiento de filial en backend
 - [ ] Nueva operación real
 - [ ] Apertura y cierre de caja
 - [ ] Ticket interno PDF/58-80 mm
