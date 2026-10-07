@@ -60,3 +60,22 @@ También incluye el primer formulario funcional de **Nueva operación**, conecta
 
 - `main`: base estable.
 - `develop`: implementación activa.
+
+
+## Login y usuarios iniciales
+
+Z-FLOW usa sesiones del lado del servidor mediante una cookie HttpOnly. Las contraseñas se almacenan con hash bcrypt.
+
+En la primera ejecución después de habilitar autenticación, si la tabla de usuarios está vacía, la API crea dos cuentas con **contraseñas temporales aleatorias**:
+
+- `admin`: propietario.
+- `miraflores`: usuario restringido de la filial de prueba.
+
+Para ver las credenciales generadas una sola vez:
+
+```bash
+docker compose logs api | grep -A 5 "CREDENCIALES TEMPORALES"
+```
+
+El usuario de filial queda restringido también en el backend: aunque cambie manualmente el ID de filial en una URL, recibirá HTTP 403.
+
