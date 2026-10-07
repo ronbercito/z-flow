@@ -1,0 +1,417 @@
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import ExcelJS from "exceljs";
+import PDFDocument from "pdfkit";
+import { z } from "zod";
+import { db } from "./db.js";
+import { canReadBranch, requireAuth } from "./auth.js";
+
+const reportQuery = z.object({
+  branchId: z.coerce.number().int().positive().optional(),
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()
+});
+
+const branchParams = z.object({
+  branchId: z.coerce.number().int().positive()
+});
+
+const receiptParams = z.object({
+  branchId: z.coerce.number().int().positive(),
+  operationId: z.coerce.number().int().positive()
+});
+
+type ReportFilters = z.infer<typeof reportQuery>;
+
+function money(value: unknown) {
+  const n = Number(value ?? 0);
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+
+function pen(value: unknown) {
+  return `S/ ${money(value).toFixed(2)}`;
+}
+
+function buildConditions(filters: ReportFilters, forcedBranchId?: number) {
+  const conditions = ["o.status = 'COMPLETED'"];
+  const params: unknown[] = [];
+  const branchId = forcedBranchId ?? filters.branchId;
+
+  if (branchId) {
+    conditions.push("o.branch_id = ?");
+    params.push(branchId);
+  }
+  if (filters.from) {
+    conditions.push("DATE(o.created_at) >= ?");
+    params.push(filters.from);
+  }
+  if (filters.to) {
+    conditions.push("DATE(o.created_at) <= ?");
+    params.push(filters.to);
+  }
+
+  return { where: `WHERE ${conditions.join(" AND ")}`, params };
+}
+
+async function fetchReport(filters: ReportFilters, forcedBranchId?: number) {
+  const { where, params } = buildConditions(filters, forcedBranchId);
+
+  const [operations] = await db.query<any[]>(`
+    SELECT o.id, o.operation_type, o.reference_code, o.customer_name,
+           o.amount, o.commission, o.staff_share_amount, o.partner_share_amount,
+           o.net_amount, DATE_FORMAT(o.created_at, '%Y-%m-%dT%H:%i:%s') AS created_at,
+           b.id AS branch_id, b.code AS branch_code, b.name AS branch_name,
+           u.full_name AS registered_by,
+           r.series, r.sequence_number
+    FROM operations o
+    JOIN branches b ON b.id = o.branch_id
+    LEFT JOIN users u ON u.id = o.user_id
+    LEFT JOIN receipts r ON r.operation_id = o.id
+    ${where}
+    ORDER BY o.created_at DESC
+    LIMIT 5000
+  `, params);
+
+  const [summaryRows] = await db.query<any[]>(`
+    SELECT
+      COUNT(*) AS operation_count,
+      COALESCE(SUM(o.amount),0) AS amount_total,
+      COALESCE(SUM(o.commission),0) AS commission_total,
+      COALESCE(SUM(o.staff_share_amount),0) AS staff_share_total,
+      COALESCE(SUM(o.partner_share_amount),0) AS partner_share_total,
+      SUM(CASE WHEN o.operation_type='YAPE_TO_CASH' THEN 1 ELSE 0 END) AS yape_to_cash_count,
+      SUM(CASE WHEN o.operation_type='CASH_TO_YAPE' THEN 1 ELSE 0 END) AS cash_to_yape_count
+    FROM operations o
+    ${where}
+  `, params);
+
+  const [branchRows] = await db.query<any[]>(`
+    SELECT b.id, b.code, b.name,
+           COUNT(*) AS operation_count,
+           COALESCE(SUM(o.amount),0) AS amount_total,
+           COALESCE(SUM(o.commission),0) AS commission_total,
+           COALESCE(SUM(o.staff_share_amount),0) AS staff_share_total,
+           COALESCE(SUM(o.partner_share_amount),0) AS partner_share_total
+    FROM operations o
+    JOIN branches b ON b.id = o.branch_id
+    ${where}
+    GROUP BY b.id, b.code, b.name
+    ORDER BY amount_total DESC
+  `, params);
+
+  const summary = summaryRows[0] ?? {};
+  const commissionTotal = money(summary.commission_total);
+  const staffShareTotal = money(summary.staff_share_total);
+  const partnerShareTotal = money(summary.partner_share_total);
+
+  return {
+    filters: {
+      branchId: forcedBranchId ?? filters.branchId ?? null,
+      from: filters.from ?? null,
+      to: filters.to ?? null
+    },
+    summary: {
+      operationCount: Number(summary.operation_count ?? 0),
+      amountTotal: money(summary.amount_total),
+      commissionTotal,
+      staffShareTotal,
+      partnerShareTotal,
+      unassignedCommission: money(Math.max(0, commissionTotal - staffShareTotal - partnerShareTotal)),
+      yapeToCashCount: Number(summary.yape_to_cash_count ?? 0),
+      cashToYapeCount: Number(summary.cash_to_yape_count ?? 0)
+    },
+    branches: branchRows.map((row) => ({
+      id: Number(row.id),
+      code: row.code,
+      name: row.name,
+      operationCount: Number(row.operation_count ?? 0),
+      amountTotal: money(row.amount_total),
+      commissionTotal: money(row.commission_total),
+      staffShareTotal: money(row.staff_share_total),
+      partnerShareTotal: money(row.partner_share_total)
+    })),
+    operations
+  };
+}
+
+function dateLabel(filters: ReportFilters) {
+  if (filters.from && filters.to) return `${filters.from} a ${filters.to}`;
+  if (filters.from) return `Desde ${filters.from}`;
+  if (filters.to) return `Hasta ${filters.to}`;
+  return "Todo el historial";
+}
+
+async function excelBuffer(report: Awaited<ReturnType<typeof fetchReport>>, title: string) {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = "Z-FLOW";
+  workbook.created = new Date();
+
+  const summary = workbook.addWorksheet("Resumen");
+  summary.addRow([title]);
+  summary.addRow(["Periodo", dateLabel(report.filters)]);
+  summary.addRow([]);
+  summary.addRow(["Indicador", "Valor"]);
+  summary.addRow(["Operaciones", report.summary.operationCount]);
+  summary.addRow(["Monto movilizado", report.summary.amountTotal]);
+  summary.addRow(["Comisión", report.summary.commissionTotal]);
+  summary.addRow(["Parte encargado", report.summary.staffShareTotal]);
+  summary.addRow(["Parte socio", report.summary.partnerShareTotal]);
+  summary.addRow(["Comisión sin reparto", report.summary.unassignedCommission]);
+  summary.addRow(["Yape → Efectivo", report.summary.yapeToCashCount]);
+  summary.addRow(["Efectivo → Yape", report.summary.cashToYapeCount]);
+  summary.columns = [{ width: 28 }, { width: 20 }];
+  summary.getRow(1).font = { bold: true, size: 16 };
+  summary.getRow(4).font = { bold: true };
+
+  const branches = workbook.addWorksheet("Filiales");
+  branches.columns = [
+    { header: "Filial", key: "name", width: 24 },
+    { header: "Código", key: "code", width: 12 },
+    { header: "Operaciones", key: "operationCount", width: 14 },
+    { header: "Monto", key: "amountTotal", width: 16 },
+    { header: "Comisión", key: "commissionTotal", width: 16 },
+    { header: "Encargado", key: "staffShareTotal", width: 16 },
+    { header: "Socio", key: "partnerShareTotal", width: 16 }
+  ];
+  report.branches.forEach((row) => branches.addRow(row));
+  branches.getRow(1).font = { bold: true };
+  ["D","E","F","G"].forEach((col) => { branches.getColumn(col).numFmt = '"S/" #,##0.00'; });
+
+  const operations = workbook.addWorksheet("Operaciones");
+  operations.columns = [
+    { header: "Fecha", key: "created_at", width: 20 },
+    { header: "Filial", key: "branch_name", width: 22 },
+    { header: "Tipo", key: "operation_type", width: 18 },
+    { header: "Cliente", key: "customer_name", width: 22 },
+    { header: "Referencia", key: "reference_code", width: 18 },
+    { header: "Monto", key: "amount", width: 14 },
+    { header: "Comisión", key: "commission", width: 14 },
+    { header: "Encargado", key: "staff_share_amount", width: 14 },
+    { header: "Socio", key: "partner_share_amount", width: 14 },
+    { header: "Entregado", key: "net_amount", width: 14 },
+    { header: "Registró", key: "registered_by", width: 22 },
+    { header: "Comprobante", key: "receipt", width: 18 }
+  ];
+  report.operations.forEach((row: any) => operations.addRow({
+    ...row,
+    operation_type: row.operation_type === "YAPE_TO_CASH" ? "Yape → Efectivo" : "Efectivo → Yape",
+    receipt: row.series && row.sequence_number ? `${row.series}-${String(row.sequence_number).padStart(6,"0")}` : ""
+  }));
+  operations.getRow(1).font = { bold: true };
+  ["F","G","H","I","J"].forEach((col) => { operations.getColumn(col).numFmt = '"S/" #,##0.00'; });
+
+  const out = await workbook.xlsx.writeBuffer();
+  return Buffer.from(out);
+}
+
+function pdfBuffer(report: Awaited<ReturnType<typeof fetchReport>>, title: string) {
+  return new Promise<Buffer>((resolve, reject) => {
+    const doc = new PDFDocument({ size: "A4", margin: 38 });
+    const chunks: Buffer[] = [];
+    doc.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+
+    doc.fontSize(18).text("Z-FLOW", { continued: true }).fontSize(11).text(`  ·  ${title}`);
+    doc.moveDown(0.4);
+    doc.fontSize(9).fillColor("#667085").text(`Periodo: ${dateLabel(report.filters)}`);
+    doc.fillColor("#111827");
+    doc.moveDown();
+
+    const cards = [
+      ["Operaciones", String(report.summary.operationCount)],
+      ["Monto movilizado", pen(report.summary.amountTotal)],
+      ["Comisión", pen(report.summary.commissionTotal)],
+      ["Encargado", pen(report.summary.staffShareTotal)],
+      ["Socio", pen(report.summary.partnerShareTotal)]
+    ];
+    cards.forEach(([label, value]) => {
+      doc.fontSize(9).fillColor("#667085").text(label, { continued: true, width: 155 });
+      doc.fillColor("#111827").font("Helvetica-Bold").text(value);
+      doc.font("Helvetica");
+    });
+
+    doc.moveDown();
+    doc.font("Helvetica-Bold").fontSize(11).text("Resumen por filial");
+    doc.font("Helvetica").moveDown(0.4);
+    report.branches.forEach((row) => {
+      doc.fontSize(8).text(
+        `${row.name}  ·  ${row.operationCount} ops  ·  Monto ${pen(row.amountTotal)}  ·  Comisión ${pen(row.commissionTotal)}  ·  Encargado ${pen(row.staffShareTotal)}  ·  Socio ${pen(row.partnerShareTotal)}`
+      );
+      doc.moveDown(0.25);
+    });
+
+    doc.moveDown();
+    doc.font("Helvetica-Bold").fontSize(11).text("Operaciones");
+    doc.font("Helvetica").moveDown(0.4);
+    report.operations.slice(0, 250).forEach((row: any) => {
+      const receipt = row.series && row.sequence_number ? `${row.series}-${String(row.sequence_number).padStart(6,"0")}` : "—";
+      doc.fontSize(7.5).text(
+        `${row.created_at} · ${row.branch_name} · ${row.operation_type === "YAPE_TO_CASH" ? "Yape→Efectivo" : "Efectivo→Yape"} · ${pen(row.amount)} · Comisión ${pen(row.commission)} · ${receipt}`
+      );
+      doc.moveDown(0.15);
+    });
+
+    if (report.operations.length > 250) {
+      doc.moveDown().fontSize(8).fillColor("#667085").text(
+        `El PDF muestra las primeras 250 operaciones. El Excel contiene las ${report.operations.length} operaciones del periodo.`
+      );
+    }
+
+    doc.end();
+  });
+}
+
+async function requireOwner(request: FastifyRequest, reply: FastifyReply) {
+  const auth = await requireAuth(request, reply);
+  if (!auth) return null;
+  if (auth.roleCode !== "OWNER") {
+    reply.code(403).send({ error: "Esta función requiere acceso de propietario" });
+    return null;
+  }
+  return auth;
+}
+
+function contentDisposition(filename: string) {
+  return `attachment; filename="${filename}"`;
+}
+
+export async function registerReportRoutes(app: FastifyInstance) {
+  app.get("/api/admin/reports/summary", async (request, reply) => {
+    const auth = await requireOwner(request, reply);
+    if (!auth) return;
+    const parsed = reportQuery.safeParse(request.query ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "Filtros inválidos" });
+    return fetchReport(parsed.data);
+  });
+
+  app.get("/api/admin/reports/export.xlsx", async (request, reply) => {
+    const auth = await requireOwner(request, reply);
+    if (!auth) return;
+    const parsed = reportQuery.safeParse(request.query ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "Filtros inválidos" });
+    const report = await fetchReport(parsed.data);
+    const buffer = await excelBuffer(report, "Reporte consolidado");
+    reply.header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    reply.header("Content-Disposition", contentDisposition("z-flow-reporte.xlsx"));
+    return reply.send(buffer);
+  });
+
+  app.get("/api/admin/reports/export.pdf", async (request, reply) => {
+    const auth = await requireOwner(request, reply);
+    if (!auth) return;
+    const parsed = reportQuery.safeParse(request.query ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "Filtros inválidos" });
+    const report = await fetchReport(parsed.data);
+    const buffer = await pdfBuffer(report, "Reporte consolidado");
+    reply.header("Content-Type", "application/pdf");
+    reply.header("Content-Disposition", contentDisposition("z-flow-reporte.pdf"));
+    return reply.send(buffer);
+  });
+
+  app.get("/api/branches/:branchId/reports/summary", async (request, reply) => {
+    const parsedParams = branchParams.safeParse(request.params);
+    const parsedQuery = reportQuery.safeParse(request.query ?? {});
+    if (!parsedParams.success || !parsedQuery.success) return reply.code(400).send({ error: "Filtros inválidos" });
+
+    const auth = await requireAuth(request, reply);
+    if (!auth) return;
+    if (!canReadBranch(auth, parsedParams.data.branchId)) return reply.code(403).send({ error: "Acceso denegado" });
+
+    return fetchReport(parsedQuery.data, parsedParams.data.branchId);
+  });
+
+  app.get("/api/branches/:branchId/reports/export.xlsx", async (request, reply) => {
+    const parsedParams = branchParams.safeParse(request.params);
+    const parsedQuery = reportQuery.safeParse(request.query ?? {});
+    if (!parsedParams.success || !parsedQuery.success) return reply.code(400).send({ error: "Filtros inválidos" });
+
+    const auth = await requireAuth(request, reply);
+    if (!auth) return;
+    if (!canReadBranch(auth, parsedParams.data.branchId)) return reply.code(403).send({ error: "Acceso denegado" });
+
+    const report = await fetchReport(parsedQuery.data, parsedParams.data.branchId);
+    const buffer = await excelBuffer(report, "Reporte de filial");
+    reply.header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    reply.header("Content-Disposition", contentDisposition("z-flow-filial.xlsx"));
+    return reply.send(buffer);
+  });
+
+  app.get("/api/branches/:branchId/reports/export.pdf", async (request, reply) => {
+    const parsedParams = branchParams.safeParse(request.params);
+    const parsedQuery = reportQuery.safeParse(request.query ?? {});
+    if (!parsedParams.success || !parsedQuery.success) return reply.code(400).send({ error: "Filtros inválidos" });
+
+    const auth = await requireAuth(request, reply);
+    if (!auth) return;
+    if (!canReadBranch(auth, parsedParams.data.branchId)) return reply.code(403).send({ error: "Acceso denegado" });
+
+    const report = await fetchReport(parsedQuery.data, parsedParams.data.branchId);
+    const buffer = await pdfBuffer(report, "Reporte de filial");
+    reply.header("Content-Type", "application/pdf");
+    reply.header("Content-Disposition", contentDisposition("z-flow-filial.pdf"));
+    return reply.send(buffer);
+  });
+
+  app.get("/api/branches/:branchId/receipts/:operationId/pdf", async (request, reply) => {
+    const parsed = receiptParams.safeParse(request.params);
+    if (!parsed.success) return reply.code(400).send({ error: "Comprobante inválido" });
+
+    const auth = await requireAuth(request, reply);
+    if (!auth) return;
+    if (!canReadBranch(auth, parsed.data.branchId)) return reply.code(403).send({ error: "Acceso denegado" });
+
+    const [rows] = await db.query<any[]>(`
+      SELECT o.id, o.operation_type, o.reference_code, o.customer_name, o.amount,
+             o.commission, o.staff_share_amount, o.partner_share_amount, o.net_amount,
+             DATE_FORMAT(o.created_at, '%d/%m/%Y %H:%i') AS created_at,
+             b.code AS branch_code, b.name AS branch_name, b.address AS branch_address,
+             u.full_name AS registered_by,
+             r.series, r.sequence_number, r.receipt_type, r.status
+      FROM operations o
+      JOIN branches b ON b.id = o.branch_id
+      LEFT JOIN users u ON u.id = o.user_id
+      LEFT JOIN receipts r ON r.operation_id = o.id
+      WHERE o.id = ? AND o.branch_id = ?
+      LIMIT 1
+    `, [parsed.data.operationId, parsed.data.branchId]);
+
+    if (!rows.length) return reply.code(404).send({ error: "Operación no encontrada" });
+    const row = rows[0];
+    if (!row.series) return reply.code(409).send({ error: "La operación todavía no tiene comprobante interno asignado" });
+
+    const buffer = await new Promise<Buffer>((resolve, reject) => {
+      const doc = new PDFDocument({ size: [226.77, 500], margins: { top: 18, bottom: 18, left: 16, right: 16 } });
+      const chunks: Buffer[] = [];
+      doc.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+      doc.on("end", () => resolve(Buffer.concat(chunks)));
+      doc.on("error", reject);
+
+      const receiptNo = `${row.series}-${String(row.sequence_number).padStart(6,"0")}`;
+      doc.font("Helvetica-Bold").fontSize(15).text("Z-FLOW", { align: "center" });
+      doc.fontSize(9).text(row.branch_name, { align: "center" });
+      if (row.branch_address) doc.font("Helvetica").fontSize(7).text(row.branch_address, { align: "center" });
+      doc.moveDown(0.5);
+      doc.font("Helvetica-Bold").fontSize(8).text("COMPROBANTE INTERNO", { align: "center" });
+      doc.font("Helvetica").fontSize(6.8).fillColor("#555555").text("No es comprobante de pago electrónico SUNAT", { align: "center" });
+      doc.fillColor("#000000").moveDown(0.7);
+      doc.fontSize(7.5).text(`N°: ${receiptNo}`);
+      doc.text(`Fecha: ${row.created_at}`);
+      doc.text(`Operación: ${row.operation_type === "YAPE_TO_CASH" ? "Yape → Efectivo" : "Efectivo → Yape"}`);
+      doc.text(`Referencia: ${row.reference_code ?? "—"}`);
+      doc.text(`Cliente: ${row.customer_name ?? "—"}`);
+      doc.text(`Registró: ${row.registered_by ?? "—"}`);
+      doc.moveDown(0.7);
+      doc.font("Helvetica-Bold").fontSize(8).text(`Monto: ${pen(row.amount)}`);
+      doc.font("Helvetica").text(`Comisión: ${pen(row.commission)}`);
+      doc.font("Helvetica-Bold").fontSize(10).text(`Entregado: ${pen(row.net_amount)}`);
+      doc.moveDown(1);
+      doc.font("Helvetica").fontSize(6.5).fillColor("#666666")
+        .text("Documento interno de control de operación. Conservar para conciliación.", { align: "center" });
+      doc.end();
+    });
+
+    reply.header("Content-Type", "application/pdf");
+    reply.header("Content-Disposition", `inline; filename="comprobante-${row.series}-${row.sequence_number}.pdf"`);
+    return reply.send(buffer);
+  });
+}
