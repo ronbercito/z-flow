@@ -321,7 +321,7 @@ function App() {
             <div>
               <div className="title-line">
                 <h1>{pageMeta[page][0]}</h1>
-                <span className="restricted"><LockKeyhole size={13} /> {authUser.role.code === "OWNER" ? "Acceso propietario" : "Vista restringida"}</span>
+                <span className="restricted"><LockKeyhole size={13} /> Vista restringida</span>
               </div>
               <p>{pageMeta[page][1]}</p>
             </div>
