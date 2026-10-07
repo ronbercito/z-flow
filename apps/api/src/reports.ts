@@ -105,9 +105,9 @@ async function fetchReport(filters: ReportFilters, forcedBranchId?: number) {
 
   return {
     filters: {
-      branchId: forcedBranchId ?? filters.branchId ?? null,
-      from: filters.from ?? null,
-      to: filters.to ?? null
+      branchId: forcedBranchId ?? filters.branchId,
+      from: filters.from,
+      to: filters.to
     },
     summary: {
       operationCount: Number(summary.operation_count ?? 0),
