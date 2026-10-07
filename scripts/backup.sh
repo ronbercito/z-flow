@@ -16,6 +16,7 @@ docker compose exec -T db sh -c 'mariadb-dump --single-transaction --routines --
   | gzip -9 > "$TMP_FILE"
 
 test -s "$TMP_FILE"
+gzip -t "$TMP_FILE"
 mv "$TMP_FILE" "$OUT_FILE"
 
 find "$BACKUP_DIR" -type f -name 'zflow_*.sql.gz' -mtime "+$RETENTION_DAYS" -delete
