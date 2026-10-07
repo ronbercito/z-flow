@@ -71,6 +71,8 @@ CREATE TABLE IF NOT EXISTS operations (
   customer_name VARCHAR(140) NULL,
   amount DECIMAL(14,2) NOT NULL,
   commission DECIMAL(14,2) NOT NULL,
+  staff_share_amount DECIMAL(14,2) NOT NULL DEFAULT 0,
+  partner_share_amount DECIMAL(14,2) NOT NULL DEFAULT 0,
   net_amount DECIMAL(14,2) NOT NULL,
   notes VARCHAR(255) NULL,
   status ENUM('COMPLETED','IN_PROGRESS','CANCELLED','REVERSED') NOT NULL DEFAULT 'COMPLETED',
@@ -94,6 +96,7 @@ CREATE TABLE IF NOT EXISTS receipts (
   issued_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY uq_receipts_series_number (series, sequence_number),
+  UNIQUE KEY uq_receipts_operation (operation_id),
   CONSTRAINT fk_receipts_branch FOREIGN KEY (branch_id) REFERENCES branches(id),
   CONSTRAINT fk_receipts_operation FOREIGN KEY (operation_id) REFERENCES operations(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -102,6 +105,10 @@ CREATE TABLE IF NOT EXISTS daily_closures (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   branch_id BIGINT UNSIGNED NOT NULL,
   cash_session_id BIGINT UNSIGNED NOT NULL,
+  operation_count INT UNSIGNED NOT NULL DEFAULT 0,
+  commission_total DECIMAL(14,2) NOT NULL DEFAULT 0,
+  staff_share_total DECIMAL(14,2) NOT NULL DEFAULT 0,
+  partner_share_total DECIMAL(14,2) NOT NULL DEFAULT 0,
   expected_cash DECIMAL(14,2) NOT NULL,
   declared_cash DECIMAL(14,2) NOT NULL,
   expected_wallet DECIMAL(14,2) NOT NULL,
@@ -149,4 +156,13 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
   KEY idx_auth_sessions_user (user_id),
   KEY idx_auth_sessions_expiry (expires_at),
   CONSTRAINT fk_auth_sessions_user FOREIGN KEY (user_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+CREATE TABLE IF NOT EXISTS receipt_sequences (
+  branch_id BIGINT UNSIGNED NOT NULL,
+  next_number BIGINT UNSIGNED NOT NULL DEFAULT 1,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (branch_id),
+  CONSTRAINT fk_receipt_sequences_branch FOREIGN KEY (branch_id) REFERENCES branches(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
