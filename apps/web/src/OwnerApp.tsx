@@ -258,6 +258,13 @@ type PartnerAssignment = {
   earnings?: number;
 };
 
+type RolePermissionInfo = {
+  id: number;
+  code: string;
+  name: string;
+  permissions: string[];
+};
+
 type FinancialReport = {
   filters: { branchId: number | null; from: string | null; to: string | null };
   summary: {
@@ -1245,17 +1252,22 @@ function SystemSettingsPage() {
 function SecurityPage({ currentUserId }: { currentUserId: number }) {
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [sessions, setSessions] = useState<SecuritySession[]>([]);
+  const [roles, setRoles] = useState<RolePermissionInfo[]>([]);
+  const [availablePermissions, setAvailablePermissions] = useState<string[]>([]);
   const [error, setError] = useState("");
 
   async function load() {
     setError("");
     try {
-      const [statusData, sessionData] = await Promise.all([
+      const [statusData, sessionData, roleData] = await Promise.all([
         api<SystemStatus>("/api/admin/system/status"),
-        api<{ sessions: SecuritySession[] }>("/api/admin/security/sessions")
+        api<{ sessions: SecuritySession[] }>("/api/admin/security/sessions"),
+        api<{ roles: RolePermissionInfo[]; availablePermissions: string[] }>("/api/admin/security/roles")
       ]);
       setStatus(statusData);
       setSessions(sessionData.sessions ?? []);
+      setRoles(roleData.roles ?? []);
+      setAvailablePermissions(roleData.availablePermissions ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo cargar seguridad");
     }
@@ -1272,6 +1284,34 @@ function SecurityPage({ currentUserId }: { currentUserId: number }) {
       setError(err instanceof Error ? err.message : "No se pudo cerrar la sesión");
     }
   }
+
+  async function togglePermission(role: RolePermissionInfo, permission: string) {
+    if (role.code === "OWNER") return;
+    const next = role.permissions.includes(permission)
+      ? role.permissions.filter((item) => item !== permission)
+      : [...role.permissions, permission];
+    try {
+      await api("/api/admin/security/roles/" + role.code + "/permissions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ permissions: next })
+      });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudieron actualizar los permisos");
+    }
+  }
+
+  const permissionLabels: Record<string,string> = {
+    GLOBAL_READ: "Lectura global",
+    GLOBAL_WRITE: "Escritura global",
+    BRANCH_READ: "Ver su filial",
+    BRANCH_WRITE: "Operar en su filial",
+    USER_ADMIN: "Administrar usuarios",
+    BRANCH_USER_ADMIN: "Administrar usuarios de filial",
+    AUDIT_READ: "Ver auditoría",
+    CANCEL_OPERATION: "Anular operaciones"
+  };
 
   const uptime = status ? Math.floor(status.api.uptimeSeconds/3600) + "h " + Math.floor((status.api.uptimeSeconds%3600)/60) + "m" : "—";
 
