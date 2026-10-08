@@ -293,15 +293,27 @@ app.get("/api/branches/:branchId/dashboard", async (request, reply) => {
   const initialCash = Number(session?.initial_cash ?? 0);
   const initialWallet = Number(session?.initial_wallet ?? 0);
 
+  const [sessionSummaryRows] = await db.query<any[]>(`SELECT
+       COALESCE(SUM(CASE WHEN operation_type = 'YAPE_TO_CASH' AND status = 'COMPLETED' THEN amount ELSE 0 END), 0) AS yape_received,
+       COALESCE(SUM(CASE WHEN operation_type = 'YAPE_TO_CASH' AND status = 'COMPLETED' THEN net_amount ELSE 0 END), 0) AS cash_delivered,
+       COALESCE(SUM(CASE WHEN operation_type = 'CASH_TO_YAPE' AND status = 'COMPLETED' THEN amount ELSE 0 END), 0) AS cash_received,
+       COALESCE(SUM(CASE WHEN operation_type = 'CASH_TO_YAPE' AND status = 'COMPLETED' THEN net_amount ELSE 0 END), 0) AS yape_sent,
+       COALESCE(SUM(CASE WHEN status = 'COMPLETED' THEN commission ELSE 0 END), 0) AS commission_total
+     FROM operations
+     WHERE branch_id = ? AND cash_session_id = ?`,
+    [branchId, session?.id ?? 0]
+  );
+  const sessionSummary = sessionSummaryRows[0] ?? {};
+
   const cashCurrent = money(
     initialCash +
-      Number(summary.cash_received ?? 0) -
-      Number(summary.cash_delivered ?? 0)
+      Number(sessionSummary.cash_received ?? 0) -
+      Number(sessionSummary.cash_delivered ?? 0)
   );
   const walletCurrent = money(
     initialWallet +
-      Number(summary.yape_received ?? 0) -
-      Number(summary.yape_sent ?? 0)
+      Number(sessionSummary.yape_received ?? 0) -
+      Number(sessionSummary.yape_sent ?? 0)
   );
 
   return {
@@ -316,6 +328,7 @@ app.get("/api/branches/:branchId/dashboard", async (request, reply) => {
       yapeReceived: money(Number(summary.yape_received ?? 0)),
       cashDelivered: money(Number(summary.cash_delivered ?? 0)),
       commissionTotal: money(Number(summary.commission_total ?? 0)),
+      sessionCommissionTotal: money(Number(sessionSummary.commission_total ?? 0)),
       cashCurrent,
       walletCurrent,
       cashDifference: 0
