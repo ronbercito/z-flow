@@ -2,7 +2,6 @@
 set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
-chmod +x "$ROOT_DIR"/scripts/*.sh
 if [ -f "$ROOT_DIR/.env" ]; then
   chmod 600 "$ROOT_DIR/.env"
 fi
