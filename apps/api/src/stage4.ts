@@ -410,14 +410,18 @@ export async function registerStage4Routes(app: FastifyInstance) {
     if (!auth) return;
 
     const [rows] = await db.query<any[]>(`
-      SELECT s.id, s.user_id, s.ip_address, s.user_agent, s.created_at, s.expires_at,
-             s.revoked_at, u.username, u.full_name, r.name AS role_name,
+      SELECT s.id, s.user_id, s.ip_address, s.user_agent,
+             DATE_FORMAT(s.created_at, '%Y-%m-%dT%H:%i:%s') AS created_at,
+             DATE_FORMAT(s.expires_at, '%Y-%m-%dT%H:%i:%s') AS expires_at,
+             DATE_FORMAT(s.revoked_at, '%Y-%m-%dT%H:%i:%s') AS revoked_at,
+             CASE WHEN s.revoked_at IS NULL AND s.expires_at>NOW() THEN 1 ELSE 0 END AS active,
+             u.username, u.full_name, r.name AS role_name,
              b.name AS branch_name
       FROM auth_sessions s
       JOIN users u ON u.id=s.user_id
       JOIN roles r ON r.id=u.role_id
       LEFT JOIN branches b ON b.id=u.branch_id
-      ORDER BY s.revoked_at IS NULL AND s.expires_at>NOW() DESC, s.created_at DESC
+      ORDER BY active DESC, s.created_at DESC
       LIMIT 300
     `);
 
@@ -434,7 +438,7 @@ export async function registerStage4Routes(app: FastifyInstance) {
         createdAt: row.created_at,
         expiresAt: row.expires_at,
         revokedAt: row.revoked_at,
-        active: !row.revoked_at && new Date(row.expires_at).getTime() > Date.now(),
+        active: Boolean(row.active),
         current: Number(row.id) === auth.sessionId
       }))
     };
