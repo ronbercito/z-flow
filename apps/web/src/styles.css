@@ -1656,3 +1656,30 @@ tr:last-child td { border-bottom:0; }
   .stage4-settings-actions { align-items: stretch; flex-direction: column; }
   .stage4-settings-actions .primary { width: 100%; }
 }
+
+
+.handoff-box {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #e4ebf4;
+  border-radius: 10px;
+  background: #fafcff;
+  display: grid;
+  gap: 9px;
+}
+.handoff-box > div:first-child { display: grid; gap: 3px; }
+.handoff-box strong { color: #2f4057; font-size: 10px; }
+.handoff-box span { color: #8492a5; font-size: 8px; }
+.handoff-controls { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; }
+.handoff-controls select {
+  height: 38px;
+  border: 1px solid #dce5ef;
+  border-radius: 8px;
+  background: #fff;
+  padding: 0 10px;
+  color: #40516a;
+  font-size: 9px;
+}
+@media (max-width:650px) {
+  .handoff-controls { grid-template-columns: 1fr; }
+}
