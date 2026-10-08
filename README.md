@@ -33,6 +33,11 @@ git clone https://github.com/ronbercito/z-flow.git
 cd z-flow
 git checkout develop
 cp .env.example .env
+# Generate two different database secrets and place them in .env:
+openssl rand -hex 32
+openssl rand -hex 32
+# Set the first value as DB_PASSWORD and the second as DB_ROOT_PASSWORD.
+chmod 600 .env
 docker compose up -d --build
 ```
 
