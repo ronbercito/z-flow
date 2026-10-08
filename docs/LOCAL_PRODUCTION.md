@@ -42,3 +42,19 @@ Una operación completada no se edita. Durante un turno abierto puede anularse c
 ## Nube
 
 La migración a nube queda deliberadamente fuera de esta etapa. Se hará después de las pruebas locales con todas las filiales.
+
+
+## Probar restauración sin tocar producción
+
+```bash
+cd /opt/z-flow
+bash scripts/test-restore.sh
+```
+
+Crea una base temporal, importa el último backup, comprueba tablas principales y elimina la base temporal al finalizar.
+
+## Arranque automático del LXC
+
+Dentro del LXC, Docker queda habilitado por `install-local-production.sh` y los contenedores usan `restart: unless-stopped`.
+
+En el host Proxmox también debe activarse **Start at boot** para el CT de Z-FLOW. Desde la interfaz de Proxmox se puede habilitar en las opciones del contenedor. La prueba final de reinicio forma parte de la Fase 5.
