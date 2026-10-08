@@ -875,10 +875,16 @@ function GlobalOperationsTable({ operations, onReverse }: { operations: GlobalOp
 }
 
 function CashAdminPage({ branches, closures }: { branches: Branch[]; closures: Closure[] }) {
-  const [branch, setBranch] = useState("ALL");
+  const [branch, setBranch] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
-
+  const [branchPickerOpen, setBranchPickerOpen] = useState(false);
+  const selectedBranchName = branch === "ALL"
+    ? "Mostrar todos"
+    : branches.find((item) => String(item.id) === branch)?.name;
+  const visibleBranches = branch === "ALL"
+    ? branches
+    : branches.filter((item) => String(item.id) === branch);
   const filteredClosures = closures.filter((item) => {
     const day = item.closed_at.slice(0, 10);
     return (branch === "ALL" || String(item.branch_id) === branch)
@@ -886,49 +892,86 @@ function CashAdminPage({ branches, closures }: { branches: Branch[]; closures: C
       && (!to || day <= to);
   });
 
+  function chooseBranch(value: string) {
+    setBranch(value);
+    setBranchPickerOpen(false);
+  }
+
+  const branchPicker = (
+    <div className={`report-branch-picker cash-picker ${branch ? "inline" : "start"}`}>
+      <div className="report-branch-picker-copy">
+        <span className="report-branch-picker-icon"><Building2 size={17} /></span>
+        <span><strong>{branch ? "Filial de cierres" : "Selecciona una filial"}</strong><small>{branch ? selectedBranchName : "Elige qué cierres deseas consultar"}</small></span>
+      </div>
+      <div className="report-branch-picker-menu-wrap">
+        <button type="button" className="report-branch-picker-trigger" aria-expanded={branchPickerOpen} onClick={()=>setBranchPickerOpen(!branchPickerOpen)}>
+          <span>{branch ? "Cambiar selección" : "Seleccionar filial"}</span><ChevronDown size={15}/>
+        </button>
+        {branchPickerOpen && <div className="report-branch-picker-menu" aria-label="Seleccionar filial para cierres">
+          <button type="button" className={branch==="ALL"?"selected":""} aria-pressed={branch==="ALL"} onClick={()=>chooseBranch("ALL")}>
+            <span className="branch-option-mark"><Building2 size={14}/></span><span><strong>Mostrar todos</strong><small>Cajas y cierres de todas las filiales</small></span>
+          </button>
+          {branches.map((item)=><button type="button" key={item.id} className={branch===String(item.id)?"selected":""} aria-pressed={branch===String(item.id)} onClick={()=>chooseBranch(String(item.id))}>
+            <span className="branch-option-mark"><Building2 size={14}/></span><span><strong>{item.name}</strong><small>{item.cashOpen ? "Caja abierta" : "Caja cerrada"} · Ver cierres</small></span>
+          </button>)}
+        </div>}
+      </div>
+    </div>
+  );
+
   return (
     <>
-      <div className="branch-cash-grid">
-        {branches.map((item) => (
-          <section className="card branch-cash-card" key={item.id}>
-            <div><div className="branch-monogram">{item.code.slice(0,2)}</div><div><strong>{item.name}</strong><span>{item.address ?? "Sin dirección"}</span></div></div>
-            <span className={item.cashOpen ? "branch-status open" : "branch-status closed"}>{item.cashOpen ? "ABIERTA" : "CERRADA"}</span>
-          </section>
-        ))}
-      </div>
-      <section className="card page-card">
-        <div className="card-head admin-filter-head">
-          <div><strong>Historial de cierres</strong><span>{filteredClosures.length} cierres encontrados</span></div>
-          <div className="admin-filters admin-filters-wide">
-            <select value={branch} onChange={(e) => setBranch(e.target.value)}>
-              <option value="ALL">Todas las filiales</option>
-              {branches.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}
-            </select>
-            <label className="date-filter"><span>Desde</span><input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
-            <label className="date-filter"><span>Hasta</span><input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
-            <button className="filter-clear" onClick={() => { setBranch("ALL"); setFrom(""); setTo(""); }}>Limpiar</button>
-          </div>
-        </div>
-        <div className="table-wrap">
-          <table className="admin-table">
-            <thead><tr><th>Fecha</th><th>Filial</th><th>Responsable</th><th>Resultado</th><th>Operaciones</th><th>Comisión</th><th>Diferencias</th><th>PDF</th></tr></thead>
-            <tbody>
-              {filteredClosures.map((item) => (
-                <tr key={item.id}>
-                  <td>{dateTime(item.closed_at)}</td><td><strong>{item.branch_name}</strong></td>
-                  <td>{item.closed_by ?? "—"}</td>
-                  <td><span className={`branch-status ${closureResult(item).cls}`}>{closureResult(item).label}</span></td>
-                  <td>{item.operation_count ?? 0}</td>
-                  <td><strong>{currency(item.commission_total)}</strong><br/><small>Ganancia del encargado</small></td>
-                  <td><span className={Math.abs(Number(item.difference_cash)) < 0.005 ? "green-text" : "red-text"}>Efectivo {currency(item.difference_cash)}</span><br/><span className={Math.abs(Number(item.difference_wallet)) < 0.005 ? "green-text" : "red-text"}>Yape {currency(item.difference_wallet)}</span></td>
-                  <td><button className="mini-button" onClick={() => window.open(`/api/branches/${item.branch_id}/closures/${item.id}/pdf`, "_blank")}><Download size={12}/> PDF</button></td>
-                </tr>
+      {!branch && <section className="card report-select-start">
+        <div><strong>¿Qué cajas y cierres deseas revisar?</strong><span>Pulsa el selector y elige una filial o muestra todas para cargar la información.</span></div>
+        {branchPicker}
+      </section>}
+
+      {branch && <>
+        <section className="cash-admin-overview">
+          <section className="card cash-branch-status">
+            <div className="card-head"><div><strong>{branch === "ALL" ? "Estado de las cajas" : `Estado de caja · ${selectedBranchName}`}</strong><span>{branch === "ALL" ? `${branches.length} filiales` : "Estado actual de la filial seleccionada"}</span></div></div>
+            <div className="branch-cash-grid cash-admin-branch-grid">
+              {visibleBranches.map((item) => (
+                <section className="card branch-cash-card" key={item.id}>
+                  <div><div className="branch-monogram">{item.code.slice(0,2)}</div><div><strong>{item.name}</strong><span>{item.address ?? "Sin dirección"}</span></div></div>
+                  <span className={item.cashOpen ? "branch-status open" : "branch-status closed"}>{item.cashOpen ? "ABIERTA" : "CERRADA"}</span>
+                </section>
               ))}
-              {!filteredClosures.length && <tr><td colSpan={8} className="empty-cell">No hay cierres para esos filtros.</td></tr>}
-            </tbody>
-          </table>
-        </div>
-      </section>
+            </div>
+          </section>
+          {branchPicker}
+        </section>
+
+        <section className="card page-card">
+          <div className="card-head admin-filter-head">
+            <div><strong>{branch === "ALL" ? "Historial de cierres · todas las filiales" : `Historial de cierres · ${selectedBranchName}`}</strong><span>{filteredClosures.length} cierres encontrados · {from || "Desde el inicio"}{to ? ` a ${to}` : ""}</span></div>
+            <div className="admin-filters admin-filters-wide">
+              <label className="date-filter"><span>Desde</span><input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
+              <label className="date-filter"><span>Hasta</span><input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
+              <button className="filter-clear" onClick={() => { setFrom(""); setTo(""); }}>Limpiar fechas</button>
+            </div>
+          </div>
+          <div className="table-wrap">
+            <table className="admin-table">
+              <thead><tr><th>Fecha</th><th>Filial</th><th>Responsable</th><th>Resultado</th><th>Operaciones</th><th>Comisión</th><th>Diferencias</th><th>PDF</th></tr></thead>
+              <tbody>
+                {filteredClosures.map((item) => (
+                  <tr key={item.id}>
+                    <td>{dateTime(item.closed_at)}</td><td><strong>{item.branch_name}</strong></td>
+                    <td>{item.closed_by ?? "—"}</td>
+                    <td><span className={`branch-status ${closureResult(item).cls}`}>{closureResult(item).label}</span></td>
+                    <td>{item.operation_count ?? 0}</td>
+                    <td><strong>{currency(item.commission_total)}</strong><br/><small>Ganancia del encargado</small></td>
+                    <td><span className={Math.abs(Number(item.difference_cash)) < 0.005 ? "green-text" : "red-text"}>Efectivo {currency(item.difference_cash)}</span><br/><span className={Math.abs(Number(item.difference_wallet)) < 0.005 ? "green-text" : "red-text"}>Yape {currency(item.difference_wallet)}</span></td>
+                    <td><button className="mini-button" onClick={() => window.open(`/api/branches/${item.branch_id}/closures/${item.id}/pdf`, "_blank")}><Download size={12}/> PDF</button></td>
+                  </tr>
+                ))}
+                {!filteredClosures.length && <tr><td colSpan={8} className="empty-cell">No hay cierres para esos filtros.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </>}
     </>
   );
 }
