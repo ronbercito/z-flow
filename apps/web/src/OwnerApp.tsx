@@ -1602,18 +1602,72 @@ function SecurityPage({ currentUserId }: { currentUserId: number }) {
 
 
 function OwnerProfile({ user }: { user: AuthUser }) {
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+
+  async function changePassword(event: FormEvent) {
+    event.preventDefault();
+    setError("");
+    setMessage("");
+    if (newPassword !== confirmPassword) {
+      setError("Las contraseñas nuevas no coinciden.");
+      return;
+    }
+    setSaving(true);
+    try {
+      await api<{ ok: boolean }>("/api/auth/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentPassword, newPassword })
+      });
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setMessage("Contraseña actualizada. Las demás sesiones se cerraron.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo cambiar la contraseña.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
-    <div className="detail-grid">
-      <section className="card large-panel">
-        <div className="profile-head"><div className="avatar big">{user.fullName.split(/\s+/).slice(0,2).map((x) => x[0]).join("")}</div><div><h2>{user.fullName}</h2><p>{user.role.name}</p></div></div>
+    <div className="owner-profile-grid">
+      <section className="card owner-profile-card">
+        <div className="profile-head">
+          <div className="avatar big">{user.fullName.split(/\\s+/).filter(Boolean).slice(0,2).map((x) => x[0]).join("").toUpperCase()}</div>
+          <div><h2>{user.fullName}</h2><p>{user.role.name}</p></div>
+        </div>
         <div className="profile-details">
           <div><span>Usuario</span><strong>{user.username}</strong></div>
           <div><span>Alcance</span><strong>Global</strong></div>
           <div><span>Rol</span><strong>{user.role.name}</strong></div>
           <div><span>Último acceso</span><strong>{dateTime(user.lastLoginAt)}</strong></div>
         </div>
+        <div className="owner-profile-note"><ShieldCheck size={16}/><span>Esta cuenta administra todo el sistema. Mantén una contraseña única y segura.</span></div>
       </section>
-      <section className="card action-panel"><ShieldCheck size={28} /><h3>Cuenta propietaria</h3><p>Puede administrar filiales, usuarios, comisiones y consultar información global.</p></section>
+
+      <section className="card owner-password-card">
+        <div className="owner-password-title"><KeyRound size={17}/><div><h3>Cambiar contraseña</h3><p>Confirma la actual y define una nueva.</p></div></div>
+        <form className="owner-password-form" onSubmit={changePassword}>
+          <label>Contraseña actual<input type="password" autoComplete="current-password" value={currentPassword} onChange={(e)=>setCurrentPassword(e.target.value)} required /></label>
+          <label>Nueva contraseña<input type="password" autoComplete="new-password" value={newPassword} onChange={(e)=>setNewPassword(e.target.value)} minLength={10} required /><small>Mínimo 10 caracteres, con mayúscula, minúscula y número.</small></label>
+          <label>Confirmar contraseña<input type="password" autoComplete="new-password" value={confirmPassword} onChange={(e)=>setConfirmPassword(e.target.value)} minLength={10} required /></label>
+          {error && <div className="error-banner">{error}</div>}
+          {message && <div className="success-banner">{message}</div>}
+          <button className="primary" type="submit" disabled={saving}>{saving ? "Guardando…" : "Actualizar contraseña"}</button>
+        </form>
+        <details className="profile-recovery">
+          <summary>¿Olvidaste tu contraseña?</summary>
+          <p>Desde la carpeta de instalación del servidor, ejecuta este comando para generar una clave temporal:</p>
+          <code>docker compose exec api npm run recover:owner-password -- {user.username}</code>
+          <p>El comando muestra la clave una sola vez y cierra las sesiones existentes. Inicia sesión con ella y cámbiala aquí.</p>
+        </details>
+      </section>
     </div>
   );
 }
