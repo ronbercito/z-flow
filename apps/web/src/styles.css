@@ -2079,3 +2079,43 @@ tr:last-child td { border-bottom:0; }
   .user-earnings-grid,
   .user-detail-summary { grid-template-columns: 1fr; }
 }
+
+
+/* Manager activity stays readable without horizontal scrolling */
+.user-activity-table-wrap {
+  width: 100%;
+  overflow: visible;
+  border: 1px solid #edf1f5;
+  border-radius: 9px;
+  background: #fff;
+}
+.compact-user-table {
+  width: 100%;
+  min-width: 0 !important;
+  table-layout: fixed;
+}
+.compact-user-table th,
+.compact-user-table td {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  vertical-align: middle;
+}
+.compact-user-table th:nth-child(1),
+.compact-user-table td:nth-child(1) { width: 25%; }
+.compact-user-table th:nth-child(2),
+.compact-user-table td:nth-child(2) { width: 25%; }
+.compact-user-table th:nth-child(3),
+.compact-user-table td:nth-child(3) { width: 16%; }
+.compact-user-table th:nth-child(4),
+.compact-user-table td:nth-child(4) { width: 17%; }
+.compact-user-table th:nth-child(5),
+.compact-user-table td:nth-child(5) { width: 17%; }
+
+@media (max-width: 620px) {
+  .compact-user-table th,
+  .compact-user-table td {
+    font-size: 7.5px;
+    padding-left: 7px;
+    padding-right: 7px;
+  }
+}
