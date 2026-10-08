@@ -5,6 +5,7 @@ import { z } from "zod";
 import { db } from "./db.js";
 import { registerAdminRoutes } from "./admin.js";
 import { registerReportRoutes } from "./reports.js";
+import { ensureStage4Schema, registerStage4Routes } from "./stage4.js";
 import {
   backfillMissingReceipts,
   calculateCommissionShares,
@@ -495,10 +496,13 @@ app.post("/api/branches/:branchId/operations", async (request, reply) => {
   const body = parsedBody.data;
   const [settingsRows] = await db.query<any[]>(
     `SELECT bs.max_operation_amount, bs.commission_type, bs.commission_value,
-            bs.staff_share_pct, bs.partner_share_pct, b.code AS branch_code
+            bs.staff_share_pct, bs.partner_share_pct, b.code AS branch_code,
+            ss.require_cash_to_yape_reference
      FROM branch_settings bs
      JOIN branches b ON b.id = bs.branch_id
-     WHERE bs.branch_id = ? LIMIT 1`,
+     CROSS JOIN system_settings ss
+     WHERE bs.branch_id = ? AND ss.id = 1
+     LIMIT 1`,
     [branchId]
   );
 
@@ -518,6 +522,16 @@ app.post("/api/branches/:branchId/operations", async (request, reply) => {
   if (body.operationType === "YAPE_TO_CASH" && !body.referenceCode) {
     return reply.code(422).send({
       error: "El código/referencia es obligatorio para Yape → Efectivo"
+    });
+  }
+
+  if (
+    body.operationType === "CASH_TO_YAPE"
+    && Boolean(settings.require_cash_to_yape_reference)
+    && !body.referenceCode
+  ) {
+    return reply.code(422).send({
+      error: "El código/referencia también es obligatorio para Efectivo → Yape según la configuración general"
     });
   }
 
@@ -640,10 +654,12 @@ app.setErrorHandler((error, _request, reply) => {
 
 await ensureAuthSchema();
 await ensureBusinessSchema();
+await ensureStage4Schema();
 await bootstrapUsersIfEmpty(app.log);
 await backfillMissingReceipts();
 await registerAdminRoutes(app);
 await registerReportRoutes(app);
+await registerStage4Routes(app);
 
 const port = Number(process.env.PORT ?? 3001);
 await app.listen({ host: "0.0.0.0", port });
