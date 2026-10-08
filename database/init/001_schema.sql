@@ -247,3 +247,20 @@ CREATE TABLE IF NOT EXISTS branch_partner_assignments (
   CONSTRAINT fk_branch_partner_branch FOREIGN KEY (branch_id) REFERENCES branches(id),
   CONSTRAINT fk_branch_partner_user FOREIGN KEY (user_id) REFERENCES users(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+CREATE TABLE IF NOT EXISTS operation_partner_shares (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  operation_id BIGINT UNSIGNED NOT NULL,
+  branch_id BIGINT UNSIGNED NOT NULL,
+  user_id BIGINT UNSIGNED NOT NULL,
+  pool_share_pct DECIMAL(5,2) NOT NULL,
+  amount DECIMAL(14,2) NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_operation_partner_share (operation_id, user_id),
+  KEY idx_partner_share_user (user_id, created_at),
+  CONSTRAINT fk_operation_partner_share_operation FOREIGN KEY (operation_id) REFERENCES operations(id),
+  CONSTRAINT fk_operation_partner_share_branch FOREIGN KEY (branch_id) REFERENCES branches(id),
+  CONSTRAINT fk_operation_partner_share_user FOREIGN KEY (user_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
