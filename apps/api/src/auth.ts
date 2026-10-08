@@ -158,6 +158,20 @@ export async function loginUser(
   const valid = user?.active === 1 && await bcrypt.compare(password, user?.password_hash ?? "$2b$12$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalid");
 
   if (!valid) {
+    await db.execute(
+      `INSERT INTO audit_logs
+       (branch_id, user_id, action, entity_type, entity_id, details, ip_address, user_agent)
+       VALUES (?, ?, 'LOGIN_FAILED', 'USER', ?, JSON_OBJECT('username', ?), ?, ?)`,
+      [
+        user?.branch_id ?? null,
+        user?.id ?? null,
+        user?.id ?? null,
+        normalized,
+        request.ip,
+        String(request.headers["user-agent"] ?? "").slice(0, 255)
+      ]
+    );
+
     const current = failedLogins.get(key) ?? { count: 0, blockedUntil: 0 };
     current.count += 1;
     if (current.count >= 5) {
@@ -211,10 +225,34 @@ export async function loginUser(
 export async function logoutUser(request: FastifyRequest, reply: FastifyReply) {
   const token = request.cookies[COOKIE_NAME];
   if (token) {
+    const [rows] = await db.query<any[]>(
+      `SELECT s.id, u.id AS user_id, u.branch_id
+       FROM auth_sessions s
+       JOIN users u ON u.id=s.user_id
+       WHERE s.token_hash=? LIMIT 1`,
+      [tokenHash(token)]
+    );
+
     await db.execute(
       "UPDATE auth_sessions SET revoked_at = NOW() WHERE token_hash = ? AND revoked_at IS NULL",
       [tokenHash(token)]
     );
+
+    if (rows.length) {
+      await db.execute(
+        `INSERT INTO audit_logs
+         (branch_id, user_id, action, entity_type, entity_id, details, ip_address, user_agent)
+         VALUES (?, ?, 'LOGOUT', 'AUTH_SESSION', ?, JSON_OBJECT('ip', ?), ?, ?)`,
+        [
+          rows[0].branch_id ?? null,
+          rows[0].user_id,
+          rows[0].id,
+          request.ip,
+          request.ip,
+          String(request.headers["user-agent"] ?? "").slice(0, 255)
+        ]
+      );
+    }
   }
 
   reply.clearCookie(COOKIE_NAME, {
