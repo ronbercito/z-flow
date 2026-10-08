@@ -217,9 +217,17 @@ export async function loginUser(
 
   await db.execute("UPDATE users SET last_login_at = NOW() WHERE id = ?", [user.id]);
   await db.execute(
-    `INSERT INTO audit_logs (branch_id, user_id, action, entity_type, entity_id, details)
-     VALUES (?, ?, 'LOGIN', 'USER', ?, JSON_OBJECT('ip', ?))`,
-    [user.branch_id ?? null, user.id, user.id, request.ip]
+    `INSERT INTO audit_logs
+      (branch_id, user_id, action, entity_type, entity_id, details, ip_address, user_agent)
+     VALUES (?, ?, 'LOGIN', 'USER', ?, JSON_OBJECT('ip', ?), ?, ?)`,
+    [
+      user.branch_id ?? null,
+      user.id,
+      user.id,
+      request.ip,
+      request.ip,
+      String(request.headers["user-agent"] ?? "").slice(0, 255)
+    ]
   );
 
   reply.setCookie(COOKIE_NAME, token, {
