@@ -2386,3 +2386,40 @@ tr:last-child td { border-bottom:0; }
   .cash-admin-branch-grid { grid-template-columns:1fr; max-height:260px; }
   .cash-picker.inline { flex-direction:column; align-items:stretch; }
 }
+
+
+/* Closure operation drill-down and invoice setup state */
+.cash-closure-table { min-width: 1180px; }
+.closure-actions { display:flex; flex-wrap:wrap; align-items:center; gap:5px; min-width:260px; }
+.closure-actions .mini-button { white-space:nowrap; }
+.closure-chevron { transition:transform .16s ease; }
+.closure-chevron.open { transform:rotate(180deg); }
+.closure-detail-row > td { padding:0 !important; background:#f7f9fc; }
+.closure-detail-panel { padding:16px; border-top:1px solid #e5ebf3; }
+.closure-detail-heading { display:flex; justify-content:space-between; gap:12px; align-items:center; margin:0 0 12px; color:#24344d; font-size:11px; }
+.closure-detail-heading > div { display:grid; gap:3px; }
+.closure-detail-heading span,.closure-detail-footer { color:#8291a5; font-size:9px; }
+.closure-operation-list { border:1px solid #e3eaf3; background:#fff; border-radius:9px; overflow:hidden; }
+.closure-operation-table { min-width:990px; }
+.closure-operation-table th,.closure-operation-table td { padding:9px 10px; }
+.closure-operation-table th { background:#f8fafc; }
+.closure-operation-table .operation-badge { display:inline-flex; padding:4px 7px; border-radius:20px; font-size:8px; font-weight:700; white-space:nowrap; }
+.closure-operation-table .operation-badge.purple { color:#6941c6; background:#f2edff; }
+.closure-operation-table .operation-badge.green { color:#087a55; background:#e9f8f1; }
+.closure-receipt-ref,.closure-event-reason { color:#8291a5; font-size:8px; }
+.closure-detail-footer { display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; padding:10px 12px; border-top:1px solid #e8edf4; }
+.closure-detail-message,.closure-detail-error { padding:16px; color:#718198; font-size:10px; }
+.closure-detail-error { color:#b42318; background:#fff5f4; border-radius:6px; }
+.closure-invoice-button { color:#5f45c4; border-color:#e5ddfb; }
+.closure-invoice-modal { width:min(520px,calc(100vw - 28px)); }
+.invoice-setup-notice { display:flex; gap:12px; padding:16px; border:1px solid #f0dfb4; background:#fffbeb; color:#8a5a08; border-radius:9px; }
+.invoice-setup-notice > div { display:grid; gap:5px; }
+.invoice-setup-notice strong { font-size:12px; }
+.invoice-setup-notice span { font-size:10px; line-height:1.5; }
+.invoice-closure-summary { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:14px; }
+.invoice-closure-summary span { display:grid; gap:5px; padding:12px; border:1px solid #e5ebf3; border-radius:8px; color:#718198; font-size:9px; }
+.invoice-closure-summary strong { color:#23324a; font-size:13px; }
+@media(max-width:760px) {
+  .closure-detail-heading { align-items:flex-start; flex-direction:column; }
+  .closure-detail-footer { flex-direction:column; }
+}
