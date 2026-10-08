@@ -153,23 +153,27 @@ export async function ensureStage4Schema() {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 
+  const allPermissionCodes = [
+    "GLOBAL_READ","GLOBAL_WRITE","BRANCH_READ","BRANCH_WRITE",
+    "USER_ADMIN","BRANCH_USER_ADMIN","AUDIT_READ","CANCEL_OPERATION"
+  ];
   const defaultPermissions: Record<string, string[]> = {
-    OWNER: ["GLOBAL_READ","GLOBAL_WRITE","BRANCH_READ","BRANCH_WRITE","USER_ADMIN","BRANCH_USER_ADMIN","AUDIT_READ","CANCEL_OPERATION"],
+    OWNER: allPermissionCodes,
     PARTNER: ["GLOBAL_READ","BRANCH_READ"],
     BRANCH_ADMIN: ["BRANCH_READ","BRANCH_WRITE","BRANCH_USER_ADMIN","CANCEL_OPERATION"],
     CASHIER: ["BRANCH_READ","BRANCH_WRITE","CANCEL_OPERATION"],
     AUDITOR: ["GLOBAL_READ","BRANCH_READ","AUDIT_READ"]
   };
 
-  for (const [roleCode, permissions] of Object.entries(defaultPermissions)) {
+  for (const [roleCode, enabledDefaults] of Object.entries(defaultPermissions)) {
     const [roleRows] = await db.query<any[]>("SELECT id FROM roles WHERE code=? LIMIT 1", [roleCode]);
     if (!roleRows.length) continue;
-    for (const permission of permissions) {
+    for (const permission of allPermissionCodes) {
       await db.execute(
         `INSERT INTO role_permissions (role_id,permission_code,enabled)
-         VALUES (?,?,1)
+         VALUES (?,?,?)
          ON DUPLICATE KEY UPDATE permission_code=VALUES(permission_code)`,
-        [roleRows[0].id, permission]
+        [roleRows[0].id, permission, enabledDefaults.includes(permission) ? 1 : 0]
       );
     }
   }
@@ -499,10 +503,12 @@ export async function registerStage4Routes(app: FastifyInstance) {
     const connection = await db.getConnection();
     try {
       await connection.beginTransaction();
-      await connection.execute("DELETE FROM role_permissions WHERE role_id=?", [roleId]);
+      await connection.execute("UPDATE role_permissions SET enabled=0 WHERE role_id=?", [roleId]);
       for (const permission of parsedBody.data.permissions) {
         await connection.execute(
-          "INSERT INTO role_permissions (role_id,permission_code,enabled) VALUES (?,?,1)",
+          `INSERT INTO role_permissions (role_id,permission_code,enabled)
+           VALUES (?,?,1)
+           ON DUPLICATE KEY UPDATE enabled=1`,
           [roleId, permission]
         );
       }
