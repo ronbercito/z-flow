@@ -1406,6 +1406,21 @@ function CreateBranchModal({ onClose, onCreated }: { onClose: () => void; onCrea
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
+  useEffect(() => {
+    void (async () => {
+      try {
+        const defaults = await api<SystemSettings>("/api/admin/system/settings");
+        setMaxAmount(String(defaults.defaultMaxOperationAmount));
+        setCommissionType(defaults.defaultCommissionType);
+        setCommission(String(defaults.defaultCommissionValue));
+        setStaffShare(defaults.defaultStaffSharePct == null ? "" : String(defaults.defaultStaffSharePct));
+        setPartnerShare(defaults.defaultPartnerSharePct == null ? "" : String(defaults.defaultPartnerSharePct));
+      } catch {
+        // Keep safe local defaults if general settings cannot be loaded.
+      }
+    })();
+  }, []);
+
   async function submit(event: FormEvent) {
     event.preventDefault(); setSaving(true); setError("");
     try {
