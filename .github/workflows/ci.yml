@@ -35,6 +35,10 @@ jobs:
 
   docker:
     runs-on: ubuntu-latest
+    env:
+      # Throwaway values for Compose interpolation in CI only.
+      DB_PASSWORD: ci-only-not-a-secret
+      DB_ROOT_PASSWORD: ci-only-root-not-a-secret
     steps:
       - uses: actions/checkout@v4
       - run: docker compose config
