@@ -3,6 +3,13 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
+if [ -f .env ]; then
+  set -a
+  # shellcheck disable=SC1091
+  source .env
+  set +a
+fi
+
 echo "=== Z-FLOW diagnóstico local ==="
 echo "Fecha: $(date -Is)"
 echo
@@ -11,6 +18,19 @@ uname -a
 echo
 echo "--- Disco ---"
 df -h /
+echo
+echo "--- Configuración sensible ---"
+if [ -f .env ]; then
+  PERMS="$(stat -c '%a' .env 2>/dev/null || true)"
+  echo ".env permisos: ${PERMS:-desconocidos}"
+  if grep -Eq 'change_this|zflow_local_change_me|root_local_change_me' .env; then
+    echo "ADVERTENCIA: se detectaron contraseñas de ejemplo en .env"
+  else
+    echo "Contraseñas de ejemplo: no detectadas"
+  fi
+else
+  echo "ADVERTENCIA: no existe .env"
+fi
 echo
 echo "--- Docker Compose ---"
 docker compose ps
