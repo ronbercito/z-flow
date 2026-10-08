@@ -15,6 +15,7 @@ export type AuthContext = {
   branchName: string | null;
   sessionId: number;
   permissions: string[];
+  accessibleBranchIds: number[];
 };
 
 const COOKIE_NAME = "zflow_session";
@@ -320,6 +321,20 @@ export async function requireAuth(
     return null;
   }
 
+  let accessibleBranchIds: number[] = [];
+  if (row.role_code === "PARTNER") {
+    const [partnerBranches] = await db.query<any[]>(
+      `SELECT branch_id
+       FROM branch_partner_assignments
+       WHERE user_id=? AND active=1
+       ORDER BY id`,
+      [row.user_id]
+    );
+    accessibleBranchIds = partnerBranches.map((item) => Number(item.branch_id));
+  } else if (row.branch_id != null) {
+    accessibleBranchIds = [Number(row.branch_id)];
+  }
+
   return {
     userId: Number(row.user_id),
     username: row.username,
@@ -329,11 +344,15 @@ export async function requireAuth(
     branchId: row.branch_id == null ? null : Number(row.branch_id),
     branchName: row.branch_name ?? null,
     sessionId: Number(row.session_id),
-    permissions: await permissionsForRoleFromDb(Number(row.role_id), row.role_code as RoleCode)
+    permissions: await permissionsForRoleFromDb(Number(row.role_id), row.role_code as RoleCode),
+    accessibleBranchIds
   };
 }
 
 export function canReadBranch(auth: AuthContext, branchId: number) {
+  if (auth.roleCode === "PARTNER") {
+    return auth.permissions.includes("BRANCH_READ") && auth.accessibleBranchIds.includes(branchId);
+  }
   if (auth.permissions.includes("GLOBAL_READ")) return true;
   return auth.permissions.includes("BRANCH_READ") && auth.branchId === branchId;
 }
@@ -361,10 +380,22 @@ export async function publicUserById(userId: number) {
 
   let defaultBranch = null;
   if (row.branch_id == null) {
-    const [branches] = await db.query<any[]>(
-      "SELECT id, code, name, address FROM branches WHERE active = 1 ORDER BY id LIMIT 1"
-    );
-    defaultBranch = branches[0] ?? null;
+    if (row.role_code === "PARTNER") {
+      const [branches] = await db.query<any[]>(`
+        SELECT b.id, b.code, b.name, b.address
+        FROM branch_partner_assignments a
+        JOIN branches b ON b.id=a.branch_id
+        WHERE a.user_id=? AND a.active=1 AND b.active=1
+        ORDER BY a.id
+        LIMIT 1
+      `, [userId]);
+      defaultBranch = branches[0] ?? null;
+    } else {
+      const [branches] = await db.query<any[]>(
+        "SELECT id, code, name, address FROM branches WHERE active = 1 ORDER BY id LIMIT 1"
+      );
+      defaultBranch = branches[0] ?? null;
+    }
   }
 
   return {
