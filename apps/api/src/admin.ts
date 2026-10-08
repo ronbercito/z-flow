@@ -18,15 +18,7 @@ const createBranchBody = z.object({
   address: z.string().trim().max(255).optional(),
   maxOperationAmount: z.coerce.number().positive().default(50),
   commissionType: z.enum(["FLAT", "PERCENT"]).default("FLAT"),
-  commissionValue: z.coerce.number().positive().default(1),
-  staffSharePct: z.coerce.number().min(0).max(100).nullable().optional(),
-  partnerSharePct: z.coerce.number().min(0).max(100).nullable().optional()
-}).superRefine((value, ctx) => {
-  if (value.staffSharePct != null && value.partnerSharePct != null) {
-    if (Math.abs(value.staffSharePct + value.partnerSharePct - 100) > 0.01) {
-      ctx.addIssue({ code: "custom", message: "El reparto encargado + socio debe sumar 100%" });
-    }
-  }
+  commissionValue: z.coerce.number().positive().default(1)
 });
 
 const updateBranchBody = z.object({
@@ -39,25 +31,12 @@ const updateBranchBody = z.object({
 const branchSettingsBody = z.object({
   maxOperationAmount: z.coerce.number().positive(),
   commissionType: z.enum(["FLAT", "PERCENT"]),
-  commissionValue: z.coerce.number().positive(),
-  staffSharePct: z.coerce.number().min(0).max(100).nullable().optional(),
-  partnerSharePct: z.coerce.number().min(0).max(100).nullable().optional()
-}).superRefine((value, ctx) => {
-  if (value.staffSharePct != null && value.partnerSharePct != null) {
-    const total = value.staffSharePct + value.partnerSharePct;
-    if (Math.abs(total - 100) > 0.01) {
-      ctx.addIssue({
-        code: "custom",
-        message: "El reparto encargado + socio debe sumar 100%"
-      });
-    }
-  }
+  commissionValue: z.coerce.number().positive()
 });
 
 const createUserBody = z.object({
-  branchId: z.coerce.number().int().positive().nullable().optional(),
-  partnerPoolSharePct: z.coerce.number().min(0).max(100).optional(),
-  roleCode: z.enum(["OWNER", "PARTNER", "BRANCH_ADMIN", "CASHIER", "AUDITOR"]),
+  branchId: z.coerce.number().int().positive(),
+  roleCode: z.literal("CASHIER"),
   username: z.string().trim().min(3).max(80).regex(/^[A-Za-z0-9._-]+$/),
   fullName: z.string().trim().min(3).max(140),
   password: z.string().min(10).max(200)
@@ -72,7 +51,7 @@ const toggleUserBody = z.object({
 
 const updateUserBody = z.object({
   branchId: z.coerce.number().int().positive().nullable().optional(),
-  roleCode: z.enum(["OWNER", "PARTNER", "BRANCH_ADMIN", "CASHIER", "AUDITOR"]),
+  roleCode: z.enum(["OWNER", "CASHIER"]),
   username: z.string().trim().min(3).max(80).regex(/^[A-Za-z0-9._-]+$/),
   fullName: z.string().trim().min(3).max(140),
   active: z.boolean()
@@ -426,8 +405,8 @@ export async function registerAdminRoutes(app: FastifyInstance) {
           body.maxOperationAmount,
           body.commissionType,
           body.commissionValue,
-          body.staffSharePct ?? null,
-          body.partnerSharePct ?? null
+          100,
+          0
         ]
       );
 
@@ -614,8 +593,8 @@ export async function registerAdminRoutes(app: FastifyInstance) {
         body.maxOperationAmount,
         body.commissionType,
         body.commissionValue,
-        body.staffSharePct ?? null,
-        body.partnerSharePct ?? null,
+        100,
+        0,
         branchId
       ]
     );
@@ -647,16 +626,12 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     const [rows] = await db.query<any[]>(`
       SELECT u.id, u.username, u.full_name, u.active, u.created_at, u.last_login_at,
              r.code AS role_code, r.name AS role_name,
-             b.id AS branch_id, b.name AS branch_name,
-             GROUP_CONCAT(DISTINCT CASE WHEN bpa.active=1 THEN pb.name END ORDER BY pb.name SEPARATOR ', ') AS partner_branches
+             b.id AS branch_id, b.name AS branch_name
       FROM users u
       JOIN roles r ON r.id = u.role_id
       LEFT JOIN branches b ON b.id = u.branch_id
-      LEFT JOIN branch_partner_assignments bpa ON bpa.user_id=u.id
-      LEFT JOIN branches pb ON pb.id=bpa.branch_id
-      GROUP BY u.id, u.username, u.full_name, u.active, u.created_at, u.last_login_at,
-               r.code, r.name, b.id, b.name
-      ORDER BY u.active DESC, u.full_name
+      WHERE r.code IN ('OWNER','CASHIER')
+      ORDER BY CASE WHEN r.code='OWNER' THEN 0 ELSE 1 END, u.active DESC, u.full_name
     `);
 
     return { users: rows };
@@ -672,68 +647,41 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     }
 
     const body = parsed.data;
-    const requiresBranch = ["BRANCH_ADMIN", "CASHIER", "PARTNER"].includes(body.roleCode);
-    if (requiresBranch && !body.branchId) {
-      return reply.code(400).send({
-        error: body.roleCode === "PARTNER"
-          ? "Selecciona la filial inicial del socio"
-          : "Ese rol requiere una filial asignada"
+
+    const [branchRows] = await db.query<any[]>(
+      "SELECT id, name FROM branches WHERE id=? AND active=1 LIMIT 1",
+      [body.branchId]
+    );
+    if (!branchRows.length) {
+      return reply.code(400).send({ error: "Filial inválida o inactiva" });
+    }
+
+    const [existingRows] = await db.query<any[]>(`
+      SELECT u.id, u.full_name
+      FROM users u
+      JOIN roles r ON r.id=u.role_id
+      WHERE u.branch_id=? AND u.active=1 AND r.code='CASHIER'
+      LIMIT 1
+    `, [body.branchId]);
+    if (existingRows.length) {
+      return reply.code(409).send({
+        error: `${branchRows[0].name} ya tiene un encargado activo: ${existingRows[0].full_name}`
       });
     }
 
     const [roleRows] = await db.query<any[]>(
-      "SELECT id FROM roles WHERE code = ? LIMIT 1",
-      [body.roleCode]
+      "SELECT id FROM roles WHERE code='CASHIER' LIMIT 1"
     );
-    if (!roleRows.length) {
-      return reply.code(400).send({ error: "Rol inválido" });
-    }
-
-    if (body.branchId) {
-      const [branchRows] = await db.query<any[]>(
-        "SELECT id FROM branches WHERE id = ? AND active = 1 LIMIT 1",
-        [body.branchId]
-      );
-      if (!branchRows.length) {
-        return reply.code(400).send({ error: "Filial inválida o inactiva" });
-      }
-    }
-
-    const partnerShare = body.roleCode === "PARTNER"
-      ? Number(body.partnerPoolSharePct ?? 100)
-      : null;
-
-    if (body.roleCode === "PARTNER" && body.branchId) {
-      const [shareRows] = await db.query<any[]>(
-        `SELECT COALESCE(SUM(pool_share_pct),0) AS total
-         FROM branch_partner_assignments
-         WHERE branch_id=? AND active=1`,
-        [body.branchId]
-      );
-      const used = Number(shareRows[0]?.total ?? 0);
-      if (used + Number(partnerShare ?? 0) > 100.01) {
-        const available = Math.max(0, Math.round((100 - used) * 100) / 100);
-        return reply.code(422).send({
-          error: `Esa filial ya tiene ${used.toFixed(2)}% asignado a socios. Disponible: ${available.toFixed(2)}%`
-        });
-      }
-    }
+    if (!roleRows.length) return reply.code(500).send({ error: "No existe el rol Cajero / Encargado" });
 
     const passwordHash = await bcrypt.hash(body.password, 12);
-    const connection = await db.getConnection();
 
     try {
-      await connection.beginTransaction();
-
-      const userBranchId = ["BRANCH_ADMIN", "CASHIER"].includes(body.roleCode)
-        ? body.branchId ?? null
-        : null;
-
-      const [result] = await connection.execute<any>(
+      const [result] = await db.execute<any>(
         `INSERT INTO users (branch_id, role_id, username, password_hash, full_name, active)
          VALUES (?, ?, ?, ?, ?, 1)`,
         [
-          userBranchId,
+          body.branchId,
           roleRows[0].id,
           body.username.toLowerCase(),
           passwordHash,
@@ -742,71 +690,92 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       );
 
       const userId = Number(result.insertId);
-
-      if (body.roleCode === "PARTNER" && body.branchId) {
-        await connection.execute(
-          `INSERT INTO branch_partner_assignments
-            (branch_id, user_id, pool_share_pct, active)
-           VALUES (?, ?, ?, 1)`,
-          [body.branchId, userId, partnerShare]
-        );
-      }
-
-      await connection.execute(
+      await db.execute(
         `INSERT INTO audit_logs
           (branch_id, user_id, action, entity_type, entity_id, details, ip_address, user_agent)
          VALUES (?, ?, 'USER_CREATED', 'USER', ?,
-           JSON_OBJECT('username', ?, 'role', ?, 'partner_branch_id', ?, 'partner_pool_share_pct', ?),
-           ?, ?)`,
+           JSON_OBJECT('username', ?, 'role', 'CASHIER'), ?, ?)`,
         [
-          body.branchId ?? null,
+          body.branchId,
           auth.userId,
           userId,
           body.username.toLowerCase(),
-          body.roleCode,
-          body.roleCode === "PARTNER" ? body.branchId ?? null : null,
-          body.roleCode === "PARTNER" ? partnerShare : null,
           request.ip,
           String(request.headers["user-agent"] ?? "").slice(0, 255)
         ]
       );
 
-      if (body.roleCode === "PARTNER" && body.branchId) {
-        await connection.execute(
-          `INSERT INTO audit_logs
-            (branch_id, user_id, action, entity_type, entity_id, details, ip_address, user_agent)
-           VALUES (?, ?, 'PARTNER_ASSIGNMENT_UPDATED', 'USER', ?,
-             JSON_OBJECT('poolSharePct', ?, 'active', true, 'createdWithUser', true),
-             ?, ?)`,
-          [
-            body.branchId,
-            auth.userId,
-            userId,
-            partnerShare,
-            request.ip,
-            String(request.headers["user-agent"] ?? "").slice(0, 255)
-          ]
-        );
-      }
-
-      await connection.commit();
-
-      return reply.code(201).send({
-        id: userId,
-        ok: true,
-        partnerAssignmentCreated: body.roleCode === "PARTNER",
-        partnerBranchId: body.roleCode === "PARTNER" ? body.branchId ?? null : null,
-        partnerPoolSharePct: body.roleCode === "PARTNER" ? partnerShare : null
-      });
+      return reply.code(201).send({ id: userId, ok: true });
     } catch (error: any) {
-      await connection.rollback();
       if (error?.code === "ER_DUP_ENTRY") {
         return reply.code(409).send({ error: "Ese nombre de usuario ya existe" });
       }
       throw error;
-    } finally {
-      connection.release();
     }
+  });
+
+  app.get("/api/admin/users/:userId/detail", async (request, reply) => {
+    const auth = await requireOwner(request, reply);
+    if (!auth) return;
+
+    const parsed = userParams.safeParse(request.params);
+    if (!parsed.success) return reply.code(400).send({ error: "Usuario inválido" });
+
+    const [userRows] = await db.query<any[]>(`
+      SELECT u.id, u.username, u.full_name, u.active, u.created_at, u.last_login_at,
+             r.code AS role_code, r.name AS role_name,
+             b.id AS branch_id, b.name AS branch_name
+      FROM users u
+      JOIN roles r ON r.id=u.role_id
+      LEFT JOIN branches b ON b.id=u.branch_id
+      WHERE u.id=? AND r.code IN ('OWNER','CASHIER')
+      LIMIT 1
+    `, [parsed.data.userId]);
+
+    if (!userRows.length) return reply.code(404).send({ error: "Usuario no encontrado" });
+
+    const [summaryRows] = await db.query<any[]>(`
+      SELECT
+        COUNT(CASE WHEN o.status='COMPLETED' THEN 1 END) AS operations_total,
+        COUNT(CASE WHEN o.status='COMPLETED' AND DATE(o.created_at)=CURDATE() THEN 1 END) AS operations_today,
+        COALESCE(SUM(CASE WHEN o.status='COMPLETED' THEN o.commission ELSE 0 END),0) AS earnings_total,
+        COALESCE(SUM(CASE WHEN o.status='COMPLETED' AND DATE(o.created_at)=CURDATE() THEN o.commission ELSE 0 END),0) AS earnings_today,
+        COALESCE(SUM(CASE WHEN o.status='CANCELLED' THEN 1 ELSE 0 END),0) AS cancelled_total
+      FROM operations o
+      WHERE o.user_id=?
+    `, [parsed.data.userId]);
+
+    const [cashRows] = await db.query<any[]>(`
+      SELECT id, status, initial_cash, initial_wallet,
+             DATE_FORMAT(started_at, '%Y-%m-%dT%H:%i:%s') AS started_at
+      FROM cash_sessions
+      WHERE user_id=? AND status='OPEN'
+      ORDER BY started_at DESC
+      LIMIT 1
+    `, [parsed.data.userId]);
+
+    const [recentRows] = await db.query<any[]>(`
+      SELECT o.id, o.operation_type, o.reference_code, o.amount, o.commission, o.net_amount,
+             o.status, DATE_FORMAT(o.created_at, '%Y-%m-%dT%H:%i:%s') AS created_at
+      FROM operations o
+      WHERE o.user_id=?
+      ORDER BY o.created_at DESC
+      LIMIT 8
+    `, [parsed.data.userId]);
+
+    const summary = summaryRows[0] ?? {};
+    return {
+      user: userRows[0],
+      metrics: {
+        operationsToday: num(summary.operations_today),
+        operationsTotal: num(summary.operations_total),
+        earningsToday: money(summary.earnings_today),
+        earningsTotal: money(summary.earnings_total),
+        cancelledTotal: num(summary.cancelled_total)
+      },
+      openCash: cashRows[0] ?? null,
+      recentOperations: recentRows
+    };
   });
 
   app.post("/api/admin/users/:userId/update", async (request, reply) => {
@@ -826,26 +795,37 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: "No puedes quitar tu propio acceso de propietario" });
     }
 
-    const branchRoles = ["BRANCH_ADMIN", "CASHIER"];
-    if (branchRoles.includes(body.roleCode) && !body.branchId) {
-      return reply.code(400).send({ error: "Ese rol requiere una filial asignada" });
+    if (body.roleCode === "CASHIER" && !body.branchId) {
+      return reply.code(400).send({ error: "Selecciona la filial del encargado" });
     }
 
-    const [roleRows] = await db.query<any[]>("SELECT id FROM roles WHERE code = ? LIMIT 1", [body.roleCode]);
+    if (body.roleCode === "CASHIER" && body.active && body.branchId) {
+      const [existingRows] = await db.query<any[]>(`
+        SELECT u.id, u.full_name
+        FROM users u
+        JOIN roles r ON r.id=u.role_id
+        WHERE u.branch_id=? AND u.active=1 AND r.code='CASHIER' AND u.id<>?
+        LIMIT 1
+      `, [body.branchId, userId]);
+      if (existingRows.length) {
+        return reply.code(409).send({
+          error: `Esa filial ya tiene un encargado activo: ${existingRows[0].full_name}`
+        });
+      }
+    }
+
+    const [roleRows] = await db.query<any[]>("SELECT id FROM roles WHERE code=? LIMIT 1", [body.roleCode]);
     if (!roleRows.length) return reply.code(400).send({ error: "Rol inválido" });
 
-    if (body.branchId) {
-      const [branchRows] = await db.query<any[]>("SELECT id FROM branches WHERE id = ? LIMIT 1", [body.branchId]);
-      if (!branchRows.length) return reply.code(400).send({ error: "Filial inválida" });
-    }
+    const targetBranch = body.roleCode === "CASHIER" ? body.branchId ?? null : null;
 
     try {
       const [result] = await db.execute<any>(
         `UPDATE users
-         SET branch_id = ?, role_id = ?, username = ?, full_name = ?, active = ?
-         WHERE id = ?`,
+         SET branch_id=?, role_id=?, username=?, full_name=?, active=?
+         WHERE id=?`,
         [
-          branchRoles.includes(body.roleCode) ? body.branchId ?? null : null,
+          targetBranch,
           roleRows[0].id,
           body.username.toLowerCase(),
           body.fullName,
@@ -857,13 +837,24 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       if (!result.affectedRows) return reply.code(404).send({ error: "Usuario no encontrado" });
 
       if (!body.active) {
-        await db.execute("UPDATE auth_sessions SET revoked_at = NOW() WHERE user_id = ? AND revoked_at IS NULL", [userId]);
+        await db.execute("UPDATE auth_sessions SET revoked_at=NOW() WHERE user_id=? AND revoked_at IS NULL", [userId]);
       }
 
       await db.execute(
-        `INSERT INTO audit_logs (branch_id, user_id, action, entity_type, entity_id, details)
-         VALUES (?, ?, 'USER_UPDATED', 'USER', ?, JSON_OBJECT('username', ?, 'role', ?, 'active', ?))`,
-        [branchRoles.includes(body.roleCode) ? body.branchId ?? null : null, auth.userId, userId, body.username.toLowerCase(), body.roleCode, body.active]
+        `INSERT INTO audit_logs
+          (branch_id, user_id, action, entity_type, entity_id, details, ip_address, user_agent)
+         VALUES (?, ?, 'USER_UPDATED', 'USER', ?,
+           JSON_OBJECT('username', ?, 'role', ?, 'active', ?), ?, ?)`,
+        [
+          targetBranch,
+          auth.userId,
+          userId,
+          body.username.toLowerCase(),
+          body.roleCode,
+          body.active,
+          request.ip,
+          String(request.headers["user-agent"] ?? "").slice(0,255)
+        ]
       );
 
       return { ok: true };
@@ -909,6 +900,30 @@ export async function registerAdminRoutes(app: FastifyInstance) {
 
     if (parsedParams.data.userId === auth.userId && !parsedBody.data.active) {
       return reply.code(400).send({ error: "No puedes desactivar tu propia cuenta" });
+    }
+
+    if (parsedBody.data.active) {
+      const [targetRows] = await db.query<any[]>(`
+        SELECT u.branch_id, r.code AS role_code
+        FROM users u
+        JOIN roles r ON r.id=u.role_id
+        WHERE u.id=? LIMIT 1
+      `, [parsedParams.data.userId]);
+      const target = targetRows[0];
+      if (target?.role_code === "CASHIER" && target.branch_id) {
+        const [existingRows] = await db.query<any[]>(`
+          SELECT u.id, u.full_name
+          FROM users u
+          JOIN roles r ON r.id=u.role_id
+          WHERE u.branch_id=? AND u.active=1 AND r.code='CASHIER' AND u.id<>?
+          LIMIT 1
+        `, [target.branch_id, parsedParams.data.userId]);
+        if (existingRows.length) {
+          return reply.code(409).send({
+            error: `Esa filial ya tiene un encargado activo: ${existingRows[0].full_name}`
+          });
+        }
+      }
     }
 
     await db.execute(
