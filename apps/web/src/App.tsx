@@ -547,7 +547,7 @@ function LoginScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
           <p>Cada empleado entra únicamente a la filial y funciones autorizadas para su cuenta.</p>
           <div className="login-feature"><Check size={16} /><span>Sesiones protegidas con cookie HttpOnly</span></div>
           <div className="login-feature"><Check size={16} /><span>Contraseñas almacenadas con hash seguro</span></div>
-          <div className="login-feature"><Check size={16} /><span>El backend bloquea accesos a otras filiales</span></div>
+          <div className="login-feature"><Check size={16} /><span>El servidor bloquea accesos a otras filiales</span></div>
           <small>Entorno local · acceso por IP</small>
         </aside>
       </div>
