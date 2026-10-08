@@ -108,6 +108,25 @@ type BranchFinancialReport = {
   };
 };
 
+type ClosurePreview = {
+  sessionId: number;
+  assignedUserId: number | null;
+  assignedTo: string | null;
+  startedAt: string;
+  initialCash: number;
+  initialWallet: number;
+  operationCount: number;
+  commissionTotal: number;
+  staffShareTotal: number;
+  partnerShareTotal: number;
+  yapeReceived: number;
+  cashDelivered: number;
+  cashReceived: number;
+  yapeSent: number;
+  expectedCash: number;
+  expectedWallet: number;
+};
+
 const sidebar: Array<{ page: Page; label: string; icon: typeof Home }> = [
   { page: "home", label: "Inicio", icon: Home },
   { page: "operations", label: "Operaciones", icon: ReceiptText },
@@ -439,7 +458,7 @@ function App() {
           )}
 
           {page === "close" && (
-            <ClosePage dashboard={dashboard} onClose={() => setCloseCashModal(true)} onOpen={() => setOpenCashModal(true)} />
+            <ClosePage branchId={branchId} dashboard={dashboard} onClose={() => setCloseCashModal(true)} onOpen={() => setOpenCashModal(true)} />
           )}
 
           {page === "receipts" && <ReceiptsPage branchId={branchId} operations={operations} onReceipt={setReceipt} />}
@@ -784,7 +803,28 @@ function CashPage({
   );
 }
 
-function ClosePage({ dashboard, onClose, onOpen }: { dashboard: Dashboard | null; onClose: () => void; onOpen: () => void }) {
+function ClosePage({ branchId, dashboard, onClose, onOpen }: { branchId: number; dashboard: Dashboard | null; onClose: () => void; onOpen: () => void }) {
+  const [preview, setPreview] = useState<ClosurePreview | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!dashboard?.session) {
+      setPreview(null);
+      return;
+    }
+    void (async () => {
+      try {
+        setError("");
+        const response = await fetch(`/api/branches/${branchId}/cash/close-preview`, { credentials: "same-origin" });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error ?? "No se pudo calcular el cierre");
+        setPreview(result);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "No se pudo calcular el cierre");
+      }
+    })();
+  }, [branchId, dashboard?.session?.id]);
+
   if (!dashboard?.session) {
     return (
       <section className="card empty-page">
@@ -799,19 +839,30 @@ function ClosePage({ dashboard, onClose, onOpen }: { dashboard: Dashboard | null
   return (
     <div className="detail-grid">
       <section className="card large-panel">
-        <div className="panel-title"><ClipboardCheck size={22} /><div><h2>Resumen para cierre</h2><p>Valores calculados automáticamente</p></div></div>
-        <div className="cash-status">
-          <div><span>Caja esperada</span><strong>{currency(dashboard.metrics.cashCurrent)}</strong></div>
-          <div><span>Yape esperado</span><strong>{currency(dashboard.metrics.walletCurrent)}</strong></div>
-          <div><span>Operaciones</span><strong>{dashboard.metrics.operationsToday}</strong></div>
-          <div><span>Comisión</span><strong>{currency(dashboard.metrics.commissionTotal)}</strong></div>
-        </div>
-        <div className="scope-banner compact"><Scale size={18} /><div><strong>El sistema comparará estos montos con lo que declares.</strong><span>Si existe una diferencia quedará guardada en el cierre.</span></div></div>
+        <div className="panel-title"><ClipboardCheck size={22} /><div><h2>Resumen para cierre</h2><p>Conciliación calculada sobre el turno abierto</p></div></div>
+        {error && <div className="modal-error">{error}</div>}
+        {!preview ? <div className="owner-loading">Calculando cierre…</div> : <>
+          <div className="cash-status closure-preview-grid">
+            <div><span>Efectivo esperado</span><strong>{currency(preview.expectedCash)}</strong></div>
+            <div><span>Yape esperado</span><strong>{currency(preview.expectedWallet)}</strong></div>
+            <div><span>Operaciones del turno</span><strong>{preview.operationCount}</strong></div>
+            <div><span>Comisión total</span><strong>{currency(preview.commissionTotal)}</strong></div>
+            <div><span>Parte encargado</span><strong>{currency(preview.staffShareTotal)}</strong></div>
+            <div><span>Parte socio</span><strong>{currency(preview.partnerShareTotal)}</strong></div>
+          </div>
+          <div className="closure-turn-info">
+            <div><span>Responsable actual</span><strong>{preview.assignedTo ?? "—"}</strong></div>
+            <div><span>Turno iniciado</span><strong>{formatDate(preview.startedAt)}</strong></div>
+            <div><span>Efectivo inicial</span><strong>{currency(preview.initialCash)}</strong></div>
+            <div><span>Yape inicial</span><strong>{currency(preview.initialWallet)}</strong></div>
+          </div>
+          <div className="scope-banner compact"><Scale size={18} /><div><strong>El sistema comparará estos montos con lo declarado.</strong><span>Si hay faltante o sobrante, la observación será obligatoria y quedará registrada.</span></div></div>
+        </>}
       </section>
       <section className="card action-panel">
         <h3>Finalizar turno</h3>
         <p>Cuenta el efectivo y confirma el saldo de Yape antes de continuar.</p>
-        <button className="soft danger full" onClick={onClose}><LockKeyhole size={17} /> Iniciar cierre</button>
+        <button className="soft danger full" onClick={onClose} disabled={!preview}><LockKeyhole size={17} /> Iniciar cierre</button>
       </section>
     </div>
   );
@@ -1191,29 +1242,61 @@ function OpenCashModal({ branchId, onClose, onOpened }: { branchId: number; onCl
 }
 
 function CloseCashModal({ branchId, dashboard, onClose, onClosed }: { branchId: number; dashboard: Dashboard; onClose: () => void; onClosed: () => void }) {
-  const [cash, setCash] = useState(String(dashboard.metrics.cashCurrent));
-  const [wallet, setWallet] = useState(String(dashboard.metrics.walletCurrent));
+  const [preview, setPreview] = useState<ClosurePreview | null>(null);
+  const [cash, setCash] = useState("");
+  const [wallet, setWallet] = useState("");
   const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<null | {
+    closureId: number;
+    resultType: "BALANCED" | "SHORTAGE" | "SURPLUS" | "MIXED";
     expectedCash: number; declaredCash: number; differenceCash: number;
     expectedWallet: number; declaredWallet: number; differenceWallet: number;
     operationCount: number; commissionTotal: number; staffShareTotal: number; partnerShareTotal: number;
+    assignedTo: string | null; notes: string | null;
   }>(null);
 
-  const cashDiff = Number(cash || 0) - dashboard.metrics.cashCurrent;
-  const walletDiff = Number(wallet || 0) - dashboard.metrics.walletCurrent;
+  useEffect(() => {
+    void (async () => {
+      try {
+        const response = await fetch(`/api/branches/${branchId}/cash/close-preview`, { credentials: "same-origin" });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error ?? "No se pudo preparar el cierre");
+        setPreview(data);
+        setCash(String(data.expectedCash));
+        setWallet(String(data.expectedWallet));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "No se pudo preparar el cierre");
+      }
+    })();
+  }, [branchId, dashboard.session?.id]);
+
+  const expectedCash = preview?.expectedCash ?? dashboard.metrics.cashCurrent;
+  const expectedWallet = preview?.expectedWallet ?? dashboard.metrics.walletCurrent;
+  const cashDiff = Number(cash || 0) - expectedCash;
+  const walletDiff = Number(wallet || 0) - expectedWallet;
+  const hasDifference = Math.abs(cashDiff) >= 0.005 || Math.abs(walletDiff) >= 0.005;
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (!preview) return;
+    if (hasDifference && notes.trim().length < 5) {
+      setError("Cuando existe una diferencia debes escribir una observación de al menos 5 caracteres.");
+      return;
+    }
     setSaving(true);
     setError("");
     try {
       const response = await fetch(`/api/branches/${branchId}/cash/close`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ declaredCash: Number(cash || 0), declaredWallet: Number(wallet || 0), notes: notes || undefined })
+        credentials: "same-origin",
+        body: JSON.stringify({
+          declaredCash: Number(cash || 0),
+          declaredWallet: Number(wallet || 0),
+          notes: notes.trim() || undefined
+        })
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "No se pudo cerrar la caja");
@@ -1225,20 +1308,46 @@ function CloseCashModal({ branchId, dashboard, onClose, onClosed }: { branchId: 
     }
   }
 
+  function resultLabel(type: "BALANCED" | "SHORTAGE" | "SURPLUS" | "MIXED") {
+    if (type === "BALANCED") return "Caja cuadrada";
+    if (type === "SHORTAGE") return "Faltante detectado";
+    if (type === "SURPLUS") return "Sobrante detectado";
+    return "Diferencias mixtas";
+  }
+
   if (result) {
+    const balanced = result.resultType === "BALANCED";
     return (
       <div className="modal-backdrop">
         <div className="modal closure-result-modal">
-          <div className="closure-success"><Check size={24}/><div><h2>Caja cerrada correctamente</h2><p>El cierre quedó registrado y ya no admite nuevas operaciones en este turno.</p></div></div>
+          <div className={balanced ? "closure-success" : "closure-result-warning"}>
+            {balanced ? <Check size={24}/> : <Scale size={24}/>}
+            <div><h2>{balanced ? "Caja cerrada correctamente" : "Caja cerrada con diferencia"}</h2><p>{resultLabel(result.resultType)}. El cierre quedó registrado en la bitácora.</p></div>
+          </div>
+
+          <div className="closure-result-status">
+            <span>Resultado</span><strong className={balanced ? "green-text" : "red-text"}>{resultLabel(result.resultType)}</strong>
+          </div>
+
           <div className="closure-result-grid">
             <div><span>Operaciones</span><strong>{result.operationCount}</strong></div>
             <div><span>Comisión total</span><strong>{currency(result.commissionTotal)}</strong></div>
             <div><span>Parte encargado</span><strong>{currency(result.staffShareTotal)}</strong></div>
             <div><span>Parte socio</span><strong>{currency(result.partnerShareTotal)}</strong></div>
-            <div><span>Diferencia efectivo</span><strong className={result.differenceCash===0?"green-text":"red-text"}>{currency(result.differenceCash)}</strong></div>
-            <div><span>Diferencia Yape</span><strong className={result.differenceWallet===0?"green-text":"red-text"}>{currency(result.differenceWallet)}</strong></div>
+            <div><span>Efectivo esperado</span><strong>{currency(result.expectedCash)}</strong></div>
+            <div><span>Efectivo declarado</span><strong>{currency(result.declaredCash)}</strong></div>
+            <div><span>Diferencia efectivo</span><strong className={Math.abs(result.differenceCash)<0.005?"green-text":"red-text"}>{currency(result.differenceCash)}</strong></div>
+            <div><span>Yape esperado</span><strong>{currency(result.expectedWallet)}</strong></div>
+            <div><span>Yape declarado</span><strong>{currency(result.declaredWallet)}</strong></div>
+            <div><span>Diferencia Yape</span><strong className={Math.abs(result.differenceWallet)<0.005?"green-text":"red-text"}>{currency(result.differenceWallet)}</strong></div>
           </div>
-          <div className="modal-actions"><button className="primary" onClick={onClosed}>Finalizar cierre</button></div>
+
+          {result.notes && <div className="closure-result-note"><span>Observación</span><strong>{result.notes}</strong></div>}
+
+          <div className="modal-actions">
+            <button className="soft" onClick={() => window.open(`/api/branches/${branchId}/closures/${result.closureId}/pdf`, "_blank")}><Download size={15}/> Descargar PDF</button>
+            <button className="primary" onClick={onClosed}>Finalizar cierre</button>
+          </div>
         </div>
       </div>
     );
@@ -1246,22 +1355,35 @@ function CloseCashModal({ branchId, dashboard, onClose, onClosed }: { branchId: 
 
   return (
     <div className="modal-backdrop">
-      <form className="modal" onSubmit={submit}>
-        <div className="modal-head"><div><h2>Cierre de caja</h2><p>Ingresa lo que realmente tienes al finalizar.</p></div><button type="button" className="icon-btn" onClick={onClose}><X size={19} /></button></div>
-        <div className="calculation">
-          <div><span>Efectivo esperado</span><strong>{currency(dashboard.metrics.cashCurrent)}</strong></div>
-          <div><span>Yape esperado</span><strong>{currency(dashboard.metrics.walletCurrent)}</strong></div>
-          <div><span>Operaciones de hoy</span><strong>{dashboard.metrics.operationsToday}</strong></div>
-          <div><span>Comisión acumulada</span><strong>{currency(dashboard.metrics.commissionTotal)}</strong></div>
-        </div>
-        <div className="field-grid">
-          <label>Efectivo declarado<div className="input-prefix"><span>S/</span><input value={cash} onChange={(e) => setCash(e.target.value)} inputMode="decimal" required /></div><small>Diferencia: {currency(cashDiff)}</small></label>
-          <label>Yape declarado<div className="input-prefix"><span>S/</span><input value={wallet} onChange={(e) => setWallet(e.target.value)} inputMode="decimal" required /></div><small>Diferencia: {currency(walletDiff)}</small></label>
-        </div>
-        <label>Observación<input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Opcional" /></label>
-        <div className="closure-warning"><LockKeyhole size={16}/><span>Al confirmar, el turno quedará cerrado. Para registrar nuevas operaciones será necesario abrir una nueva caja.</span></div>
+      <form className="modal closure-modal" onSubmit={submit}>
+        <div className="modal-head"><div><h2>Cierre de caja</h2><p>Ingresa lo que realmente tienes al finalizar el turno.</p></div><button type="button" className="icon-btn" onClick={onClose}><X size={19} /></button></div>
+
+        {!preview ? <div className="owner-loading">Preparando cierre…</div> : <>
+          <div className="calculation closure-calculation">
+            <div><span>Efectivo esperado</span><strong>{currency(preview.expectedCash)}</strong></div>
+            <div><span>Yape esperado</span><strong>{currency(preview.expectedWallet)}</strong></div>
+            <div><span>Operaciones del turno</span><strong>{preview.operationCount}</strong></div>
+            <div><span>Comisión acumulada</span><strong>{currency(preview.commissionTotal)}</strong></div>
+            <div><span>Parte encargado</span><strong>{currency(preview.staffShareTotal)}</strong></div>
+            <div><span>Parte socio</span><strong>{currency(preview.partnerShareTotal)}</strong></div>
+          </div>
+
+          <div className="field-grid">
+            <label>Efectivo declarado<div className="input-prefix"><span>S/</span><input value={cash} onChange={(e) => setCash(e.target.value)} inputMode="decimal" required /></div><small className={Math.abs(cashDiff)<0.005?"green-text":"red-text"}>Diferencia: {currency(cashDiff)}</small></label>
+            <label>Yape declarado<div className="input-prefix"><span>S/</span><input value={wallet} onChange={(e) => setWallet(e.target.value)} inputMode="decimal" required /></div><small className={Math.abs(walletDiff)<0.005?"green-text":"red-text"}>Diferencia: {currency(walletDiff)}</small></label>
+          </div>
+
+          <div className={hasDifference ? "closure-difference-alert" : "closure-balanced-alert"}>
+            <Scale size={17}/>
+            <div><strong>{hasDifference ? "Existe una diferencia" : "Los montos cuadran"}</strong><span>{hasDifference ? "Debes indicar el motivo antes de confirmar el cierre." : "No se detectan diferencias con los valores esperados."}</span></div>
+          </div>
+
+          <label>Observación{hasDifference && <span className="required-mark"> · obligatoria</span>}<input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder={hasDifference ? "Ej. faltante por sencillo, ajuste pendiente…" : "Opcional"} required={hasDifference} /></label>
+          <div className="closure-warning"><LockKeyhole size={16}/><span>Al confirmar, el turno quedará cerrado. Para registrar nuevas operaciones será necesario abrir una nueva caja.</span></div>
+        </>}
+
         {error && <div className="modal-error">{error}</div>}
-        <div className="modal-actions"><button type="button" className="ghost-button" onClick={onClose}>Cancelar</button><button className="soft danger" disabled={saving}>{saving ? "Cerrando…" : "Confirmar cierre"}</button></div>
+        <div className="modal-actions"><button type="button" className="ghost-button" onClick={onClose}>Cancelar</button><button className="soft danger" disabled={saving || !preview}>{saving ? "Cerrando…" : "Confirmar cierre"}</button></div>
       </form>
     </div>
   );
