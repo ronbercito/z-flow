@@ -25,14 +25,14 @@ TEST_DB="zflow_restore_check_$(date +%s)"
 TABLES=(branches users operations daily_closures receipts)
 
 cleanup() {
-  docker compose exec -T db sh -c 'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" -e "DROP DATABASE IF EXISTS `'"$TEST_DB"'`;"' >/dev/null 2>&1 || true
+  docker compose exec -T db sh -c 'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" -e "DROP DATABASE IF EXISTS \`$1\`;"' sh "$TEST_DB" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
 db_count() {
   local database="$1"
   local table="$2"
-  docker compose exec -T db sh -c 'mariadb -N -uroot -p"$MARIADB_ROOT_PASSWORD" "'"$database"'" -e "SELECT COUNT(*) FROM '"$table"';"' | tr -d '\r'
+  docker compose exec -T db sh -c 'mariadb -N -uroot -p"$MARIADB_ROOT_PASSWORD" "$1" -e "SELECT COUNT(*) FROM $2;"' sh "$database" "$table" | tr -d '\r'
 }
 
 echo "=== Z-FLOW prueba de restauración no destructiva ==="
@@ -52,11 +52,11 @@ for table in "${TABLES[@]}"; do
 done
 
 echo "[3/5] Creando base temporal"
-docker compose exec -T db sh -c 'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" -e "CREATE DATABASE `'"$TEST_DB"'` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"'
+docker compose exec -T db sh -c 'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" -e "CREATE DATABASE \`$1\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"' sh "$TEST_DB"
 
 echo "[4/5] Restaurando backup en la base temporal"
 gunzip -c "$BACKUP_FILE" \
-  | docker compose exec -T db sh -c 'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" "'"$TEST_DB"'"'
+  | docker compose exec -T db sh -c 'exec mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" "$1"' sh "$TEST_DB"
 
 echo "[5/5] Comparando producción vs. restauración"
 FAILED=0
