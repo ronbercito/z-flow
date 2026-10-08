@@ -105,6 +105,7 @@ CREATE TABLE IF NOT EXISTS daily_closures (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   branch_id BIGINT UNSIGNED NOT NULL,
   cash_session_id BIGINT UNSIGNED NOT NULL,
+  closed_by_user_id BIGINT UNSIGNED NULL,
   operation_count INT UNSIGNED NOT NULL DEFAULT 0,
   commission_total DECIMAL(14,2) NOT NULL DEFAULT 0,
   staff_share_total DECIMAL(14,2) NOT NULL DEFAULT 0,
@@ -119,7 +120,8 @@ CREATE TABLE IF NOT EXISTS daily_closures (
   closed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   CONSTRAINT fk_daily_closures_branch FOREIGN KEY (branch_id) REFERENCES branches(id),
-  CONSTRAINT fk_daily_closures_session FOREIGN KEY (cash_session_id) REFERENCES cash_sessions(id)
+  CONSTRAINT fk_daily_closures_session FOREIGN KEY (cash_session_id) REFERENCES cash_sessions(id),
+  CONSTRAINT fk_daily_closures_closed_by FOREIGN KEY (closed_by_user_id) REFERENCES users(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS audit_logs (
