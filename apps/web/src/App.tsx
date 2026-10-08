@@ -119,6 +119,7 @@ type ClosurePreview = {
   commissionTotal: number;
   staffShareTotal: number;
   partnerShareTotal: number;
+  unassignedCommission: number;
   yapeReceived: number;
   cashDelivered: number;
   cashReceived: number;
@@ -845,10 +846,12 @@ function ClosePage({ branchId, dashboard, onClose, onOpen }: { branchId: number;
           <div className="cash-status closure-preview-grid">
             <div><span>Efectivo esperado</span><strong>{currency(preview.expectedCash)}</strong></div>
             <div><span>Yape esperado</span><strong>{currency(preview.expectedWallet)}</strong></div>
-            <div><span>Operaciones del turno</span><strong>{preview.operationCount}</strong></div>
+            <div><span>Operaciones</span><strong>{preview.operationCount}</strong></div>
             <div><span>Comisión total</span><strong>{currency(preview.commissionTotal)}</strong></div>
-            <div><span>Parte encargado</span><strong>{currency(preview.staffShareTotal)}</strong></div>
-            <div><span>Parte socio</span><strong>{currency(preview.partnerShareTotal)}</strong></div>
+          </div>
+          <div className="commission-split-summary">
+            <span>Reparto de comisión</span>
+            <strong>Encargado {currency(preview.staffShareTotal)} · Socio {currency(preview.partnerShareTotal)}{preview.unassignedCommission > 0 ? ` · Pendiente ${currency(preview.unassignedCommission)}` : ""}</strong>
           </div>
           <div className="closure-turn-info">
             <div><span>Responsable actual</span><strong>{preview.assignedTo ?? "—"}</strong></div>
@@ -1253,7 +1256,7 @@ function CloseCashModal({ branchId, dashboard, onClose, onClosed }: { branchId: 
     resultType: "BALANCED" | "SHORTAGE" | "SURPLUS" | "MIXED";
     expectedCash: number; declaredCash: number; differenceCash: number;
     expectedWallet: number; declaredWallet: number; differenceWallet: number;
-    operationCount: number; commissionTotal: number; staffShareTotal: number; partnerShareTotal: number;
+    operationCount: number; commissionTotal: number; staffShareTotal: number; partnerShareTotal: number; unassignedCommission: number;
     assignedTo: string | null; notes: string | null;
   }>(null);
 
@@ -1329,17 +1332,22 @@ function CloseCashModal({ branchId, dashboard, onClose, onClosed }: { branchId: 
             <span>Resultado</span><strong className={balanced ? "green-text" : "red-text"}>{resultLabel(result.resultType)}</strong>
           </div>
 
-          <div className="closure-result-grid">
+          <div className="closure-result-grid simple">
             <div><span>Operaciones</span><strong>{result.operationCount}</strong></div>
             <div><span>Comisión total</span><strong>{currency(result.commissionTotal)}</strong></div>
-            <div><span>Parte encargado</span><strong>{currency(result.staffShareTotal)}</strong></div>
-            <div><span>Parte socio</span><strong>{currency(result.partnerShareTotal)}</strong></div>
-            <div><span>Efectivo esperado</span><strong>{currency(result.expectedCash)}</strong></div>
-            <div><span>Efectivo declarado</span><strong>{currency(result.declaredCash)}</strong></div>
             <div><span>Diferencia efectivo</span><strong className={Math.abs(result.differenceCash)<0.005?"green-text":"red-text"}>{currency(result.differenceCash)}</strong></div>
-            <div><span>Yape esperado</span><strong>{currency(result.expectedWallet)}</strong></div>
-            <div><span>Yape declarado</span><strong>{currency(result.declaredWallet)}</strong></div>
             <div><span>Diferencia Yape</span><strong className={Math.abs(result.differenceWallet)<0.005?"green-text":"red-text"}>{currency(result.differenceWallet)}</strong></div>
+          </div>
+
+          <div className="closure-compact-details">
+            <div>
+              <span>Conciliación</span>
+              <strong>Efectivo {currency(result.declaredCash)} de {currency(result.expectedCash)} · Yape {currency(result.declaredWallet)} de {currency(result.expectedWallet)}</strong>
+            </div>
+            <div>
+              <span>Reparto de comisión</span>
+              <strong>Encargado {currency(result.staffShareTotal)} · Socio {currency(result.partnerShareTotal)}{result.unassignedCommission > 0 ? ` · Pendiente ${currency(result.unassignedCommission)}` : ""}</strong>
+            </div>
           </div>
 
           {result.notes && <div className="closure-result-note"><span>Observación</span><strong>{result.notes}</strong></div>}
@@ -1362,10 +1370,12 @@ function CloseCashModal({ branchId, dashboard, onClose, onClosed }: { branchId: 
           <div className="calculation closure-calculation">
             <div><span>Efectivo esperado</span><strong>{currency(preview.expectedCash)}</strong></div>
             <div><span>Yape esperado</span><strong>{currency(preview.expectedWallet)}</strong></div>
-            <div><span>Operaciones del turno</span><strong>{preview.operationCount}</strong></div>
-            <div><span>Comisión acumulada</span><strong>{currency(preview.commissionTotal)}</strong></div>
-            <div><span>Parte encargado</span><strong>{currency(preview.staffShareTotal)}</strong></div>
-            <div><span>Parte socio</span><strong>{currency(preview.partnerShareTotal)}</strong></div>
+            <div><span>Operaciones</span><strong>{preview.operationCount}</strong></div>
+            <div><span>Comisión</span><strong>{currency(preview.commissionTotal)}</strong></div>
+          </div>
+          <div className="commission-split-summary">
+            <span>Reparto de comisión</span>
+            <strong>Encargado {currency(preview.staffShareTotal)} · Socio {currency(preview.partnerShareTotal)}{preview.unassignedCommission > 0 ? ` · Pendiente ${currency(preview.unassignedCommission)}` : ""}</strong>
           </div>
 
           <div className="field-grid">
