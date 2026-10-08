@@ -602,7 +602,7 @@ function HomePage({
       {canWrite && <div className="quick-actions">
         <button className="quick yape" onClick={() => onNewOperation("YAPE_TO_CASH")}><Smartphone size={20} /><div><strong>Yape → Efectivo</strong><span>Registrar recepción Yape</span></div><ChevronRight size={17} /></button>
         <button className="quick cash" onClick={() => onNewOperation("CASH_TO_YAPE")}><Send size={20} /><div><strong>Efectivo → Yape</strong><span>Registrar envío Yape</span></div><ChevronRight size={17} /></button>
-      </div>
+      </div>}
 
       <div className="kpi-grid">
         <Kpi icon={<ReceiptText />} tone="blue" label="Operaciones hoy" value={String(dashboard?.metrics.operationsToday ?? 0)} hint="Actividad de hoy" />
@@ -700,7 +700,7 @@ function OperationsPage({
       {canCreate && <div className="quick-actions">
         <button className="quick yape" onClick={() => onNewOperation("YAPE_TO_CASH")}><Smartphone size={20} /><div><strong>Yape → Efectivo</strong><span>Cliente paga por Yape</span></div><Plus size={17} /></button>
         <button className="quick cash" onClick={() => onNewOperation("CASH_TO_YAPE")}><Send size={20} /><div><strong>Efectivo → Yape</strong><span>Cliente entrega efectivo</span></div><Plus size={17} /></button>
-      </div>
+      </div>}
       <section className="card page-card">
         <div className="card-head">
           <div><strong>Historial de operaciones</strong><span>{filtered.length} registros cargados</span></div>
