@@ -75,7 +75,7 @@
 - [x] Separación de datos y ganancias entre filiales
 - [x] Anulación con motivo y registro en auditoría
 - [x] Aislamiento propietario / Cajero-Encargado por filial
-- [ ] Reverso de propietario sobre una operación ya cerrada
+- [x] Reverso de propietario sobre una operación ya cerrada
 - [ ] Prueba multiusuario simultánea entre filiales
 - [x] Prueba no destructiva de backup y restauración
 - [x] Prueba de reinicio del LXC y arranque automático
