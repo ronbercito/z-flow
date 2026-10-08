@@ -16,7 +16,7 @@
 - [x] Gestión de filiales
 - [x] Usuarios y roles
 - [x] Configuración de comisiones
-- [x] Reparto encargado/socio
+- [x] Comisión completa para el encargado de filial
 - [x] Reportes y exportaciones PDF/Excel
 - [x] Auditoría administrativa inicial
 
@@ -24,8 +24,8 @@
 - [x] Reportes por rango de fechas
 - [x] Exportación PDF
 - [x] Exportación Excel
-- [x] Reparto histórico encargado/socio guardado por operación
-- [x] Cierre diario con totales de comisión y reparto
+- [x] Ganancia histórica del encargado calculada por sus operaciones
+- [x] Cierre diario con comisión del encargado y conciliación
 - [x] Comprobante interno correlativo y PDF 80 mm
 - [x] Backup local y restauración
 - [x] Backup local automático diario
@@ -35,7 +35,7 @@
 ## Fase 2.1
 - [x] Ficha detallada por filial
 - [x] Edición de datos y estado de filial
-- [x] Configuración completa de comisión y reparto desde la ficha
+- [x] Configuración de límite y comisión desde la ficha
 - [x] Administración y edición de usuarios
 - [x] Restablecimiento de contraseña de usuarios
 - [x] Historial de operaciones por filial
@@ -53,10 +53,9 @@
 - [x] Anulación de operaciones durante turno abierto con motivo
 - [x] Reverso de propietario para correcciones posteriores
 - [x] Bloqueo de edición de operaciones cerradas
-- [x] Cambio de encargado sin cerrar la caja
-- [x] Varios encargados por filial
-- [x] Asignación de socios por filial
-- [x] Distribución histórica individual de ganancia de socios
+- [x] Un solo Cajero / Encargado activo por filial
+- [x] Detalle del encargado con ganancias y actividad
+- [x] Eliminación del módulo de socios del flujo operativo
 - [x] Permisos configurables por rol con validación en backend
 - [x] Gestión y cierre remoto de sesiones
 - [x] Auditoría de login fallido, logout, IP y agente de usuario
