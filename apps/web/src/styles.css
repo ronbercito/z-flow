@@ -2218,3 +2218,19 @@ tr:last-child td { border-bottom:0; }
 .report-register-note, .report-register-limit { padding:9px 13px; color:#8290a3; font-size:9px; line-height:1.45; border-top:1px solid #f0f3f7; }
 .report-register-limit { color:#946917; background:#fffaf0; }
 @media (max-width:760px) { .report-register-heading { align-items:flex-start; flex-direction:column; } }
+
+.report-branch-select {
+  width: 100%;
+  border: 0;
+  border-radius: 9px;
+  padding: 8px;
+  margin: -8px 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.report-branch-select:hover { background: #f7faff; }
+.report-branch-select.selected { background: #f2f7ff; }
+.report-branch-select:focus-visible { outline: 2px solid #6ea3ee; outline-offset: 2px; }
