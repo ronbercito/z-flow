@@ -67,6 +67,7 @@ type Dashboard = {
     yapeReceived: number;
     cashDelivered: number;
     commissionTotal: number;
+    sessionCommissionTotal: number;
     cashCurrent: number;
     walletCurrent: number;
     cashDifference: number;
@@ -731,7 +732,7 @@ function CashPage({
           <div><span>Estado</span><strong className={dashboard?.session ? "green-text" : "red-text"}>{dashboard?.session ? "ABIERTA" : "CERRADA"}</strong></div>
           <div><span>Efectivo actual</span><strong>{currency(dashboard?.metrics.cashCurrent)}</strong></div>
           <div><span>Saldo Yape</span><strong>{currency(dashboard?.metrics.walletCurrent)}</strong></div>
-          <div><span>Ganancia del turno</span><strong>{currency(dashboard?.metrics.commissionTotal)}</strong></div>
+          <div><span>Ganancia del turno</span><strong>{currency(dashboard?.metrics.sessionCommissionTotal)}</strong></div>
         </div>
         {dashboard?.session ? (
           <div className="info-box">
