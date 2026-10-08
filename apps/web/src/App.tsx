@@ -138,6 +138,22 @@ function formatDate(value: string) {
   });
 }
 
+
+function operationStatusLabel(status: string) {
+  if (status === "COMPLETED") return "Completada";
+  if (status === "IN_PROGRESS") return "En proceso";
+  if (status === "CANCELLED") return "Anulada";
+  if (status === "REVERSED") return "Revertida";
+  return status;
+}
+
+function operationStatusClass(status: string) {
+  if (status === "COMPLETED") return "ok";
+  if (status === "CANCELLED") return "cancelled";
+  if (status === "REVERSED") return "reversed";
+  return "pending";
+}
+
 function App() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
@@ -1000,7 +1016,7 @@ function OperationsTable({ operations, onReceipt, onCancel }: { operations: Oper
               <td>{currency(op.amount)}</td>
               <td>{currency(op.commission)}</td>
               <td>{currency(op.net_amount)}</td>
-              <td><span className={`status ${op.status === "COMPLETED" ? "ok" : "pending"}`}><i />{op.status === "COMPLETED" ? "Completada" : "En proceso"}</span></td>
+              <td><span className={`status ${operationStatusClass(op.status)}`}><i />{operationStatusLabel(op.status)}</span></td>
               {(onReceipt || onCancel) && <td><div className="inline-actions">{onReceipt && <button className="mini-button" onClick={() => onReceipt(op)}><ReceiptText size={13} /> Ver</button>}{onCancel && op.status === "COMPLETED" && <button className="mini-button danger-mini" onClick={() => void onCancel(op)}>Anular</button>}</div></td>}
             </tr>
           ))}
