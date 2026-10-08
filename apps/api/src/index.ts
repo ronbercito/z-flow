@@ -634,24 +634,60 @@ app.post("/api/branches/:branchId/operations", async (request, reply) => {
     });
   }
 
-  const [sessionRows] = await db.query<any[]>(
-    `SELECT id FROM cash_sessions
-     WHERE branch_id = ? AND status = 'OPEN'
-     ORDER BY started_at DESC LIMIT 1`,
-    [branchId]
-  );
-
-  if (!sessionRows.length) {
-    return reply.code(409).send({
-      error: "Debes abrir la caja antes de registrar operaciones"
-    });
-  }
-
   const managerEarning = commission;
 
   const connection = await db.getConnection();
   try {
     await connection.beginTransaction();
+
+    // Serialize operations for this open session so two simultaneous requests
+    // cannot spend the same cash or Yape balance.
+    const [sessionRows] = await connection.execute<any[]>(
+      `SELECT id, initial_cash, initial_wallet FROM cash_sessions
+       WHERE branch_id = ? AND status = 'OPEN'
+       ORDER BY started_at DESC LIMIT 1 FOR UPDATE`,
+      [branchId]
+    );
+
+    if (!sessionRows.length) {
+      await connection.rollback();
+      return reply.code(409).send({
+        error: "Debes abrir la caja antes de registrar operaciones"
+      });
+    }
+
+    const session = sessionRows[0];
+    const [balanceRows] = await connection.execute<any[]>(
+      `SELECT
+         COALESCE(SUM(CASE WHEN operation_type='CASH_TO_YAPE' AND status='COMPLETED' THEN amount ELSE 0 END), 0) AS cash_received,
+         COALESCE(SUM(CASE WHEN operation_type='YAPE_TO_CASH' AND status='COMPLETED' THEN net_amount ELSE 0 END), 0) AS cash_delivered,
+         COALESCE(SUM(CASE WHEN operation_type='YAPE_TO_CASH' AND status='COMPLETED' THEN amount ELSE 0 END), 0) AS yape_received,
+         COALESCE(SUM(CASE WHEN operation_type='CASH_TO_YAPE' AND status='COMPLETED' THEN net_amount ELSE 0 END), 0) AS yape_sent
+       FROM operations WHERE branch_id = ? AND cash_session_id = ?`,
+      [branchId, session.id]
+    );
+
+    const balances = balanceRows[0] ?? {};
+    const availableCash = money(
+      Number(session.initial_cash) + Number(balances.cash_received ?? 0) - Number(balances.cash_delivered ?? 0)
+    );
+    const availableWallet = money(
+      Number(session.initial_wallet) + Number(balances.yape_received ?? 0) - Number(balances.yape_sent ?? 0)
+    );
+
+    if (body.operationType === "YAPE_TO_CASH" && availableCash < netAmount) {
+      await connection.rollback();
+      return reply.code(422).send({
+        error: `Efectivo insuficiente en caja. Disponible: S/ ${availableCash.toFixed(2)}`
+      });
+    }
+
+    if (body.operationType === "CASH_TO_YAPE" && availableWallet < netAmount) {
+      await connection.rollback();
+      return reply.code(422).send({
+        error: `Saldo Yape insuficiente. Disponible: S/ ${availableWallet.toFixed(2)}`
+      });
+    }
 
     const [result] = await connection.execute<any>(
       `INSERT INTO operations
@@ -661,7 +697,7 @@ app.post("/api/branches/:branchId/operations", async (request, reply) => {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'COMPLETED')`,
       [
         branchId,
-        sessionRows[0].id,
+        session.id,
         auth.userId,
         body.operationType,
         body.referenceCode ?? null,
@@ -747,3 +783,4 @@ await registerStage4Routes(app);
 
 const port = Number(process.env.PORT ?? 3001);
 await app.listen({ host: "0.0.0.0", port });
+
