@@ -203,6 +203,7 @@ type SystemSettings = {
   ruc: string | null;
   address: string | null;
   phone: string | null;
+  logoDataUrl: string | null;
   currencyCode: string;
   timezoneName: string;
   ticketFooter: string | null;
@@ -1209,6 +1210,26 @@ function SystemSettingsPage() {
             <label>RUC<input value={form.ruc ?? ""} onChange={(e)=>setForm({...form,ruc:e.target.value || null})} placeholder="Opcional" /></label>
             <label>Teléfono<input value={form.phone ?? ""} onChange={(e)=>setForm({...form,phone:e.target.value || null})} placeholder="Opcional" /></label>
           </div>
+          <label>Logo del negocio
+            <div className="logo-upload-row">
+              <div className="business-logo-preview">{form.logoDataUrl ? <img src={form.logoDataUrl} alt="Logo" /> : <Store size={22}/>}</div>
+              <div>
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg"
+                  onChange={(e)=>{
+                    const file=e.target.files?.[0];
+                    if(!file) return;
+                    if(file.size>2_000_000){ setError("El logo no debe superar 2 MB."); return; }
+                    const reader=new FileReader();
+                    reader.onload=()=>setForm({...form,logoDataUrl:String(reader.result)});
+                    reader.readAsDataURL(file);
+                  }}
+                />
+                {form.logoDataUrl && <button type="button" className="mini-button danger-mini" onClick={()=>setForm({...form,logoDataUrl:null})}>Quitar logo</button>}
+              </div>
+            </div>
+          </label>
           <label>Dirección<input value={form.address ?? ""} onChange={(e)=>setForm({...form,address:e.target.value || null})} placeholder="Dirección principal" /></label>
           <div className="field-grid">
             <label>Moneda<select value={form.currencyCode} onChange={(e)=>setForm({...form,currencyCode:e.target.value})}><option value="PEN">Soles (PEN)</option><option value="USD">Dólares (USD)</option></select></label>
