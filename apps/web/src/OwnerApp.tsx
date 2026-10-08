@@ -239,8 +239,6 @@ type SystemSettings = {
   defaultMaxOperationAmount: number;
   defaultCommissionType: "FLAT" | "PERCENT";
   defaultCommissionValue: number;
-  defaultStaffSharePct: number | null;
-  defaultPartnerSharePct: number | null;
   requireCashToYapeReference: boolean;
   allowCashierCancel: boolean;
   updatedAt: string;
@@ -1545,56 +1543,60 @@ function CreateBranchModal({ onClose, onCreated }: { onClose: () => void; onCrea
   </form></div>;
 }
 
-function CreateUserModal({ branches, onClose, onCreated }: { branches: Branch[]; onClose: () => void; onCreated: () => void }) {
-  const [role, setRole] = useState("CASHIER");
-  const [branchId, setBranchId] = useState(branches[0] ? String(branches[0].id) : "");
-  const [partnerShare, setPartnerShare] = useState("100");
+function CreateUserModal({ branches, users, onClose, onCreated }: { branches: Branch[]; users: AdminUser[]; onClose: () => void; onCreated: () => void }) {
+  const occupiedBranchIds = new Set(
+    users.filter((item) => item.role_code==="CASHIER" && Boolean(item.active) && item.branch_id != null).map((item) => Number(item.branch_id))
+  );
+  const firstAvailable = branches.find((branch) => !occupiedBranchIds.has(branch.id));
+  const [branchId, setBranchId] = useState(firstAvailable ? String(firstAvailable.id) : "");
   const [fullName, setFullName] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
-  const needsBranch = ["CASHIER", "BRANCH_ADMIN", "PARTNER"].includes(role);
-  const isPartner = role === "PARTNER";
 
   async function submit(event: FormEvent) {
     event.preventDefault(); setSaving(true); setError("");
     try {
-      const result = await api<{ partnerAssignmentCreated?: boolean }>("/api/admin/users", {
+      await api("/api/admin/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          roleCode: role,
-          branchId: needsBranch ? Number(branchId) : null,
-          partnerPoolSharePct: isPartner ? Number(partnerShare) : undefined,
+          roleCode: "CASHIER",
+          branchId: Number(branchId),
           fullName,
           username,
           password
         })
       });
-      void result;
       onCreated();
-    } catch (err) { setError(err instanceof Error ? err.message : "No se pudo crear el usuario"); }
-    finally { setSaving(false); }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo crear el encargado");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return <div className="modal-backdrop"><form className="modal" onSubmit={submit}>
-    <div className="modal-head"><div><h2>Nuevo usuario</h2><p>{isPartner ? "Crea el socio y asígnalo a una filial en un solo paso." : "Asigna rol, filial y credenciales."}</p></div><button type="button" className="icon-btn" onClick={onClose}><X size={18}/></button></div>
-    <div className="field-grid"><label>Nombre completo<input value={fullName} onChange={(e)=>setFullName(e.target.value)} required /></label><label>Usuario<input value={username} onChange={(e)=>setUsername(e.target.value)} required /></label></div>
+    <div className="modal-head"><div><h2>Nuevo encargado</h2><p>Crea la cuenta responsable de una filial.</p></div><button type="button" className="icon-btn" onClick={onClose}><X size={18}/></button></div>
     <div className="field-grid">
-      <label>Rol<select value={role} onChange={(e)=>setRole(e.target.value)}><option value="CASHIER">Cajero / Encargado</option><option value="BRANCH_ADMIN">Administrador de filial</option><option value="PARTNER">Socio</option><option value="AUDITOR">Auditor</option><option value="OWNER">Propietario</option></select></label>
-      <label>{isPartner ? "Filial del socio" : "Filial"}<select value={branchId} onChange={(e)=>setBranchId(e.target.value)} disabled={!needsBranch}>{needsBranch ? branches.map((b)=><option value={b.id} key={b.id}>{b.name}</option>) : <option value="">Acceso global</option>}</select></label>
+      <label>Nombre completo<input value={fullName} onChange={(e)=>setFullName(e.target.value)} required /></label>
+      <label>Nombre de la cuenta<input value={username} onChange={(e)=>setUsername(e.target.value)} required /></label>
     </div>
-    {isPartner && <div className="partner-create-inline">
-      <label>Participación del reparto de socios
-        <div className="input-suffix"><input type="number" min="0" max="100" step="0.01" value={partnerShare} onChange={(e)=>setPartnerShare(e.target.value)} required /><span>%</span></div>
-        <small>Normalmente 100% si es el único socio de la filial.</small>
-      </label>
-      <div className="friendly-info"><Landmark size={16}/><span>Al crear el usuario, Z-FLOW también lo registrará automáticamente como socio de esta filial.</span></div>
-    </div>}
+    <div className="field-grid">
+      <label>Rol<select value="CASHIER" disabled><option value="CASHIER">Cajero / Encargado</option></select></label>
+      <label>Filial<select value={branchId} onChange={(e)=>setBranchId(e.target.value)} required>
+        <option value="">Selecciona una filial</option>
+        {branches.map((branch)=><option key={branch.id} value={branch.id} disabled={occupiedBranchIds.has(branch.id)}>{branch.name}{occupiedBranchIds.has(branch.id)?" · ya tiene encargado":""}</option>)}
+      </select></label>
+    </div>
     <label>Contraseña temporal<input type="password" value={password} onChange={(e)=>setPassword(e.target.value)} placeholder="Mín. 10 caracteres, mayúscula, minúscula y número" required /></label>
+    {!firstAvailable && <div className="friendly-info"><UserCog size={16}/><span>Todas las filiales activas ya tienen un encargado.</span></div>}
     {error && <div className="modal-error">{error}</div>}
-    <div className="modal-actions"><button type="button" className="ghost-button" onClick={onClose}>Cancelar</button><button className="primary" disabled={saving}>{saving ? "Creando…" : isPartner ? "Crear socio" : "Crear usuario"}</button></div>
+    <div className="modal-actions">
+      <button type="button" className="ghost-button" onClick={onClose}>Cancelar</button>
+      <button className="primary" disabled={saving || !branchId}>{saving ? "Creando…" : "Crear encargado"}</button>
+    </div>
   </form></div>;
 }
 
@@ -1602,8 +1604,6 @@ function BranchSettingsModal({ branch, onClose, onSaved }: { branch: Branch; onC
   const [maxAmount, setMaxAmount] = useState(String(branch.settings.maxOperationAmount));
   const [commissionType, setCommissionType] = useState<"FLAT" | "PERCENT">(branch.settings.commissionType);
   const [commissionValue, setCommissionValue] = useState(String(branch.settings.commissionValue));
-  const [staffShare, setStaffShare] = useState(branch.settings.staffSharePct == null ? "" : String(branch.settings.staffSharePct));
-  const [partnerShare, setPartnerShare] = useState(branch.settings.partnerSharePct == null ? "" : String(branch.settings.partnerSharePct));
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -1616,42 +1616,49 @@ function BranchSettingsModal({ branch, onClose, onSaved }: { branch: Branch; onC
         body: JSON.stringify({
           maxOperationAmount: Number(maxAmount),
           commissionType,
-          commissionValue: Number(commissionValue),
-          staffSharePct: staffShare === "" ? null : Number(staffShare),
-          partnerSharePct: partnerShare === "" ? null : Number(partnerShare)
+          commissionValue: Number(commissionValue)
         })
       });
       onSaved();
-    } catch (err) { setError(err instanceof Error ? err.message : "No se pudo guardar"); }
-    finally { setSaving(false); }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo guardar");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return <div className="modal-backdrop"><form className="modal" onSubmit={submit}>
-    <div className="modal-head"><div><h2>Configurar {branch.name}</h2><p>Reglas de operación, comisión y reparto.</p></div><button type="button" className="icon-btn" onClick={onClose}><X size={18}/></button></div>
-    <div className="field-grid"><label>Límite por operación<div className="input-prefix"><span>S/</span><input value={maxAmount} onChange={(e)=>setMaxAmount(e.target.value)} required /></div></label><label>Tipo de comisión<select value={commissionType} onChange={(e)=>setCommissionType(e.target.value as "FLAT"|"PERCENT")}><option value="FLAT">Monto fijo</option><option value="PERCENT">Porcentaje</option></select></label></div>
-    <label>Valor de comisión<div className="input-prefix"><span>{commissionType === "FLAT" ? "S/" : "%"}</span><input value={commissionValue} onChange={(e)=>setCommissionValue(e.target.value)} required /></div></label>
-    <div className="field-grid"><label>% Encargado<input value={staffShare} onChange={(e)=>setStaffShare(e.target.value)} placeholder="Ej. 30" /></label><label>% Socio<input value={partnerShare} onChange={(e)=>setPartnerShare(e.target.value)} placeholder="Ej. 70" /></label></div>
-    <small>Si defines ambos porcentajes, deben sumar 100%.</small>
+    <div className="modal-head"><div><h2>Configurar {branch.name}</h2><p>Límite y comisión de la filial.</p></div><button type="button" className="icon-btn" onClick={onClose}><X size={18}/></button></div>
+    <div className="field-grid">
+      <label>Límite por operación<div className="input-prefix"><span>S/</span><input value={maxAmount} onChange={(e)=>setMaxAmount(e.target.value)} required /></div></label>
+      <label>Tipo de comisión<select value={commissionType} onChange={(e)=>setCommissionType(e.target.value as "FLAT"|"PERCENT")}><option value="FLAT">Monto fijo</option><option value="PERCENT">Porcentaje</option></select></label>
+    </div>
+    <label>Comisión del encargado<div className="input-prefix"><span>{commissionType === "FLAT" ? "S/" : "%"}</span><input value={commissionValue} onChange={(e)=>setCommissionValue(e.target.value)} required /></div><small>La comisión generada pertenece al encargado de la filial.</small></label>
     {error && <div className="modal-error">{error}</div>}
     <div className="modal-actions"><button type="button" className="ghost-button" onClick={onClose}>Cancelar</button><button className="primary" disabled={saving}>{saving ? "Guardando…" : "Guardar cambios"}</button></div>
   </form></div>;
 }
 
-
 function EditUserModal({
   user,
   branches,
+  users,
   currentUserId,
   onClose,
   onSaved
 }: {
   user: AdminUser;
   branches: Branch[];
+  users: AdminUser[];
   currentUserId: number;
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [role, setRole] = useState(user.role_code);
+  const isOwner = user.role_code === "OWNER";
+  const isSelf = user.id === currentUserId;
+  const occupiedBranchIds = new Set(
+    users.filter((item)=>item.id!==user.id && item.role_code==="CASHIER" && Boolean(item.active) && item.branch_id!=null).map((item)=>Number(item.branch_id))
+  );
   const [branchId, setBranchId] = useState(user.branch_id ? String(user.branch_id) : "");
   const [fullName, setFullName] = useState(user.full_name);
   const [username, setUsername] = useState(user.username);
@@ -1660,8 +1667,6 @@ function EditUserModal({
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
-  const needsBranch = ["CASHIER", "BRANCH_ADMIN"].includes(role);
-  const isSelf = user.id === currentUserId;
 
   async function save(event: FormEvent) {
     event.preventDefault();
@@ -1671,17 +1676,17 @@ function EditUserModal({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          roleCode: role,
-          branchId: needsBranch ? Number(branchId) : null,
+          roleCode: isOwner ? "OWNER" : "CASHIER",
+          branchId: isOwner ? null : Number(branchId),
           fullName,
           username,
           active
         })
       });
-      setMessage("Usuario actualizado.");
+      setMessage("Cuenta actualizada.");
       await onSaved();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo actualizar el usuario");
+      setError(err instanceof Error ? err.message : "No se pudo actualizar la cuenta");
     } finally {
       setSaving(false);
     }
@@ -1705,11 +1710,14 @@ function EditUserModal({
   }
 
   return <div className="modal-backdrop"><form className="modal" onSubmit={save}>
-    <div className="modal-head"><div><h2>Editar usuario</h2><p>{user.full_name} · @{user.username}</p></div><button type="button" className="icon-btn" onClick={onClose}><X size={18}/></button></div>
-    <div className="field-grid"><label>Nombre completo<input value={fullName} onChange={(e)=>setFullName(e.target.value)} required /></label><label>Usuario<input value={username} onChange={(e)=>setUsername(e.target.value)} required /></label></div>
+    <div className="modal-head"><div><h2>Editar cuenta</h2><p>{user.full_name} · @{user.username}</p></div><button type="button" className="icon-btn" onClick={onClose}><X size={18}/></button></div>
     <div className="field-grid">
-      <label>Rol<select value={role} onChange={(e)=>setRole(e.target.value)} disabled={isSelf}><option value="CASHIER">Cajero / Encargado</option><option value="BRANCH_ADMIN">Administrador de filial</option><option value="PARTNER">Socio</option><option value="AUDITOR">Auditor</option><option value="OWNER">Propietario</option></select></label>
-      <label>Filial<select value={branchId} onChange={(e)=>setBranchId(e.target.value)} disabled={!needsBranch}>{needsBranch ? branches.map((b)=><option value={b.id} key={b.id}>{b.name}</option>) : <option value="">Acceso global</option>}</select></label>
+      <label>Nombre completo<input value={fullName} onChange={(e)=>setFullName(e.target.value)} required /></label>
+      <label>Nombre de la cuenta<input value={username} onChange={(e)=>setUsername(e.target.value)} required /></label>
+    </div>
+    <div className="field-grid">
+      <label>Rol<select value={isOwner?"OWNER":"CASHIER"} disabled><option value="OWNER">Propietario</option><option value="CASHIER">Cajero / Encargado</option></select></label>
+      <label>Filial<select value={branchId} onChange={(e)=>setBranchId(e.target.value)} disabled={isOwner}>{isOwner ? <option value="">Acceso global</option> : branches.map((branch)=><option value={branch.id} key={branch.id} disabled={occupiedBranchIds.has(branch.id)}>{branch.name}{occupiedBranchIds.has(branch.id)?" · ya tiene encargado":""}</option>)}</select></label>
     </div>
     <label className="active-toggle"><input type="checkbox" checked={active} onChange={(e)=>setActive(e.target.checked)} disabled={isSelf} /> Cuenta activa</label>
     <div className="password-reset-box">
@@ -1718,7 +1726,7 @@ function EditUserModal({
     </div>
     {error && <div className="modal-error">{error}</div>}
     {message && <div className="success-message">{message}</div>}
-    <div className="modal-actions"><button type="button" className="ghost-button" onClick={onClose}>Cerrar</button><button className="primary" disabled={saving}>{saving ? "Guardando…" : "Guardar usuario"}</button></div>
+    <div className="modal-actions"><button type="button" className="ghost-button" onClick={onClose}>Cerrar</button><button className="primary" disabled={saving || (!isOwner && !branchId)}>{saving ? "Guardando…" : "Guardar cuenta"}</button></div>
   </form></div>;
 }
 
