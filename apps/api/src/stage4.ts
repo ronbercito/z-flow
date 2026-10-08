@@ -177,12 +177,24 @@ export async function ensureStage4Schema() {
     HAVING COUNT(*)>1
   `);
   for (const row of duplicateCashiers) {
+    const [openRows] = await db.query<any[]>(`
+      SELECT cs.user_id
+      FROM cash_sessions cs
+      JOIN users u ON u.id=cs.user_id
+      JOIN roles r ON r.id=u.role_id
+      WHERE cs.branch_id=? AND cs.status='OPEN'
+        AND u.active=1 AND r.code='CASHIER'
+      ORDER BY cs.started_at DESC
+      LIMIT 1
+    `, [row.branch_id]);
+    const keepId = Number(openRows[0]?.user_id ?? row.keep_id);
+
     const [extraRows] = await db.query<any[]>(`
       SELECT u.id
       FROM users u
       JOIN roles r ON r.id=u.role_id
       WHERE u.branch_id=? AND r.code='CASHIER' AND u.active=1 AND u.id<>?
-    `, [row.branch_id, row.keep_id]);
+    `, [row.branch_id, keepId]);
     for (const extra of extraRows) {
       await db.execute("UPDATE users SET active=0 WHERE id=?", [extra.id]);
       await db.execute("UPDATE auth_sessions SET revoked_at=NOW() WHERE user_id=? AND revoked_at IS NULL", [extra.id]);
