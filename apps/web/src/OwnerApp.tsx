@@ -1085,6 +1085,10 @@ function AdminReports({ overview }: { overview: Overview; operations: GlobalOper
       partnerShareTotal: 0
     };
   });
+  const visibleComparisonBranches = branch === "ALL"
+    ? comparisonBranches
+    : comparisonBranches.filter((item) => String(item.id) === branch);
+  const selectedBranchName = overview.branches.find((item) => String(item.id) === branch)?.name;
   const maxAmount = Math.max(...comparisonBranches.map((x) => x.amountTotal), 1);
   const registerRows = (report?.operations ?? []).filter((row) => flow === "ALL" || row.operation_type === flow);
   const enteredTotal = registerRows.reduce((sum, row) => sum + Number(row.amount), 0);
@@ -1125,11 +1129,11 @@ function AdminReports({ overview }: { overview: Overview; operations: GlobalOper
 
         <section className="card page-card">
           <div className="card-head">
-            <div><strong>Comparativo por filial</strong><span>Selecciona una filial para ver su reporte · {from || "Inicio"} → {to || "Hoy"}</span></div>
+            <div><strong>{branch === "ALL" ? "Comparativo por filial" : `Reporte de filial: ${selectedBranchName ?? "Filial"}`}</strong><span>{branch === "ALL" ? "Selecciona una filial para ver solo su reporte" : "Vista individual"} · {from || "Inicio"} → {to || "Hoy"}</span></div>
             <button type="button" className={`filter ${branch==="ALL"?"active":""}`} onClick={()=>setBranch("ALL")}>Mostrar todos</button>
           </div>
-          <div className="report-bars owner-report-bars">
-            {comparisonBranches.map((item) => (
+          <div className={`report-bars owner-report-bars ${branch === "ALL" ? "all-branch-comparison" : ""}`}>
+            {visibleComparisonBranches.map((item) => (
               <button
                 type="button"
                 className={`report-bar-row report-branch-select ${branch===String(item.id)?"selected":""}`}
