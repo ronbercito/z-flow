@@ -78,7 +78,7 @@
 - [ ] Reverso de propietario sobre una operación ya cerrada
 - [ ] Prueba multiusuario simultánea entre filiales
 - [x] Prueba no destructiva de backup y restauración
-- [ ] Prueba de reinicio del LXC y arranque automático
+- [x] Prueba de reinicio del LXC y arranque automático
 - [ ] Validación con las 5 filiales reales
 
 ## Fase final — Nube
