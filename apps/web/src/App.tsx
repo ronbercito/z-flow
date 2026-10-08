@@ -56,6 +56,7 @@ type Dashboard = {
   };
   session: {
     id: number;
+    user_id?: number | null;
     initial_cash: number;
     initial_wallet: number;
     status: string;
@@ -79,6 +80,8 @@ type Settings = {
   commission_value: number;
   staff_share_pct?: number | null;
   partner_share_pct?: number | null;
+  require_cash_to_yape_reference?: number | boolean;
+  allow_cashier_cancel?: number | boolean;
 };
 
 type AuthUser = {
@@ -385,11 +388,38 @@ function App() {
           )}
 
           {page === "operations" && (
-            <OperationsPage operations={operations} onNewOperation={(type) => setOperationModal(type)} onReceipt={setReceipt} />
+            <OperationsPage
+              operations={operations}
+              onNewOperation={(type) => setOperationModal(type)}
+              onReceipt={setReceipt}
+              canCancel={Boolean(canWrite && dashboard?.session && (authUser.role.code !== "CASHIER" || settings?.allow_cashier_cancel))}
+              onCancel={async (op) => {
+                const reason = window.prompt("Motivo de anulación (mínimo 5 caracteres):");
+                if (!reason) return;
+                const response = await fetch(`/api/branches/${branchId}/operations/${op.id}/cancel`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  credentials: "same-origin",
+                  body: JSON.stringify({ reason })
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                  window.alert(result.error ?? "No se pudo anular la operación");
+                  return;
+                }
+                await load();
+              }}
+            />
           )}
 
           {page === "cash" && (
-            <CashPage dashboard={dashboard} onOpen={() => setOpenCashModal(true)} onClose={() => setCloseCashModal(true)} />
+            <CashPage
+              branchId={branchId}
+              dashboard={dashboard}
+              onOpen={() => setOpenCashModal(true)}
+              onClose={() => setCloseCashModal(true)}
+              onChanged={load}
+            />
           )}
 
           {page === "close" && (
@@ -604,11 +634,15 @@ function HomePage({
 function OperationsPage({
   operations,
   onNewOperation,
-  onReceipt
+  onReceipt,
+  canCancel,
+  onCancel
 }: {
   operations: Operation[];
   onNewOperation: (type: "YAPE_TO_CASH" | "CASH_TO_YAPE") => void;
   onReceipt: (op: Operation) => void;
+  canCancel: boolean;
+  onCancel: (op: Operation) => void | Promise<void>;
 }) {
   const [filter, setFilter] = useState<"ALL" | "YAPE_TO_CASH" | "CASH_TO_YAPE">("ALL");
   const filtered = filter === "ALL" ? operations : operations.filter((op) => op.operation_type === filter);
@@ -628,13 +662,65 @@ function OperationsPage({
             <button className={filter === "CASH_TO_YAPE" ? "filter active" : "filter"} onClick={() => setFilter("CASH_TO_YAPE")}>Efectivo → Yape</button>
           </div>
         </div>
-        <OperationsTable operations={filtered} onReceipt={onReceipt} />
+        <OperationsTable operations={filtered} onReceipt={onReceipt} onCancel={canCancel ? onCancel : undefined} />
       </section>
     </>
   );
 }
 
-function CashPage({ dashboard, onOpen, onClose }: { dashboard: Dashboard | null; onOpen: () => void; onClose: () => void }) {
+function CashPage({
+  branchId,
+  dashboard,
+  onOpen,
+  onClose,
+  onChanged
+}: {
+  branchId: number;
+  dashboard: Dashboard | null;
+  onOpen: () => void;
+  onClose: () => void;
+  onChanged: () => Promise<void>;
+}) {
+  const [staff, setStaff] = useState<Array<{ id: number; username: string; full_name: string; role_name: string }>>([]);
+  const [toUserId, setToUserId] = useState("");
+  const [handoffMessage, setHandoffMessage] = useState("");
+  const [handoffError, setHandoffError] = useState("");
+
+  useEffect(() => {
+    if (!dashboard?.session) return;
+    void (async () => {
+      try {
+        const response = await fetch(`/api/branches/${branchId}/staff`, { credentials: "same-origin" });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error ?? "No se pudo cargar el personal");
+        setStaff(result.users ?? []);
+        const alternate = (result.users ?? []).find((item: { id: number }) => item.id !== dashboard.session?.user_id);
+        if (alternate) setToUserId(String(alternate.id));
+      } catch (err) {
+        setHandoffError(err instanceof Error ? err.message : "No se pudo cargar el personal");
+      }
+    })();
+  }, [branchId, dashboard?.session?.id]);
+
+  async function handoff() {
+    if (!toUserId) return;
+    setHandoffError(""); setHandoffMessage("");
+    try {
+      const response = await fetch(`/api/branches/${branchId}/cash/handoff`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ toUserId: Number(toUserId) })
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "No se pudo cambiar el encargado");
+      setHandoffMessage("Cambio de turno registrado.");
+      await onChanged();
+    } catch (err) {
+      setHandoffError(err instanceof Error ? err.message : "No se pudo cambiar el encargado");
+    }
+  }
+
   return (
     <div className="detail-grid">
       <section className="card large-panel">
@@ -646,12 +732,26 @@ function CashPage({ dashboard, onOpen, onClose }: { dashboard: Dashboard | null;
           <div><span>Comisión del turno</span><strong>{currency(dashboard?.metrics.commissionTotal)}</strong></div>
         </div>
         {dashboard?.session ? (
-          <div className="info-box">
-            <strong>Turno iniciado</strong>
-            <span>{new Date(dashboard.session.started_at).toLocaleString("es-PE")}</span>
-            <span>Efectivo inicial: {currency(dashboard.session.initial_cash)}</span>
-            <span>Saldo Yape inicial: {currency(dashboard.session.initial_wallet)}</span>
-          </div>
+          <>
+            <div className="info-box">
+              <strong>Turno iniciado</strong>
+              <span>{new Date(dashboard.session.started_at).toLocaleString("es-PE")}</span>
+              <span>Efectivo inicial: {currency(dashboard.session.initial_cash)}</span>
+              <span>Saldo Yape inicial: {currency(dashboard.session.initial_wallet)}</span>
+            </div>
+            {staff.length > 1 && <div className="handoff-box">
+              <div><strong>Cambio de turno</strong><span>Transfiere la caja abierta a otro encargado de la misma filial sin cerrar el turno.</span></div>
+              <div className="handoff-controls">
+                <select value={toUserId} onChange={(e)=>setToUserId(e.target.value)}>
+                  <option value="">Selecciona encargado</option>
+                  {staff.filter((item)=>item.id!==dashboard.session?.user_id).map((item)=><option key={item.id} value={item.id}>{item.full_name} · {item.role_name}</option>)}
+                </select>
+                <button className="soft" onClick={()=>void handoff()} disabled={!toUserId}>Cambiar encargado</button>
+              </div>
+              {handoffError && <div className="modal-error">{handoffError}</div>}
+              {handoffMessage && <div className="success-message">{handoffMessage}</div>}
+            </div>}
+          </>
         ) : (
           <div className="empty-state"><WalletCards size={28} /><strong>No hay caja abierta</strong><span>Abre una caja para empezar a registrar operaciones.</span></div>
         )}
@@ -873,7 +973,7 @@ function HelpPage({ onNavigate }: { onNavigate: (page: Page) => void }) {
   );
 }
 
-function OperationsTable({ operations, onReceipt }: { operations: Operation[]; onReceipt?: (op: Operation) => void }) {
+function OperationsTable({ operations, onReceipt, onCancel }: { operations: Operation[]; onReceipt?: (op: Operation) => void; onCancel?: (op: Operation) => void | Promise<void> }) {
   return (
     <div className="table-wrap">
       <table>
@@ -887,7 +987,7 @@ function OperationsTable({ operations, onReceipt }: { operations: Operation[]; o
             <th>Comisión</th>
             <th>Entregado</th>
             <th>Estado</th>
-            {onReceipt && <th></th>}
+            {(onReceipt || onCancel) && <th>Acciones</th>}
           </tr>
         </thead>
         <tbody>
@@ -901,10 +1001,10 @@ function OperationsTable({ operations, onReceipt }: { operations: Operation[]; o
               <td>{currency(op.commission)}</td>
               <td>{currency(op.net_amount)}</td>
               <td><span className={`status ${op.status === "COMPLETED" ? "ok" : "pending"}`}><i />{op.status === "COMPLETED" ? "Completada" : "En proceso"}</span></td>
-              {onReceipt && <td><button className="mini-button" onClick={() => onReceipt(op)}><ReceiptText size={13} /> Ver</button></td>}
+              {(onReceipt || onCancel) && <td><div className="inline-actions">{onReceipt && <button className="mini-button" onClick={() => onReceipt(op)}><ReceiptText size={13} /> Ver</button>}{onCancel && op.status === "COMPLETED" && <button className="mini-button danger-mini" onClick={() => void onCancel(op)}>Anular</button>}</div></td>}
             </tr>
           ))}
-          {!operations.length && <tr><td colSpan={9} className="empty-cell">No hay operaciones para mostrar.</td></tr>}
+          {!operations.length && <tr><td colSpan={(onReceipt || onCancel) ? 9 : 8} className="empty-cell">No hay operaciones para mostrar.</td></tr>}
         </tbody>
       </table>
     </div>
@@ -1013,8 +1113,8 @@ function OperationModal({
             <small>Máximo actual: {currency(settings?.max_operation_amount ?? 50)}</small>
           </label>
           <label>Código / referencia
-            <input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Ej. 850421" required={type === "YAPE_TO_CASH"} />
-            <small>{type === "YAPE_TO_CASH" ? "Obligatorio para Yape → Efectivo" : "Opcional"}</small>
+            <input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Ej. 850421" required={type === "YAPE_TO_CASH" || Boolean(settings?.require_cash_to_yape_reference)} />
+            <small>{type === "YAPE_TO_CASH" || Boolean(settings?.require_cash_to_yape_reference) ? "Código/referencia obligatorio" : "Opcional"}</small>
           </label>
         </div>
         <label>Cliente<input value={customer} onChange={(e) => setCustomer(e.target.value)} placeholder="Nombre opcional" /></label>
