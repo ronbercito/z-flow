@@ -178,6 +178,7 @@ function operationStatusClass(status: string) {
 function App() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
+  const [businessName, setBusinessName] = useState("Z-FLOW");
   const [page, setPage] = useState<Page>("home");
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -255,7 +256,21 @@ function App() {
 
   useEffect(() => {
     void checkAuth();
+    const loadBranding = async () => {
+      try {
+        const response = await fetch("/api/branding", { credentials: "same-origin" });
+        if (!response.ok) return;
+        const result = await response.json();
+        if (typeof result.businessName === "string" && result.businessName.trim()) setBusinessName(result.businessName.trim());
+      } catch { /* Keep the default label if branding is temporarily unavailable. */ }
+    };
+    const refreshBranding = () => { void loadBranding(); };
+    void loadBranding();
+    window.addEventListener("zflow:branding-updated", refreshBranding);
+    return () => window.removeEventListener("zflow:branding-updated", refreshBranding);
   }, []);
+
+  useEffect(() => { document.title = businessName; }, [businessName]);
 
   useEffect(() => {
     if (authUser && authUser.role.code !== "OWNER" && branchId) void load();
@@ -282,15 +297,15 @@ function App() {
   }
 
   if (!authChecked) {
-    return <div className="splash">Verificando sesión Z-FLOW…</div>;
+    return <div className="splash">Verificando sesión de {businessName}…</div>;
   }
 
   if (!authUser) {
-    return <LoginScreen onLogin={(user) => setAuthUser(user)} />;
+    return <LoginScreen businessName={businessName} onLogin={(user) => setAuthUser(user)} />;
   }
 
   if (authUser.role.code === "OWNER") {
-    return <OwnerApp user={authUser} onLogout={logout} />;
+    return <OwnerApp user={authUser} onLogout={logout} businessName={businessName} />;
   }
 
   if (!branchId) {
@@ -303,7 +318,7 @@ function App() {
   }
 
   if (loading && !dashboard) {
-    return <div className="splash">Cargando Z-FLOW…</div>;
+    return <div className="splash">Cargando {businessName}…</div>;
   }
 
   const branchName = dashboard?.branch.name ?? authUser.branch?.name ?? authUser.defaultBranch?.name ?? "Filial";
@@ -316,7 +331,7 @@ function App() {
     receipts: ["Comprobantes", "Consulta los comprobantes internos de las operaciones"],
     reports: ["Reportes", "Resumen de actividad y comisiones de la filial"],
     profile: ["Mi perfil", "Datos del usuario y filial asignada"],
-    help: ["Ayuda", "Guía rápida para operar Z-FLOW"]
+    help: ["Ayuda", "Guía rápida para operar el sistema"]
   };
 
   return (
@@ -325,7 +340,7 @@ function App() {
         <div className="brand">
           <div className="brand-mark"><BadgeDollarSign size={22} /></div>
           <div>
-            <strong>Z-FLOW</strong>
+            <strong>{businessName}</strong>
             <span>Gestión de filial</span>
           </div>
           <button className="mobile-close" onClick={() => setMobileNav(false)}><X size={20} /></button>
@@ -513,12 +528,12 @@ function App() {
         />
       )}
 
-      {receipt && <ReceiptModal branchId={branchId} operation={receipt} branchName={branchName} onClose={() => setReceipt(null)} />}
+      {receipt && <ReceiptModal branchId={branchId} operation={receipt} branchName={branchName} businessName={businessName} onClose={() => setReceipt(null)} />}
     </div>
   );
 }
 
-function LoginScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
+function LoginScreen({ onLogin, businessName }: { onLogin: (user: AuthUser) => void; businessName: string }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(true);
@@ -550,19 +565,19 @@ function LoginScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
     <div className="login-page">
       <div className="login-brand">
         <div className="brand-mark large"><BadgeDollarSign size={28} /></div>
-        <div><strong>Z-FLOW</strong><span>Gestión segura de cajas y filiales</span></div>
+        <div><strong>{businessName}</strong><span>Gestión segura de cajas y filiales</span></div>
       </div>
       <div className="login-layout">
         <section className="login-card">
           <span className="login-kicker">ACCESO SEGURO</span>
           <h1>Inicia sesión</h1>
-          <p>Ingresa con la cuenta asignada por el administrador de Z-FLOW.</p>
+          <p>Ingresa con la cuenta asignada por el administrador de {businessName}.</p>
           <form onSubmit={submit}>
             <label>Usuario<input type="text" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" placeholder="Tu usuario" required /></label>
             <label>Contraseña<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" placeholder="Tu contraseña" required /></label>
             <label className="remember"><input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> Mantener sesión iniciada</label>
             {error && <div className="modal-error">{error}</div>}
-            <button className="primary login-button" disabled={saving}>{saving ? "Ingresando…" : "Ingresar a Z-FLOW"}</button>
+            <button className="primary login-button" disabled={saving}>{saving ? "Ingresando…" : `Ingresar a ${businessName}`}</button>
           </form>
         </section>
         <aside className="login-info">
@@ -1349,7 +1364,7 @@ function CloseCashModal({ branchId, dashboard, onClose, onClosed }: { branchId: 
   );
 }
 
-function ReceiptModal({ branchId, operation, branchName, onClose }: { branchId: number; operation: Operation; branchName: string; onClose: () => void }) {
+function ReceiptModal({ branchId, operation, branchName, businessName, onClose }: { branchId: number; operation: Operation; branchName: string; businessName: string; onClose: () => void }) {
   const receiptNumber = operation.receipt_series && operation.receipt_number
     ? `${operation.receipt_series}-${String(operation.receipt_number).padStart(6,"0")}`
     : `Z-${String(operation.id).padStart(6,"0")}`;
@@ -1358,7 +1373,7 @@ function ReceiptModal({ branchId, operation, branchName, onClose }: { branchId: 
       <div className="modal receipt-modal">
         <div className="modal-head"><div><h2>Comprobante interno</h2><p>{receiptNumber}</p></div><button className="icon-btn" onClick={onClose}><X size={19} /></button></div>
         <div className="ticket">
-          <strong className="ticket-brand">Z-FLOW</strong>
+          <strong className="ticket-brand">{businessName}</strong>
           <span>{branchName}</span>
           <hr />
           <div><span>Comprobante</span><strong>{receiptNumber}</strong></div>

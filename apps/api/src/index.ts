@@ -4,6 +4,7 @@ import cookie from "@fastify/cookie";
 import { z } from "zod";
 import { db } from "./db.js";
 import { registerAdminRoutes } from "./admin.js";
+import { registerBackupRoutes } from "./backup.js";
 import { registerReportRoutes } from "./reports.js";
 import { ensureStage4Schema, registerStage4Routes } from "./stage4.js";
 import {
@@ -157,6 +158,11 @@ async function cashClosurePreview(branchId: number) {
     expectedWallet
   };
 }
+
+app.get("/api/branding", async () => {
+  const [rows] = await db.query<any[]>("SELECT business_name FROM system_settings WHERE id=1 LIMIT 1");
+  return { businessName: String(rows[0]?.business_name ?? "Z-FLOW") };
+});
 
 app.get("/health", async () => {
   await db.query("SELECT 1");
@@ -791,9 +797,9 @@ await ensureStage4Schema();
 await bootstrapUsersIfEmpty(app.log);
 await backfillMissingReceipts();
 await registerAdminRoutes(app);
+await registerBackupRoutes(app);
 await registerReportRoutes(app);
 await registerStage4Routes(app);
 
 const port = Number(process.env.PORT ?? 3001);
 await app.listen({ host: "0.0.0.0", port });
-

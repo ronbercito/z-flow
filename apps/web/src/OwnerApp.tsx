@@ -17,6 +17,7 @@ import {
   ClipboardCheck,
   FileSearch,
   Download,
+  Database,
   Home,
   Landmark,
   LockKeyhole,
@@ -58,6 +59,7 @@ type AdminPage =
   | "commissions"
   | "reports"
   | "audit"
+  | "backup"
   | "settings"
   | "security"
   | "profile";
@@ -378,12 +380,13 @@ const nav: Array<{ page: AdminPage; label: string; icon: typeof Home }> = [
   { page: "commissions", label: "Comisiones", icon: CircleDollarSign },
   { page: "reports", label: "Reportes", icon: BarChart3 },
   { page: "audit", label: "Auditoría", icon: FileSearch },
+  { page: "backup", label: "Backup", icon: Database },
   { page: "settings", label: "Configuración", icon: Settings2 },
   { page: "security", label: "Seguridad", icon: ShieldCheck },
   { page: "profile", label: "Mi perfil", icon: UserRound }
 ];
 
-const UI_BUILD = "E4.2-20261008";
+const UI_BUILD = "E4.3-20261008";
 
 function currency(value: number | string | null | undefined) {
   return new Intl.NumberFormat("es-PE", {
@@ -435,7 +438,7 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
   return result as T;
 }
 
-export default function OwnerApp({ user, onLogout }: { user: AuthUser; onLogout: () => Promise<void> | void }) {
+export default function OwnerApp({ user, onLogout, businessName }: { user: AuthUser; onLogout: () => Promise<void> | void; businessName: string }) {
   const [page, setPage] = useState<AdminPage>("dashboard");
   const [overview, setOverview] = useState<Overview | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -503,7 +506,8 @@ export default function OwnerApp({ user, onLogout }: { user: AuthUser; onLogout:
     users: ["Usuarios y roles", "Control de accesos y asignación de personal"],
     commissions: ["Comisiones", "Reglas de cobro por filial"],
     reports: ["Reportes", "Consolidado operativo y financiero"],
-    audit: ["Auditoría", "Historial de acciones sensibles dentro de Z-FLOW"],
+    audit: ["Auditoría", "Historial de acciones sensibles del sistema"],
+    backup: ["Backup", "Crea, descarga y restaura copias de la base de datos"],
     settings: ["Configuración general", "Datos del negocio y reglas centrales del sistema local"],
     security: ["Seguridad y sesiones", "Control de sesiones activas y estado del entorno local"],
     profile: ["Mi perfil", "Cuenta propietaria y seguridad"]
@@ -519,7 +523,7 @@ export default function OwnerApp({ user, onLogout }: { user: AuthUser; onLogout:
       <aside className={`sidebar owner-sidebar ${mobileNav ? "sidebar-open" : ""}`}>
         <div className="brand">
           <div className="brand-mark"><BadgeDollarSign size={22} /></div>
-          <div><strong>Z-FLOW</strong><span>Panel propietario</span></div>
+          <div><strong>{businessName}</strong><span>Panel propietario</span></div>
           <button className="mobile-close" onClick={() => setMobileNav(false)}><X size={20} /></button>
         </div>
 
@@ -583,6 +587,7 @@ export default function OwnerApp({ user, onLogout }: { user: AuthUser; onLogout:
           {page === "commissions" && overview && <CommissionsPage branches={overview.branches} onSettings={setSettingsBranch} />}
           {page === "reports" && overview && <AdminReports overview={overview} operations={operations} closures={closures} />}
           {page === "audit" && <AuditPage rows={auditRows} />}
+          {page === "backup" && <BackupPage />}
           {page === "settings" && <SystemSettingsPage />}
           {page === "security" && <SecurityPage currentUserId={user.id} />}
           {page === "profile" && <OwnerProfile user={user} />}
@@ -1131,7 +1136,9 @@ function auditActionLabel(action: string) {
     USER_CREATED: "Usuario creado",
     USER_PASSWORD_RESET: "Contraseña de usuario restablecida",
     USER_STATUS_CHANGED: "Estado de usuario actualizado",
-    USER_UPDATED: "Usuario actualizado"
+    USER_UPDATED: "Usuario actualizado",
+    DATABASE_BACKUP_CREATED: "Copia de base de datos creada",
+    DATABASE_BACKUP_RESTORED: "Copia de base de datos restaurada"
   };
   return labels[action] ?? "Evento del sistema";
 }
@@ -1146,7 +1153,8 @@ function auditEntityLabel(entity: string | null) {
     BRANCH: "Filial",
     CASH_SESSION: "Turno de caja",
     DAILY_CLOSURE: "Cierre diario",
-    ROLE: "Rol"
+    ROLE: "Rol",
+    DATABASE: "Base de datos"
   };
   return labels[entity] ?? "Registro";
 }
@@ -1166,6 +1174,141 @@ function AuditPage({ rows }: { rows: AuditRow[] }) {
         </table>
       </div>
     </section>
+  );
+}
+
+type BackupFile = { filename: string; size: number; createdAt: string };
+
+function BackupPage() {
+  const [backups, setBackups] = useState<BackupFile[]>([]);
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+
+  async function load() {
+    try {
+      const result = await api<{ backups: BackupFile[] }>("/api/admin/backups");
+      setBackups(result.backups ?? []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudieron cargar las copias");
+    }
+  }
+
+  useEffect(() => { void load(); }, []);
+
+  async function createBackup() {
+    setBusy(true); setError(""); setMessage("");
+    try {
+      const result = await api<{ filename: string }>("/api/admin/backups", { method: "POST" });
+      setMessage("Copia creada: " + result.filename);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo crear la copia");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function uploadBackup() {
+    if (!file) return;
+    setBusy(true); setError(""); setMessage("");
+    try {
+      const result = await api<{ filename: string }>("/api/admin/backups/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/gzip" },
+        body: file
+      });
+      setMessage("Copia subida y validada: " + result.filename + ". Ahora puedes restaurarla.");
+      setFile(null);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo subir la copia");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function restoreBackup(item: BackupFile) {
+    const confirmation = window.prompt(
+      "Restaurar " + item.filename + " reemplazará los datos actuales. Escribe RESTAURAR para continuar."
+    );
+    if (confirmation !== "RESTAURAR") return;
+    setBusy(true); setError(""); setMessage("");
+    try {
+      const result = await api<{ safetyCopy: string }>("/api/admin/backups/restore", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename: item.filename, confirmation })
+      });
+      setMessage("Base de datos restaurada. Copia de seguridad previa: " + result.safetyCopy);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo restaurar la copia");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function sizeLabel(bytes: number) {
+    return bytes < 1024 * 1024
+      ? (bytes / 1024).toFixed(1) + " KB"
+      : (bytes / (1024 * 1024)).toFixed(1) + " MB";
+  }
+
+  return (
+    <div className="backup-page">
+      {error && <div className="error-banner">{error}</div>}
+      {message && <div className="success-banner">{message}</div>}
+      <section className="card page-card">
+        <div className="card-head">
+          <div><strong>Crear copia de seguridad</strong><span>Guarda una copia completa de la base de datos en el servidor.</span></div>
+          <Database size={18}/>
+        </div>
+        <div className="settings-form-body">
+          <p>Las copias se comprimen en formato .sql.gz y se pueden descargar para guardarlas en otro equipo.</p>
+          <button className="primary" type="button" disabled={busy} onClick={()=>void createBackup()}>
+            <Database size={15}/> {busy ? "Procesando…" : "Crear copia ahora"}
+          </button>
+        </div>
+      </section>
+
+      <section className="card page-card">
+        <div className="card-head">
+          <div><strong>Subir copia para restaurar</strong><span>Solo se aceptan archivos .sql.gz de hasta 100 MB.</span></div>
+          <Download size={18}/>
+        </div>
+        <div className="settings-form-body backup-upload">
+          <input type="file" accept=".sql.gz,application/gzip" onChange={(event)=>setFile(event.target.files?.[0] ?? null)} />
+          <button className="soft" type="button" disabled={busy || !file} onClick={()=>void uploadBackup()}>Subir y validar copia</button>
+          <p>La copia subida no reemplaza los datos hasta que elijas Restaurar. La restauración exige cerrar todas las cajas abiertas y crea una copia previa automática.</p>
+        </div>
+      </section>
+
+      <section className="card page-card">
+        <div className="card-head">
+          <div><strong>Copias disponibles</strong><span>{backups.length} archivos guardados en este servidor.</span></div>
+          <button className="soft" type="button" disabled={busy} onClick={()=>void load()}><RefreshCw size={14}/> Actualizar</button>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Archivo</th><th>Fecha</th><th>Tamaño</th><th>Acciones</th></tr></thead>
+            <tbody>
+              {backups.map((item)=><tr key={item.filename}>
+                <td>{item.filename}</td>
+                <td>{dateTime(item.createdAt)}</td>
+                <td>{sizeLabel(item.size)}</td>
+                <td className="table-actions">
+                  <a className="mini-button" href={"/api/admin/backups/" + encodeURIComponent(item.filename) + "/download"}><Download size={14}/> Descargar</a>
+                  <button className="mini-button danger-mini" type="button" disabled={busy} onClick={()=>void restoreBackup(item)}>Restaurar</button>
+                </td>
+              </tr>)}
+              {!backups.length && <tr><td colSpan={4} className="empty-cell">Todavía no hay copias guardadas.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -1199,6 +1342,7 @@ function SystemSettingsPage() {
         body: JSON.stringify(form)
       });
       setMessage("Configuración general guardada.");
+      window.dispatchEvent(new Event("zflow:branding-updated"));
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo guardar");

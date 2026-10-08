@@ -103,12 +103,15 @@ async function fetchReport(filters: ReportFilters, forcedBranchId?: number) {
     ORDER BY amount_total DESC
   `, params);
 
+  const [brandingRows] = await db.query<any[]>("SELECT business_name FROM system_settings WHERE id=1 LIMIT 1");
+  const businessName = String(brandingRows[0]?.business_name ?? "Z-FLOW");
   const summary = summaryRows[0] ?? {};
   const commissionTotal = money(summary.commission_total);
   const staffShareTotal = money(summary.staff_share_total);
   const partnerShareTotal = money(summary.partner_share_total);
 
   return {
+    businessName,
     filters: {
       branchId: forcedBranchId ?? filters.branchId,
       from: filters.from,
@@ -147,11 +150,11 @@ function dateLabel(filters: ReportFilters) {
 
 async function excelBuffer(report: Awaited<ReturnType<typeof fetchReport>>, title: string) {
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = "Z-FLOW";
+  workbook.creator = report.businessName;
   workbook.created = new Date();
 
   const summary = workbook.addWorksheet("Resumen");
-  summary.addRow([title]);
+  summary.addRow([report.businessName + " · " + title]);
   summary.addRow(["Periodo", dateLabel(report.filters)]);
   summary.addRow([]);
   summary.addRow(["Indicador", "Valor"]);
@@ -209,7 +212,7 @@ function pdfBuffer(report: Awaited<ReturnType<typeof fetchReport>>, title: strin
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
 
-    doc.fontSize(18).text("Z-FLOW", { continued: true }).fontSize(11).text(`  ·  ${title}`);
+    doc.fontSize(18).text(report.businessName, { continued: true }).fontSize(11).text(`  ·  ${title}`);
     doc.moveDown(0.4);
     doc.fontSize(9).fillColor("#667085").text(`Periodo: ${dateLabel(report.filters)}`);
     doc.fillColor("#111827");
@@ -489,7 +492,7 @@ export async function registerReportRoutes(app: FastifyInstance) {
 
       doc.moveDown(2);
       doc.font("Helvetica").fontSize(7).fillColor("#98A2B3")
-        .text("Documento interno de control de caja generado por Z-FLOW.", { align: "center" });
+        .text(`Documento interno de control de caja generado por ${String(branding.business_name ?? "Z-FLOW")}.`, { align: "center" });
 
       doc.end();
     });
