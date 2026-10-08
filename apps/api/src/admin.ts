@@ -647,10 +647,15 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     const [rows] = await db.query<any[]>(`
       SELECT u.id, u.username, u.full_name, u.active, u.created_at, u.last_login_at,
              r.code AS role_code, r.name AS role_name,
-             b.id AS branch_id, b.name AS branch_name
+             b.id AS branch_id, b.name AS branch_name,
+             GROUP_CONCAT(DISTINCT CASE WHEN bpa.active=1 THEN pb.name END ORDER BY pb.name SEPARATOR ', ') AS partner_branches
       FROM users u
       JOIN roles r ON r.id = u.role_id
       LEFT JOIN branches b ON b.id = u.branch_id
+      LEFT JOIN branch_partner_assignments bpa ON bpa.user_id=u.id
+      LEFT JOIN branches pb ON pb.id=bpa.branch_id
+      GROUP BY u.id, u.username, u.full_name, u.active, u.created_at, u.last_login_at,
+               r.code, r.name, b.id, b.name
       ORDER BY u.active DESC, u.full_name
     `);
 
