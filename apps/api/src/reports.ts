@@ -379,6 +379,12 @@ export async function registerReportRoutes(app: FastifyInstance) {
     const row = rows[0];
     if (!row.series) return reply.code(409).send({ error: "La operación todavía no tiene comprobante interno asignado" });
 
+    const [settingRows] = await db.query<any[]>(`
+      SELECT business_name, legal_name, ruc, address, phone, ticket_footer
+      FROM system_settings WHERE id=1 LIMIT 1
+    `);
+    const branding = settingRows[0] ?? {};
+
     const buffer = await new Promise<Buffer>((resolve, reject) => {
       const doc = new PDFDocument({ size: [226.77, 500], margins: { top: 18, bottom: 18, left: 16, right: 16 } });
       const chunks: Buffer[] = [];
@@ -387,9 +393,12 @@ export async function registerReportRoutes(app: FastifyInstance) {
       doc.on("error", reject);
 
       const receiptNo = `${row.series}-${String(row.sequence_number).padStart(6,"0")}`;
-      doc.font("Helvetica-Bold").fontSize(15).text("Z-FLOW", { align: "center" });
-      doc.fontSize(9).text(row.branch_name, { align: "center" });
-      if (row.branch_address) doc.font("Helvetica").fontSize(7).text(row.branch_address, { align: "center" });
+      doc.font("Helvetica-Bold").fontSize(15).text(String(branding.business_name ?? "Z-FLOW"), { align: "center" });
+      if (branding.legal_name) doc.font("Helvetica").fontSize(7).text(String(branding.legal_name), { align: "center" });
+      if (branding.ruc) doc.fontSize(7).text(`RUC: ${branding.ruc}`, { align: "center" });
+      doc.font("Helvetica-Bold").fontSize(9).text(row.branch_name, { align: "center" });
+      if (row.branch_address || branding.address) doc.font("Helvetica").fontSize(7).text(String(row.branch_address ?? branding.address), { align: "center" });
+      if (branding.phone) doc.fontSize(7).text(`Tel: ${branding.phone}`, { align: "center" });
       doc.moveDown(0.5);
       doc.font("Helvetica-Bold").fontSize(8).text("COMPROBANTE INTERNO", { align: "center" });
       doc.font("Helvetica").fontSize(6.8).fillColor("#555555").text("No es comprobante de pago electrónico SUNAT", { align: "center" });
@@ -406,7 +415,7 @@ export async function registerReportRoutes(app: FastifyInstance) {
       doc.font("Helvetica-Bold").fontSize(10).text(`Entregado: ${pen(row.net_amount)}`);
       doc.moveDown(1);
       doc.font("Helvetica").fontSize(6.5).fillColor("#666666")
-        .text("Documento interno de control de operación. Conservar para conciliación.", { align: "center" });
+        .text(String(branding.ticket_footer ?? "Documento interno de control de operación. Conservar para conciliación."), { align: "center" });
       doc.end();
     });
 
