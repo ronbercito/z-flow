@@ -70,13 +70,16 @@
 - [ ] Pruebas paso a paso en el LXC real con las filiales
 
 ## Fase 5 — Pruebas reales
-- [ ] Simulación completa de apertura → operaciones → cambio de turno → cierre
-- [ ] Prueba multiusuario simultánea
-- [ ] Prueba de anulación y reverso
-- [ ] Prueba de permisos personalizados
-- [ ] Prueba de backup y restauración
-- [ ] Prueba de reinicio del LXC/Proxmox
-- [ ] Validación con las 5 filiales
+- [x] Flujo completo Miraflores: apertura → operaciones → cierre
+- [x] Flujo completo PNC Playa: apertura → operaciones → cierre
+- [x] Separación de datos y ganancias entre filiales
+- [x] Anulación con motivo y registro en auditoría
+- [x] Aislamiento propietario / Cajero-Encargado por filial
+- [ ] Reverso de propietario sobre una operación ya cerrada
+- [ ] Prueba multiusuario simultánea entre filiales
+- [ ] Prueba no destructiva de backup y restauración
+- [ ] Prueba de reinicio del LXC y arranque automático
+- [ ] Validación con las 5 filiales reales
 
 ## Fase final — Nube
 - [ ] Backup externo fuera del LXC
