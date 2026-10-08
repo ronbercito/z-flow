@@ -455,11 +455,9 @@ function App() {
 
           {page === "cash" && (
             <CashPage
-              branchId={branchId}
               dashboard={dashboard}
               onOpen={() => setOpenCashModal(true)}
               onClose={() => setCloseCashModal(true)}
-              onChanged={load}
             />
           )}
 
@@ -717,58 +715,14 @@ function OperationsPage({
 }
 
 function CashPage({
-  branchId,
   dashboard,
   onOpen,
-  onClose,
-  onChanged
+  onClose
 }: {
-  branchId: number;
   dashboard: Dashboard | null;
   onOpen: () => void;
   onClose: () => void;
-  onChanged: () => Promise<void>;
 }) {
-  const [staff, setStaff] = useState<Array<{ id: number; username: string; full_name: string; role_name: string }>>([]);
-  const [toUserId, setToUserId] = useState("");
-  const [handoffMessage, setHandoffMessage] = useState("");
-  const [handoffError, setHandoffError] = useState("");
-
-  useEffect(() => {
-    if (!dashboard?.session) return;
-    void (async () => {
-      try {
-        const response = await fetch(`/api/branches/${branchId}/staff`, { credentials: "same-origin" });
-        const result = await response.json();
-        if (!response.ok) throw new Error(result.error ?? "No se pudo cargar el personal");
-        setStaff(result.users ?? []);
-        const alternate = (result.users ?? []).find((item: { id: number }) => item.id !== dashboard.session?.user_id);
-        if (alternate) setToUserId(String(alternate.id));
-      } catch (err) {
-        setHandoffError(err instanceof Error ? err.message : "No se pudo cargar el personal");
-      }
-    })();
-  }, [branchId, dashboard?.session?.id]);
-
-  async function handoff() {
-    if (!toUserId) return;
-    setHandoffError(""); setHandoffMessage("");
-    try {
-      const response = await fetch(`/api/branches/${branchId}/cash/handoff`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "same-origin",
-        body: JSON.stringify({ toUserId: Number(toUserId) })
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error ?? "No se pudo cambiar el encargado");
-      setHandoffMessage("Cambio de turno registrado.");
-      await onChanged();
-    } catch (err) {
-      setHandoffError(err instanceof Error ? err.message : "No se pudo cambiar el encargado");
-    }
-  }
-
   return (
     <div className="detail-grid">
       <section className="card large-panel">
@@ -777,29 +731,15 @@ function CashPage({
           <div><span>Estado</span><strong className={dashboard?.session ? "green-text" : "red-text"}>{dashboard?.session ? "ABIERTA" : "CERRADA"}</strong></div>
           <div><span>Efectivo actual</span><strong>{currency(dashboard?.metrics.cashCurrent)}</strong></div>
           <div><span>Saldo Yape</span><strong>{currency(dashboard?.metrics.walletCurrent)}</strong></div>
-          <div><span>Comisión del turno</span><strong>{currency(dashboard?.metrics.commissionTotal)}</strong></div>
+          <div><span>Ganancia del turno</span><strong>{currency(dashboard?.metrics.commissionTotal)}</strong></div>
         </div>
         {dashboard?.session ? (
-          <>
-            <div className="info-box">
-              <strong>Turno iniciado</strong>
-              <span>{new Date(dashboard.session.started_at).toLocaleString("es-PE")}</span>
-              <span>Efectivo inicial: {currency(dashboard.session.initial_cash)}</span>
-              <span>Saldo Yape inicial: {currency(dashboard.session.initial_wallet)}</span>
-            </div>
-            {staff.length > 1 && <div className="handoff-box">
-              <div><strong>Cambio de turno</strong><span>Transfiere la caja abierta a otro encargado de la misma filial sin cerrar el turno.</span></div>
-              <div className="handoff-controls">
-                <select value={toUserId} onChange={(e)=>setToUserId(e.target.value)}>
-                  <option value="">Selecciona encargado</option>
-                  {staff.filter((item)=>item.id!==dashboard.session?.user_id).map((item)=><option key={item.id} value={item.id}>{item.full_name} · {item.role_name}</option>)}
-                </select>
-                <button className="soft" onClick={()=>void handoff()} disabled={!toUserId}>Cambiar encargado</button>
-              </div>
-              {handoffError && <div className="modal-error">{handoffError}</div>}
-              {handoffMessage && <div className="success-message">{handoffMessage}</div>}
-            </div>}
-          </>
+          <div className="info-box">
+            <strong>Turno iniciado</strong>
+            <span>{new Date(dashboard.session.started_at).toLocaleString("es-PE")}</span>
+            <span>Efectivo inicial: {currency(dashboard.session.initial_cash)}</span>
+            <span>Saldo Yape inicial: {currency(dashboard.session.initial_wallet)}</span>
+          </div>
         ) : (
           <div className="empty-state"><WalletCards size={28} /><strong>No hay caja abierta</strong><span>Abre una caja para empezar a registrar operaciones.</span></div>
         )}
@@ -862,8 +802,8 @@ function ClosePage({ branchId, dashboard, onClose, onOpen }: { branchId: number;
             <div><span>Comisión total</span><strong>{currency(preview.commissionTotal)}</strong></div>
           </div>
           <div className="commission-split-summary">
-            <span>Reparto de comisión</span>
-            <strong>Encargado {currency(preview.staffShareTotal)} · Socio {currency(preview.partnerShareTotal)}{preview.unassignedCommission > 0 ? ` · Pendiente ${currency(preview.unassignedCommission)}` : ""}</strong>
+            <span>Ganancia del encargado</span>
+            <strong>{currency(preview.commissionTotal)}</strong>
           </div>
           <div className="closure-turn-info">
             <div><span>Responsable actual</span><strong>{preview.assignedTo ?? "—"}</strong></div>
@@ -963,17 +903,10 @@ function ReportsPage({ branchId, dashboard }: { branchId: number; dashboard: Das
         <Kpi icon={<Smartphone />} tone="purple" label="Yape → Efectivo" value={String(summary?.yapeToCashCount ?? 0)} hint="Operaciones" />
         <Kpi icon={<Send />} tone="green" label="Efectivo → Yape" value={String(summary?.cashToYapeCount ?? 0)} hint="Operaciones" />
         <Kpi icon={<BadgeDollarSign />} tone="orange" label="Monto movilizado" value={currency(summary?.amountTotal)} hint="Periodo seleccionado" />
-        <Kpi icon={<BadgeDollarSign />} tone="cyan" label="Comisión total" value={currency(summary?.commissionTotal)} hint="Generada" />
+        <Kpi icon={<BadgeDollarSign />} tone="cyan" label="Ganancia del encargado" value={currency(summary?.commissionTotal)} hint="Comisiones del periodo" />
         <Kpi icon={<WalletCards />} tone="blue" label="Caja actual" value={currency(dashboard?.metrics.cashCurrent)} hint="Turno actual" />
       </div>
-      <section className="card page-card report-panel">
-        <div className="card-head"><div><strong>Reparto de comisión</strong><span>Según la regla guardada al momento de cada operación</span></div></div>
-        <div className="financial-split-grid">
-          <div><span>Para encargado</span><strong>{currency(summary?.staffShareTotal)}</strong></div>
-          <div><span>Para socio</span><strong>{currency(summary?.partnerShareTotal)}</strong></div>
-          <div><span>Sin reparto configurado</span><strong>{currency(summary?.unassignedCommission)}</strong></div>
-        </div>
-      </section>
+
     </>
   );
 }
@@ -1042,7 +975,7 @@ function HelpPage({ onNavigate, canWrite }: { onNavigate: (page: Page) => void; 
   ] : [
     ["Consultar operaciones", "Revisa los movimientos registrados en tu filial.", "operations"],
     ["Ver comprobantes", "Consulta los comprobantes internos disponibles.", "receipts"],
-    ["Revisar reportes", "Consulta actividad, comisiones y reparto.", "reports"]
+    ["Revisar reportes", "Consulta actividad y comisiones.", "reports"]
   ];
 
   return (
@@ -1361,8 +1294,8 @@ function CloseCashModal({ branchId, dashboard, onClose, onClosed }: { branchId: 
               <strong>Efectivo {currency(result.declaredCash)} de {currency(result.expectedCash)} · Yape {currency(result.declaredWallet)} de {currency(result.expectedWallet)}</strong>
             </div>
             <div>
-              <span>Reparto de comisión</span>
-              <strong>Encargado {currency(result.staffShareTotal)} · Socio {currency(result.partnerShareTotal)}{result.unassignedCommission > 0 ? ` · Pendiente ${currency(result.unassignedCommission)}` : ""}</strong>
+              <span>Ganancia del encargado</span>
+              <strong>{currency(result.commissionTotal)}</strong>
             </div>
           </div>
 
@@ -1390,8 +1323,8 @@ function CloseCashModal({ branchId, dashboard, onClose, onClosed }: { branchId: 
             <div><span>Comisión</span><strong>{currency(preview.commissionTotal)}</strong></div>
           </div>
           <div className="commission-split-summary">
-            <span>Reparto de comisión</span>
-            <strong>Encargado {currency(preview.staffShareTotal)} · Socio {currency(preview.partnerShareTotal)}{preview.unassignedCommission > 0 ? ` · Pendiente ${currency(preview.unassignedCommission)}` : ""}</strong>
+            <span>Ganancia del encargado</span>
+            <strong>{currency(preview.commissionTotal)}</strong>
           </div>
 
           <div className="field-grid">
