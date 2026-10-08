@@ -3,6 +3,12 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 chmod +x "$ROOT_DIR"/scripts/*.sh
+if [ -f "$ROOT_DIR/.env" ]; then
+  chmod 600 "$ROOT_DIR/.env"
+fi
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl enable --now docker
+fi
 
 echo "[1/3] Backup automático"
 bash "$ROOT_DIR/scripts/install-backup-cron.sh"
