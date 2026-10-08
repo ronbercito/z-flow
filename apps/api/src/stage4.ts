@@ -116,8 +116,8 @@ export async function ensureStage4Schema() {
       default_max_operation_amount DECIMAL(14,2) NOT NULL DEFAULT 50.00,
       default_commission_type ENUM('FLAT','PERCENT') NOT NULL DEFAULT 'FLAT',
       default_commission_value DECIMAL(14,2) NOT NULL DEFAULT 1.00,
-      default_staff_share_pct DECIMAL(5,2) NULL,
-      default_partner_share_pct DECIMAL(5,2) NULL,
+      default_staff_share_pct DECIMAL(5,2) NOT NULL DEFAULT 100.00,
+      default_partner_share_pct DECIMAL(5,2) NOT NULL DEFAULT 0.00,
       require_cash_to_yape_reference TINYINT(1) NOT NULL DEFAULT 0,
       allow_cashier_cancel TINYINT(1) NOT NULL DEFAULT 1,
       updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -149,6 +149,18 @@ export async function ensureStage4Schema() {
   await db.query(`
     UPDATE branch_settings
     SET staff_share_pct=100, partner_share_pct=0
+  `);
+
+  await db.query(`
+    UPDATE operations
+    SET staff_share_amount=commission, partner_share_amount=0
+    WHERE staff_share_amount<>commission OR partner_share_amount<>0
+  `);
+
+  await db.query(`
+    UPDATE daily_closures
+    SET staff_share_total=commission_total, partner_share_total=0
+    WHERE staff_share_total<>commission_total OR partner_share_total<>0
   `);
 
   await db.query(`
