@@ -354,7 +354,7 @@ type BranchDetail = {
 };
 
 const nav: Array<{ page: AdminPage; label: string; icon: typeof Home }> = [
-  { page: "dashboard", label: "Dashboard", icon: Home },
+  { page: "dashboard", label: "Inicio", icon: Home },
   { page: "branches", label: "Filiales", icon: Building2 },
   { page: "operations", label: "Operaciones", icon: ReceiptText },
   { page: "cash", label: "Cajas / Cierres", icon: WalletCards },
@@ -582,7 +582,7 @@ function OwnerDashboard({ user, overview, onPage }: { user: AuthUser; overview: 
     try {
       setData(await api<DashboardData>(`/api/admin/dashboard?${query()}`));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo cargar el dashboard");
+      setError(err instanceof Error ? err.message : "No se pudo cargar el panel principal");
     } finally {
       setLoading(false);
     }
@@ -615,7 +615,7 @@ function OwnerDashboard({ user, overview, onPage }: { user: AuthUser; overview: 
       </div>
 
       {error && <div className="error-banner">{error}<button onClick={() => void loadDashboard()}><RefreshCw size={14}/> Reintentar</button></div>}
-      {loading && !data && <div className="owner-loading">Actualizando dashboard…</div>}
+      {loading && !data && <div className="owner-loading">Actualizando panel principal…</div>}
 
       {data && <>
         <div className="dashboard-kpi-grid">
@@ -984,7 +984,7 @@ function PartnersPage({ users, branches }: { users: AdminUser[]; branches: Branc
           <form className="partner-assignment-form" onSubmit={saveAssignment}>
             <label>Filial<select value={branchId} onChange={(e)=>setBranchId(e.target.value)} required>{branches.map((item)=><option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
             <label>Socio<select value={userId} onChange={(e)=>setUserId(e.target.value)} required>{partners.map((item)=><option value={item.id} key={item.id}>{item.full_name}</option>)}</select></label>
-            <label>% del pool de socios<input type="number" min="0" max="100" step="0.01" value={share} onChange={(e)=>setShare(e.target.value)} required /></label>
+            <label>% del reparto de socios<input type="number" min="0" max="100" step="0.01" value={share} onChange={(e)=>setShare(e.target.value)} required /></label>
             <button className="primary" disabled={!partners.length || !branches.length}>Guardar asignación</button>
             {error && <div className="modal-error">{error}</div>}
             {message && <div className="success-message">{message}</div>}
@@ -1009,7 +1009,7 @@ function PartnersPage({ users, branches }: { users: AdminUser[]; branches: Branc
         <div className="card-head"><div><strong>Asignaciones por filial</strong><span>La suma activa por filial no puede superar 100%.</span></div></div>
         <div className="table-wrap">
           <table className="admin-table">
-            <thead><tr><th>Filial</th><th>Socio</th><th>Usuario</th><th>% pool socio</th><th>Ganancia acumulada</th><th>Estado</th><th>Acción</th></tr></thead>
+            <thead><tr><th>Filial</th><th>Socio</th><th>Usuario</th><th>% de reparto del socio</th><th>Ganancia acumulada</th><th>Estado</th><th>Acción</th></tr></thead>
             <tbody>
               {assignments.map((item)=><tr key={item.id}><td><strong>{item.branch_name}</strong></td><td>{item.full_name}</td><td>{item.username}</td><td>{Number(item.pool_share_pct).toFixed(2)}%</td><td><strong>{currency(item.earnings ?? 0)}</strong></td><td><span className={item.active?"branch-status open":"branch-status closed"}>{item.active?"Activo":"Inactivo"}</span></td><td>{item.active?<button className="mini-button danger-mini" onClick={()=>void disableAssignment(item)}>Desactivar</button>:"—"}</td></tr>)}
               {!assignments.length && <tr><td colSpan={7} className="empty-cell">Todavía no hay socios asignados a filiales.</td></tr>}
@@ -1131,16 +1131,60 @@ function ScaleIcon() {
   return <ClipboardCheck />;
 }
 
+function auditActionLabel(action: string) {
+  const labels: Record<string, string> = {
+    LOGIN: "Inicio de sesión",
+    LOGIN_FAILED: "Inicio de sesión fallido",
+    LOGOUT: "Cierre de sesión",
+    OPERATION_CREATED: "Operación registrada",
+    OPERATION_CANCELLED: "Operación anulada",
+    OPERATION_REVERSED: "Operación revertida",
+    CASH_OPENED: "Caja abierta",
+    CASH_CLOSED: "Caja cerrada",
+    CASH_HANDOFF: "Cambio de encargado",
+    PASSWORD_CHANGED: "Contraseña cambiada",
+    SYSTEM_SETTINGS_UPDATED: "Configuración general actualizada",
+    DEFAULT_RULES_APPLIED_TO_BRANCHES: "Reglas generales aplicadas a filiales",
+    SESSION_REVOKED: "Sesión cerrada por administración",
+    USER_SESSIONS_REVOKED: "Sesiones de usuario cerradas",
+    PARTNER_ASSIGNMENT_UPDATED: "Asignación de socio actualizada",
+    ROLE_PERMISSIONS_UPDATED: "Permisos de rol actualizados",
+    BRANCH_CREATED: "Filial creada",
+    BRANCH_SETTINGS_UPDATED: "Configuración de filial actualizada",
+    BRANCH_UPDATED: "Filial actualizada",
+    USER_CREATED: "Usuario creado",
+    USER_PASSWORD_RESET: "Contraseña de usuario restablecida",
+    USER_STATUS_CHANGED: "Estado de usuario actualizado",
+    USER_UPDATED: "Usuario actualizado"
+  };
+  return labels[action] ?? "Evento del sistema";
+}
+
+function auditEntityLabel(entity: string | null) {
+  if (!entity) return "—";
+  const labels: Record<string, string> = {
+    USER: "Usuario",
+    AUTH_SESSION: "Sesión",
+    OPERATION: "Operación",
+    SYSTEM: "Sistema",
+    BRANCH: "Filial",
+    CASH_SESSION: "Turno de caja",
+    DAILY_CLOSURE: "Cierre diario",
+    ROLE: "Rol"
+  };
+  return labels[entity] ?? "Registro";
+}
+
 function AuditPage({ rows }: { rows: AuditRow[] }) {
   return (
     <section className="card page-card">
       <div className="card-head"><div><strong>Bitácora de seguridad</strong><span>{rows.length} eventos recientes</span></div></div>
       <div className="table-wrap">
         <table className="admin-table">
-          <thead><tr><th>Fecha / Hora</th><th>Usuario</th><th>Filial</th><th>IP</th><th>Acción</th><th>Entidad</th><th>ID</th></tr></thead>
+          <thead><tr><th>Fecha / Hora</th><th>Usuario</th><th>Filial</th><th>IP</th><th>Acción</th><th>Entidad</th><th>N.º</th></tr></thead>
           <tbody>
             {rows.map((row) => (
-              <tr key={row.id}><td>{dateTime(row.created_at)}</td><td><strong>{row.user_name ?? "Sistema"}</strong><br/><small>{row.username ?? ""}</small></td><td>{row.branch_name ?? "Global"}</td><td>{row.ip_address ?? "—"}</td><td><span className="audit-action">{row.action}</span></td><td>{row.entity_type ?? "—"}</td><td>{row.entity_id ?? "—"}</td></tr>
+              <tr key={row.id}><td>{dateTime(row.created_at)}</td><td><strong>{row.user_name ?? "Sistema"}</strong><br/><small>{row.username ?? ""}</small></td><td>{row.branch_name ?? "Global"}</td><td>{row.ip_address ?? "—"}</td><td><span className="audit-action">{auditActionLabel(row.action)}</span></td><td>{auditEntityLabel(row.entity_type)}</td><td>{row.entity_id ?? "—"}</td></tr>
             ))}
           </tbody>
         </table>
@@ -1353,7 +1397,7 @@ function SecurityPage({ currentUserId }: { currentUserId: number }) {
         <section className="card security-runtime-card">
           <div className="card-head"><div><strong>Entorno local</strong><span>Estado del LXC/Docker visto desde la API.</span></div><RefreshCw size={16}/></div>
           <div className="runtime-list">
-            <div><span>Uptime API</span><strong>{uptime}</strong></div>
+            <div><span>Tiempo activo de la API</span><strong>{uptime}</strong></div>
             <div><span>Node.js</span><strong>{status?.api.node ?? "—"}</strong></div>
             <div><span>Memoria API</span><strong>{status ? String(status.api.memoryMb) + " MB" : "—"}</strong></div>
             <div><span>MariaDB</span><strong>{status?.database.version ?? "—"}</strong></div>
@@ -1368,23 +1412,23 @@ function SecurityPage({ currentUserId }: { currentUserId: number }) {
           <div className="security-checks">
             <div><CheckCircle2 size={15}/><span>Sesiones HttpOnly del lado del servidor</span></div>
             <div><CheckCircle2 size={15}/><span>Bloqueo temporal por intentos fallidos</span></div>
-            <div><CheckCircle2 size={15}/><span>Permisos por rol y filial validados en backend</span></div>
+            <div><CheckCircle2 size={15}/><span>Permisos por rol y filial validados en el servidor</span></div>
             <div><CheckCircle2 size={15}/><span>Anulaciones y reversos con motivo y auditoría</span></div>
-            <div><CheckCircle2 size={15}/><span>Health checks de MariaDB, API y Web</span></div>
+            <div><CheckCircle2 size={15}/><span>Verificaciones de estado de MariaDB, API y sitio web</span></div>
           </div>
         </section>
       </div>
 
       <section className="card page-card">
         <div className="card-head">
-          <div><strong>Permisos por rol</strong><span>Configuración aplicada y validada en backend.</span></div>
-          <span className="build-badge">Build {UI_BUILD}</span>
+          <div><strong>Permisos por rol</strong><span>Configuración aplicada y validada en el servidor.</span></div>
+          <span className="build-badge">Versión {UI_BUILD}</span>
         </div>
         <div className="role-permission-grid">
           {roles.map((role) => (
             <div className="role-permission-card" key={role.id}>
               <div className="role-permission-head">
-                <div><strong>{role.name}</strong><span>{role.code}</span></div>
+                <div><strong>{role.name}</strong><span>Permisos del rol</span></div>
                 {role.code === "OWNER" && <em>Protegido</em>}
               </div>
               <div className="role-permission-options">
