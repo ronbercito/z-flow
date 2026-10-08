@@ -405,6 +405,16 @@ function closureResult(item: Pick<Closure, "difference_cash" | "difference_walle
   return { label: "Sobrante", cls: "warning" };
 }
 
+
+function pendingCommission(item: Pick<Closure, "commission_total" | "staff_share_total" | "partner_share_total">) {
+  return Math.max(
+    0,
+    Number(item.commission_total ?? 0)
+      - Number(item.staff_share_total ?? 0)
+      - Number(item.partner_share_total ?? 0)
+  );
+}
+
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { credentials: "same-origin", ...init });
   const result = await response.json().catch(() => ({}));
@@ -874,22 +884,20 @@ function CashAdminPage({ branches, closures }: { branches: Branch[]; closures: C
         </div>
         <div className="table-wrap">
           <table className="admin-table">
-            <thead><tr><th>Fecha</th><th>Filial</th><th>Responsable</th><th>Resultado</th><th>Ops.</th><th>Comisión</th><th>Encargado</th><th>Socio</th><th>Caja esperada</th><th>Caja declarada</th><th>Diferencia caja</th><th>Yape esperado</th><th>Yape declarado</th><th>Diferencia Yape</th><th>PDF</th></tr></thead>
+            <thead><tr><th>Fecha</th><th>Filial</th><th>Responsable</th><th>Resultado</th><th>Operaciones</th><th>Comisión</th><th>Diferencias</th><th>PDF</th></tr></thead>
             <tbody>
               {filteredClosures.map((item) => (
                 <tr key={item.id}>
                   <td>{dateTime(item.closed_at)}</td><td><strong>{item.branch_name}</strong></td>
                   <td>{item.closed_by ?? "—"}</td>
                   <td><span className={`branch-status ${closureResult(item).cls}`}>{closureResult(item).label}</span></td>
-                  <td>{item.operation_count ?? 0}</td><td>{currency(item.commission_total)}</td><td>{currency(item.staff_share_total)}</td><td>{currency(item.partner_share_total)}</td>
-                  <td>{currency(item.expected_cash)}</td><td>{currency(item.declared_cash)}</td>
-                  <td className={Math.abs(Number(item.difference_cash)) < 0.005 ? "green-text" : "red-text"}>{currency(item.difference_cash)}</td>
-                  <td>{currency(item.expected_wallet)}</td><td>{currency(item.declared_wallet)}</td>
-                  <td className={Math.abs(Number(item.difference_wallet)) < 0.005 ? "green-text" : "red-text"}>{currency(item.difference_wallet)}</td>
+                  <td>{item.operation_count ?? 0}</td>
+                  <td><strong>{currency(item.commission_total)}</strong><br/><small>Enc. {currency(item.staff_share_total)} · Socio {currency(item.partner_share_total)}{pendingCommission(item) > 0 ? ` · Pendiente ${currency(pendingCommission(item))}` : ""}</small></td>
+                  <td><span className={Math.abs(Number(item.difference_cash)) < 0.005 ? "green-text" : "red-text"}>Efectivo {currency(item.difference_cash)}</span><br/><span className={Math.abs(Number(item.difference_wallet)) < 0.005 ? "green-text" : "red-text"}>Yape {currency(item.difference_wallet)}</span></td>
                   <td><button className="mini-button" onClick={() => window.open(`/api/branches/${item.branch_id}/closures/${item.id}/pdf`, "_blank")}><Download size={12}/> PDF</button></td>
                 </tr>
               ))}
-              {!filteredClosures.length && <tr><td colSpan={15} className="empty-cell">No hay cierres para esos filtros.</td></tr>}
+              {!filteredClosures.length && <tr><td colSpan={8} className="empty-cell">No hay cierres para esos filtros.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -1876,9 +1884,9 @@ function BranchDetailModal({
         {!detail.users.length && <tr><td colSpan={5} className="empty-cell">No hay usuarios asignados.</td></tr>}
       </tbody></table></div></div>}
 
-      {!loading && detail && tab==="closures" && <div className="branch-detail-table"><div className="table-wrap"><table className="admin-table"><thead><tr><th>Fecha</th><th>Resultado</th><th>Ops.</th><th>Comisión</th><th>Encargado</th><th>Socio</th><th>Caja esperada</th><th>Caja declarada</th><th>Diferencia caja</th><th>Yape esperado</th><th>Yape declarado</th><th>Diferencia Yape</th><th>PDF</th></tr></thead><tbody>
-        {detail.closures.map((item)=><tr key={item.id}><td>{dateTime(item.closed_at)}</td><td><span className={`branch-status ${closureResult(item as Closure).cls}`}>{closureResult(item as Closure).label}</span></td><td>{item.operation_count ?? 0}</td><td>{currency(item.commission_total)}</td><td>{currency(item.staff_share_total)}</td><td>{currency(item.partner_share_total)}</td><td>{currency(item.expected_cash)}</td><td>{currency(item.declared_cash)}</td><td className={Number(item.difference_cash)===0?"green-text":"red-text"}>{currency(item.difference_cash)}</td><td>{currency(item.expected_wallet)}</td><td>{currency(item.declared_wallet)}</td><td className={Math.abs(Number(item.difference_wallet))<0.005?"green-text":"red-text"}>{currency(item.difference_wallet)}</td><td><button className="mini-button" onClick={()=>window.open(`/api/branches/${detail.branch.id}/closures/${item.id}/pdf`,"_blank")}><Download size={12}/> PDF</button></td></tr>)}
-        {!detail.closures.length && <tr><td colSpan={13} className="empty-cell">Todavía no hay cierres.</td></tr>}
+      {!loading && detail && tab==="closures" && <div className="branch-detail-table"><div className="table-wrap"><table className="admin-table"><thead><tr><th>Fecha</th><th>Resultado</th><th>Operaciones</th><th>Comisión</th><th>Diferencias</th><th>PDF</th></tr></thead><tbody>
+        {detail.closures.map((item)=><tr key={item.id}><td>{dateTime(item.closed_at)}</td><td><span className={`branch-status ${closureResult(item as Closure).cls}`}>{closureResult(item as Closure).label}</span></td><td>{item.operation_count ?? 0}</td><td><strong>{currency(item.commission_total)}</strong><br/><small>Enc. {currency(item.staff_share_total)} · Socio {currency(item.partner_share_total)}{pendingCommission(item as Closure)>0 ? ` · Pendiente ${currency(pendingCommission(item as Closure))}` : ""}</small></td><td><span className={Math.abs(Number(item.difference_cash))<0.005?"green-text":"red-text"}>Efectivo {currency(item.difference_cash)}</span><br/><span className={Math.abs(Number(item.difference_wallet))<0.005?"green-text":"red-text"}>Yape {currency(item.difference_wallet)}</span></td><td><button className="mini-button" onClick={()=>window.open(`/api/branches/${detail.branch.id}/closures/${item.id}/pdf`,"_blank")}><Download size={12}/> PDF</button></td></tr>)}
+        {!detail.closures.length && <tr><td colSpan={6} className="empty-cell">Todavía no hay cierres.</td></tr>}
       </tbody></table></div></div>}
     </div>
   </div>;
