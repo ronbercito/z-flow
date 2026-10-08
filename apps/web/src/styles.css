@@ -2240,3 +2240,55 @@ tr:last-child td { border-bottom:0; }
   overflow-y: auto;
   overscroll-behavior: contain;
 }
+
+/* Compact, friendly filial selector for reports */
+.branch-report-heading-copy { display:grid; gap:4px; }
+.report-branch-select {
+  border: 1px solid #e6edf5;
+  background: linear-gradient(135deg,#fff 0%,#fbfdff 100%);
+  box-shadow: 0 3px 10px #203a5c08;
+  padding: 12px;
+  margin: 0;
+  gap: 10px;
+  transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease, background .16s ease;
+}
+.report-branch-select:hover {
+  background: #fff;
+  border-color: #bed3f4;
+  box-shadow: 0 7px 18px #203a5c12;
+  transform: translateY(-1px);
+}
+.report-branch-select.selected {
+  border-color: #8eb6f4;
+  background: linear-gradient(135deg,#f5f9ff 0%,#fff 100%);
+  box-shadow: 0 0 0 3px #2563eb0d, 0 6px 16px #203a5c0c;
+}
+.branch-report-card-top { display:flex; align-items:center; gap:10px; min-width:0; }
+.branch-report-mark {
+  width:34px; height:34px; flex:0 0 34px; display:grid; place-items:center;
+  border-radius:10px; color:#2563eb; background:#edf5ff; font-size:12px; font-weight:800;
+}
+.report-branch-select.selected .branch-report-mark { color:#fff; background:linear-gradient(135deg,#3478ee,#6655df); }
+.branch-report-name { display:grid; gap:3px; min-width:0; }
+.branch-report-name strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11px; color:#23324a; }
+.branch-report-name small, .branch-report-amount small { color:#8b98aa; font-size:9px; }
+.branch-report-amount { display:grid; gap:3px; text-align:right; margin-left:auto; }
+.branch-report-amount strong { font-size:12px; color:#23324a; white-space:nowrap; }
+.branch-report-card-bottom { display:flex; justify-content:space-between; gap:8px; color:#8291a5; font-size:9px; }
+.report-branch-select.selected .branch-report-card-bottom span:first-child { color:#2563eb; font-weight:750; }
+.owner-report-bars:not(.all-branch-comparison) { max-width:700px; }
+.owner-report-bars.all-branch-comparison {
+  max-height:min(360px,55vh);
+  overflow-y:auto;
+  overscroll-behavior:contain;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  align-content:start;
+  gap:10px;
+  padding:16px;
+  scrollbar-width:thin;
+  scrollbar-color:#cad7e8 transparent;
+}
+@media (max-width:760px) {
+  .owner-report-bars.all-branch-comparison { grid-template-columns:1fr; max-height:320px; }
+  .branch-report-amount strong { font-size:11px; }
+}
