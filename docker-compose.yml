@@ -3,6 +3,7 @@ services:
     image: mariadb:11.8
     restart: unless-stopped
     environment:
+      TZ: ${TZ:-America/Lima}
       MARIADB_DATABASE: ${DB_NAME:-zflow}
       MARIADB_USER: ${DB_USER:-zflow}
       MARIADB_PASSWORD: ${DB_PASSWORD:-zflow_local_change_me}
@@ -15,12 +16,18 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
 
   api:
     build:
       context: ./apps/api
     restart: unless-stopped
     environment:
+      TZ: ${TZ:-America/Lima}
       PORT: 3001
       DB_HOST: db
       DB_PORT: 3306
@@ -40,11 +47,18 @@ services:
       timeout: 5s
       retries: 10
       start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   web:
     build:
       context: ./apps/web
     restart: unless-stopped
+    environment:
+      TZ: ${TZ:-America/Lima}
     depends_on:
       api:
         condition: service_healthy
@@ -56,6 +70,11 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   zflow_db:
