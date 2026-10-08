@@ -166,3 +166,22 @@ La siguiente fase es probar todo paso por paso en el entorno local antes de cual
 - No existe módulo de socios en el flujo operativo actual.
 - La comisión completa de las operaciones corresponde al encargado.
 - En **Usuarios → Detalles** se consultan sus ganancias y actividad.
+
+
+### Cierre de la etapa local
+
+Validación completa sin tocar los datos productivos:
+
+```bash
+cd /opt/z-flow
+bash scripts/verify-local-production.sh
+```
+
+Después de reiniciar el LXC desde Proxmox:
+
+```bash
+cd /opt/z-flow
+bash scripts/verify-after-reboot.sh
+```
+
+Si ambas pruebas terminan en **OK**, la instalación local queda validada para uso real de filiales. La migración a nube se mantiene para la etapa final.
