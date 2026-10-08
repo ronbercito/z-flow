@@ -56,6 +56,7 @@ const branchSettingsBody = z.object({
 
 const createUserBody = z.object({
   branchId: z.coerce.number().int().positive().nullable().optional(),
+  partnerPoolSharePct: z.coerce.number().min(0).max(100).optional(),
   roleCode: z.enum(["OWNER", "PARTNER", "BRANCH_ADMIN", "CASHIER", "AUDITOR"]),
   username: z.string().trim().min(3).max(80).regex(/^[A-Za-z0-9._-]+$/),
   fullName: z.string().trim().min(3).max(140),
@@ -666,9 +667,13 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     }
 
     const body = parsed.data;
-    const branchRoles = ["BRANCH_ADMIN", "CASHIER"];
-    if (branchRoles.includes(body.roleCode) && !body.branchId) {
-      return reply.code(400).send({ error: "Ese rol requiere una filial asignada" });
+    const requiresBranch = ["BRANCH_ADMIN", "CASHIER", "PARTNER"].includes(body.roleCode);
+    if (requiresBranch && !body.branchId) {
+      return reply.code(400).send({
+        error: body.roleCode === "PARTNER"
+          ? "Selecciona la filial inicial del socio"
+          : "Ese rol requiere una filial asignada"
+      });
     }
 
     const [roleRows] = await db.query<any[]>(
@@ -689,14 +694,41 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       }
     }
 
+    const partnerShare = body.roleCode === "PARTNER"
+      ? Number(body.partnerPoolSharePct ?? 100)
+      : null;
+
+    if (body.roleCode === "PARTNER" && body.branchId) {
+      const [shareRows] = await db.query<any[]>(
+        `SELECT COALESCE(SUM(pool_share_pct),0) AS total
+         FROM branch_partner_assignments
+         WHERE branch_id=? AND active=1`,
+        [body.branchId]
+      );
+      const used = Number(shareRows[0]?.total ?? 0);
+      if (used + Number(partnerShare ?? 0) > 100.01) {
+        const available = Math.max(0, Math.round((100 - used) * 100) / 100);
+        return reply.code(422).send({
+          error: `Esa filial ya tiene ${used.toFixed(2)}% asignado a socios. Disponible: ${available.toFixed(2)}%`
+        });
+      }
+    }
+
     const passwordHash = await bcrypt.hash(body.password, 12);
+    const connection = await db.getConnection();
 
     try {
-      const [result] = await db.execute<any>(
+      await connection.beginTransaction();
+
+      const userBranchId = ["BRANCH_ADMIN", "CASHIER"].includes(body.roleCode)
+        ? body.branchId ?? null
+        : null;
+
+      const [result] = await connection.execute<any>(
         `INSERT INTO users (branch_id, role_id, username, password_hash, full_name, active)
          VALUES (?, ?, ?, ?, ?, 1)`,
         [
-          body.branchId ?? null,
+          userBranchId,
           roleRows[0].id,
           body.username.toLowerCase(),
           passwordHash,
@@ -704,18 +736,71 @@ export async function registerAdminRoutes(app: FastifyInstance) {
         ]
       );
 
-      await db.execute(
-        `INSERT INTO audit_logs (branch_id, user_id, action, entity_type, entity_id, details)
-         VALUES (?, ?, 'USER_CREATED', 'USER', ?, JSON_OBJECT('username', ?, 'role', ?))`,
-        [body.branchId ?? null, auth.userId, Number(result.insertId), body.username.toLowerCase(), body.roleCode]
+      const userId = Number(result.insertId);
+
+      if (body.roleCode === "PARTNER" && body.branchId) {
+        await connection.execute(
+          `INSERT INTO branch_partner_assignments
+            (branch_id, user_id, pool_share_pct, active)
+           VALUES (?, ?, ?, 1)`,
+          [body.branchId, userId, partnerShare]
+        );
+      }
+
+      await connection.execute(
+        `INSERT INTO audit_logs
+          (branch_id, user_id, action, entity_type, entity_id, details, ip_address, user_agent)
+         VALUES (?, ?, 'USER_CREATED', 'USER', ?,
+           JSON_OBJECT('username', ?, 'role', ?, 'partner_branch_id', ?, 'partner_pool_share_pct', ?),
+           ?, ?)`,
+        [
+          body.branchId ?? null,
+          auth.userId,
+          userId,
+          body.username.toLowerCase(),
+          body.roleCode,
+          body.roleCode === "PARTNER" ? body.branchId ?? null : null,
+          body.roleCode === "PARTNER" ? partnerShare : null,
+          request.ip,
+          String(request.headers["user-agent"] ?? "").slice(0, 255)
+        ]
       );
 
-      return reply.code(201).send({ id: Number(result.insertId), ok: true });
+      if (body.roleCode === "PARTNER" && body.branchId) {
+        await connection.execute(
+          `INSERT INTO audit_logs
+            (branch_id, user_id, action, entity_type, entity_id, details, ip_address, user_agent)
+           VALUES (?, ?, 'PARTNER_ASSIGNMENT_UPDATED', 'USER', ?,
+             JSON_OBJECT('poolSharePct', ?, 'active', true, 'createdWithUser', true),
+             ?, ?)`,
+          [
+            body.branchId,
+            auth.userId,
+            userId,
+            partnerShare,
+            request.ip,
+            String(request.headers["user-agent"] ?? "").slice(0, 255)
+          ]
+        );
+      }
+
+      await connection.commit();
+
+      return reply.code(201).send({
+        id: userId,
+        ok: true,
+        partnerAssignmentCreated: body.roleCode === "PARTNER",
+        partnerBranchId: body.roleCode === "PARTNER" ? body.branchId ?? null : null,
+        partnerPoolSharePct: body.roleCode === "PARTNER" ? partnerShare : null
+      });
     } catch (error: any) {
+      await connection.rollback();
       if (error?.code === "ER_DUP_ENTRY") {
         return reply.code(409).send({ error: "Ese nombre de usuario ya existe" });
       }
       throw error;
+    } finally {
+      connection.release();
     }
   });
 
