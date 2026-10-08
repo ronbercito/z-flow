@@ -181,24 +181,27 @@ async function excelBuffer(report: Awaited<ReturnType<typeof fetchReport>>, titl
 
   const operations = workbook.addWorksheet("Operaciones");
   operations.columns = [
-    { header: "Fecha", key: "created_at", width: 20 },
+    { header: "Fecha / hora", key: "created_at", width: 22 },
     { header: "Filial", key: "branch_name", width: 22 },
-    { header: "Tipo", key: "operation_type", width: 18 },
+    { header: "N.º operación", key: "operation_id", width: 14 },
+    { header: "Referencia Yape", key: "reference_code", width: 20 },
+    { header: "Concepto", key: "operation_type", width: 20 },
     { header: "Cliente", key: "customer_name", width: 22 },
-    { header: "Referencia", key: "reference_code", width: 18 },
-    { header: "Monto", key: "amount", width: 14 },
-    { header: "Ganancia", key: "commission", width: 14 },
-    { header: "Entregado", key: "net_amount", width: 14 },
-    { header: "Registró", key: "registered_by", width: 22 },
-    { header: "Comprobante", key: "receipt", width: 18 }
+    { header: "Entrada (Yape / efectivo)", key: "entry_amount", width: 22 },
+    { header: "Salida (efectivo / Yape)", key: "exit_amount", width: 22 },
+    { header: "Comisión / ingreso real", key: "commission", width: 20 },
+    { header: "Comprobante interno", key: "receipt", width: 22 }
   ];
   report.operations.forEach((row: any) => operations.addRow({
     ...row,
+    operation_id: row.id,
     operation_type: row.operation_type === "YAPE_TO_CASH" ? "Yape → Efectivo" : "Efectivo → Yape",
+    entry_amount: row.amount,
+    exit_amount: row.net_amount,
     receipt: row.series && row.sequence_number ? `${row.series}-${String(row.sequence_number).padStart(6,"0")}` : ""
   }));
   operations.getRow(1).font = { bold: true };
-  ["F","G","H"].forEach((col) => { operations.getColumn(col).numFmt = '"S/" #,##0.00'; });
+  ["G","H","I"].forEach((col) => { operations.getColumn(col).numFmt = '"S/" #,##0.00'; });
 
   const out = await workbook.xlsx.writeBuffer();
   return Buffer.from(out);
@@ -245,7 +248,7 @@ function pdfBuffer(report: Awaited<ReturnType<typeof fetchReport>>, title: strin
     report.operations.slice(0, 250).forEach((row: any) => {
       const receipt = row.series && row.sequence_number ? `${row.series}-${String(row.sequence_number).padStart(6,"0")}` : "—";
       doc.fontSize(7.5).text(
-        `${row.created_at} · ${row.branch_name} · ${row.operation_type === "YAPE_TO_CASH" ? "Yape a Efectivo" : "Efectivo a Yape"} · ${pen(row.amount)} · Comisión ${pen(row.commission)} · ${receipt}`
+        `${row.created_at} · Op. ${row.id} · ${row.branch_name} · ${row.operation_type === "YAPE_TO_CASH" ? "Yape → Efectivo" : "Efectivo → Yape"} · ${row.customer_name ?? "Sin nombre"} · Entrada ${pen(row.amount)} · Entrega ${pen(row.net_amount)} · Comisión ${pen(row.commission)} · Comprobante interno ${receipt}`
       );
       doc.moveDown(0.15);
     });
