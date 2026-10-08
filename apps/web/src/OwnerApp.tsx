@@ -916,26 +916,24 @@ function CashAdminPage({ branches, closures }: { branches: Branch[]; closures: C
 }
 
 function UsersPage({ users, branches, onDetail }: { users: AdminUser[]; branches: Branch[]; onDetail: (userId: number) => void }) {
-  const staff = users.filter((item) => item.role_code === "CASHIER");
+  const staff = users.filter((item) => item.role_code === "CASHIER" && Boolean(item.active));
   return (
     <section className="card page-card">
-      <div className="card-head"><div><strong>Encargados de filial</strong><span>{staff.filter((item)=>Boolean(item.active)).length} activos · {branches.length} filiales</span></div></div>
+      <div className="card-head"><div><strong>Encargados de filial</strong><span>{staff.length} encargados activos · {branches.length} filiales</span></div></div>
       <div className="table-wrap">
         <table className="admin-table">
-          <thead><tr><th>Nombre</th><th>Usuario</th><th>Rol</th><th>Filial</th><th>Último acceso</th><th>Estado</th><th></th></tr></thead>
+          <thead><tr><th>Nombre</th><th>Cuenta</th><th>Filial</th><th>Último acceso</th><th></th></tr></thead>
           <tbody>
             {staff.map((item) => (
               <tr key={item.id}>
                 <td><strong>{item.full_name}</strong></td>
                 <td>{item.username}</td>
-                <td>Cajero / Encargado</td>
                 <td>{item.branch_name ?? "Sin filial"}</td>
                 <td>{dateTime(item.last_login_at)}</td>
-                <td><span className={item.active ? "branch-status open" : "branch-status closed"}>{item.active ? "Activo" : "Inactivo"}</span></td>
                 <td><button className="mini-button" onClick={() => onDetail(item.id)}><Eye size={13}/> Detalles</button></td>
               </tr>
             ))}
-            {!staff.length && <tr><td colSpan={7} className="empty-cell">Todavía no hay encargados creados.</td></tr>}
+            {!staff.length && <tr><td colSpan={5} className="empty-cell">Todavía no hay encargados activos.</td></tr>}
           </tbody>
         </table>
       </div>
