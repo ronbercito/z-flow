@@ -185,6 +185,24 @@ export async function ensureStage4Schema() {
       CONSTRAINT fk_branch_partner_user FOREIGN KEY (user_id) REFERENCES users(id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS operation_partner_shares (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      operation_id BIGINT UNSIGNED NOT NULL,
+      branch_id BIGINT UNSIGNED NOT NULL,
+      user_id BIGINT UNSIGNED NOT NULL,
+      pool_share_pct DECIMAL(5,2) NOT NULL,
+      amount DECIMAL(14,2) NOT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY uq_operation_partner_share (operation_id, user_id),
+      KEY idx_partner_share_user (user_id, created_at),
+      CONSTRAINT fk_operation_partner_share_operation FOREIGN KEY (operation_id) REFERENCES operations(id),
+      CONSTRAINT fk_operation_partner_share_branch FOREIGN KEY (branch_id) REFERENCES branches(id),
+      CONSTRAINT fk_operation_partner_share_user FOREIGN KEY (user_id) REFERENCES users(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
 }
 
 export async function registerStage4Routes(app: FastifyInstance) {
@@ -396,10 +414,16 @@ export async function registerStage4Routes(app: FastifyInstance) {
     if (!auth) return;
     const [rows] = await db.query<any[]>(`
       SELECT a.id, a.branch_id, a.user_id, a.pool_share_pct, a.active,
-             b.name AS branch_name, u.full_name, u.username
+             b.name AS branch_name, u.full_name, u.username,
+             COALESCE(SUM(CASE WHEN o.status='COMPLETED' THEN ops.amount ELSE 0 END),0) AS earnings
       FROM branch_partner_assignments a
       JOIN branches b ON b.id=a.branch_id
       JOIN users u ON u.id=a.user_id
+      LEFT JOIN operation_partner_shares ops
+        ON ops.branch_id=a.branch_id AND ops.user_id=a.user_id
+      LEFT JOIN operations o ON o.id=ops.operation_id
+      GROUP BY a.id, a.branch_id, a.user_id, a.pool_share_pct, a.active,
+               b.name, u.full_name, u.username
       ORDER BY b.name, u.full_name
     `);
     return { assignments: rows };
