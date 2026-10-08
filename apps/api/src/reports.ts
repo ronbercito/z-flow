@@ -103,6 +103,23 @@ async function fetchReport(filters: ReportFilters, forcedBranchId?: number) {
     ORDER BY amount_total DESC
   `, params);
 
+  const comparisonFilter = forcedBranchId
+    ? { where, params }
+    : buildConditions({ ...filters, branchId: undefined });
+  const [branchComparisonRows] = await db.query<any[]>(`
+    SELECT b.id, b.code, b.name,
+           COUNT(*) AS operation_count,
+           COALESCE(SUM(o.amount),0) AS amount_total,
+           COALESCE(SUM(o.commission),0) AS commission_total,
+           COALESCE(SUM(o.staff_share_amount),0) AS staff_share_total,
+           COALESCE(SUM(o.partner_share_amount),0) AS partner_share_total
+    FROM operations o
+    JOIN branches b ON b.id = o.branch_id
+    ${comparisonFilter.where}
+    GROUP BY b.id, b.code, b.name
+    ORDER BY amount_total DESC
+  `, comparisonFilter.params);
+
   const [brandingRows] = await db.query<any[]>("SELECT business_name FROM system_settings WHERE id=1 LIMIT 1");
   const businessName = String(brandingRows[0]?.business_name ?? "Z-FLOW");
   const summary = summaryRows[0] ?? {};
@@ -128,6 +145,16 @@ async function fetchReport(filters: ReportFilters, forcedBranchId?: number) {
       cashToYapeCount: Number(summary.cash_to_yape_count ?? 0)
     },
     branches: branchRows.map((row) => ({
+      id: Number(row.id),
+      code: row.code,
+      name: row.name,
+      operationCount: Number(row.operation_count ?? 0),
+      amountTotal: money(row.amount_total),
+      commissionTotal: money(row.commission_total),
+      staffShareTotal: money(row.staff_share_total),
+      partnerShareTotal: money(row.partner_share_total)
+    })),
+    branchComparison: branchComparisonRows.map((row) => ({
       id: Number(row.id),
       code: row.code,
       name: row.name,
