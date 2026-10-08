@@ -460,7 +460,8 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     `, [branchId]);
 
     const [userRows] = await db.query<any[]>(`
-      SELECT u.id, u.username, u.full_name, u.active, u.last_login_at,
+      SELECT u.id, u.username, u.full_name, u.active,
+             DATE_FORMAT(u.last_login_at, '%Y-%m-%dT%H:%i:%s') AS last_login_at,
              r.code AS role_code, r.name AS role_name
       FROM users u
       JOIN roles r ON r.id = u.role_id
@@ -624,7 +625,8 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     if (!auth) return;
 
     const [rows] = await db.query<any[]>(`
-      SELECT u.id, u.username, u.full_name, u.active, u.created_at, u.last_login_at,
+      SELECT u.id, u.username, u.full_name, u.active, u.created_at,
+             DATE_FORMAT(u.last_login_at, '%Y-%m-%dT%H:%i:%s') AS last_login_at,
              r.code AS role_code, r.name AS role_name,
              b.id AS branch_id, b.name AS branch_name
       FROM users u
