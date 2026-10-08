@@ -1136,6 +1136,204 @@ function AuditPage({ rows }: { rows: AuditRow[] }) {
   );
 }
 
+function SystemSettingsPage() {
+  const [settings, setSettings] = useState<SystemSettings | null>(null);
+  const [form, setForm] = useState<SystemSettings | null>(null);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function load() {
+    try {
+      const data = await api<SystemSettings>("/api/admin/system/settings");
+      setSettings(data);
+      setForm(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo cargar la configuración");
+    }
+  }
+
+  useEffect(() => { void load(); }, []);
+
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    if (!form) return;
+    setSaving(true); setError(""); setMessage("");
+    try {
+      await api("/api/admin/system/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form)
+      });
+      setMessage("Configuración general guardada.");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo guardar");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function applyDefaults() {
+    if (!window.confirm("Esto aplicará las reglas generales de comisión, límite y reparto a todas las filiales. ¿Continuar?")) return;
+    try {
+      const result = await api<{ affectedBranches: number }>("/api/admin/system/apply-defaults-to-branches", { method: "POST" });
+      setMessage("Reglas aplicadas a " + result.affectedBranches + " filiales.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudieron aplicar las reglas");
+    }
+  }
+
+  if (!form) return <div className="owner-loading">Cargando configuración…</div>;
+
+  return (
+    <form className="stage4-settings-layout" onSubmit={save}>
+      <section className="card stage4-settings-card">
+        <div className="card-head"><div><strong>Identidad del negocio</strong><span>Datos usados en documentos internos y configuración local.</span></div><Store size={17}/></div>
+        <div className="settings-form-body">
+          <div className="field-grid">
+            <label>Nombre comercial<input value={form.businessName} onChange={(e)=>setForm({...form,businessName:e.target.value})} required /></label>
+            <label>Razón social<input value={form.legalName ?? ""} onChange={(e)=>setForm({...form,legalName:e.target.value || null})} placeholder="Opcional" /></label>
+          </div>
+          <div className="field-grid">
+            <label>RUC<input value={form.ruc ?? ""} onChange={(e)=>setForm({...form,ruc:e.target.value || null})} placeholder="Opcional" /></label>
+            <label>Teléfono<input value={form.phone ?? ""} onChange={(e)=>setForm({...form,phone:e.target.value || null})} placeholder="Opcional" /></label>
+          </div>
+          <label>Dirección<input value={form.address ?? ""} onChange={(e)=>setForm({...form,address:e.target.value || null})} placeholder="Dirección principal" /></label>
+          <div className="field-grid">
+            <label>Moneda<select value={form.currencyCode} onChange={(e)=>setForm({...form,currencyCode:e.target.value})}><option value="PEN">Soles (PEN)</option><option value="USD">Dólares (USD)</option></select></label>
+            <label>Zona horaria<select value={form.timezoneName} onChange={(e)=>setForm({...form,timezoneName:e.target.value})}><option value="America/Lima">Perú · America/Lima</option></select></label>
+          </div>
+          <div className="field-grid">
+            <label>Prefijo de comprobante<input value={form.receiptPrefix} onChange={(e)=>setForm({...form,receiptPrefix:e.target.value.toUpperCase()})} placeholder="ZF" /></label>
+            <label>Pie del ticket<input value={form.ticketFooter ?? ""} onChange={(e)=>setForm({...form,ticketFooter:e.target.value || null})} placeholder="Mensaje del comprobante interno" /></label>
+          </div>
+        </div>
+      </section>
+
+      <section className="card stage4-settings-card">
+        <div className="card-head"><div><strong>Reglas generales</strong><span>Plantilla central para filiales y políticas de operación.</span></div><Settings2 size={17}/></div>
+        <div className="settings-form-body">
+          <div className="field-grid">
+            <label>Límite predeterminado<div className="input-prefix"><span>S/</span><input type="number" min="0.01" step="0.01" value={form.defaultMaxOperationAmount} onChange={(e)=>setForm({...form,defaultMaxOperationAmount:Number(e.target.value)})} /></div></label>
+            <label>Tipo de comisión<select value={form.defaultCommissionType} onChange={(e)=>setForm({...form,defaultCommissionType:e.target.value as "FLAT"|"PERCENT"})}><option value="FLAT">Monto fijo</option><option value="PERCENT">Porcentaje</option></select></label>
+          </div>
+          <label>Valor predeterminado<div className="input-prefix"><span>{form.defaultCommissionType==="FLAT"?"S/":"%"}</span><input type="number" min="0.01" step="0.01" value={form.defaultCommissionValue} onChange={(e)=>setForm({...form,defaultCommissionValue:Number(e.target.value)})} /></div></label>
+          <div className="field-grid">
+            <label>% Encargado<input type="number" min="0" max="100" step="0.01" value={form.defaultStaffSharePct ?? ""} onChange={(e)=>setForm({...form,defaultStaffSharePct:e.target.value===""?null:Number(e.target.value)})} /></label>
+            <label>% Socio<input type="number" min="0" max="100" step="0.01" value={form.defaultPartnerSharePct ?? ""} onChange={(e)=>setForm({...form,defaultPartnerSharePct:e.target.value===""?null:Number(e.target.value)})} /></label>
+          </div>
+          <label className="active-toggle"><input type="checkbox" checked={form.requireCashToYapeReference} onChange={(e)=>setForm({...form,requireCashToYapeReference:e.target.checked})} /> Exigir referencia también en Efectivo → Yape</label>
+          <label className="active-toggle"><input type="checkbox" checked={form.allowCashierCancel} onChange={(e)=>setForm({...form,allowCashierCancel:e.target.checked})} /> Permitir que el cajero anule operaciones mientras su turno está abierto</label>
+          <div className="stage4-policy-note"><LockKeyhole size={16}/><span>Las operaciones de turnos cerrados no se editan. Cualquier corrección posterior requiere reverso del propietario y queda en auditoría.</span></div>
+          <button type="button" className="soft full" onClick={()=>void applyDefaults()}>Aplicar estas reglas a todas las filiales</button>
+        </div>
+      </section>
+
+      <div className="stage4-settings-actions">
+        <div>{error && <div className="modal-error">{error}</div>}{message && <div className="success-message">{message}</div>}</div>
+        <button className="primary" disabled={saving}>{saving?"Guardando…":"Guardar configuración"}</button>
+      </div>
+      {settings && <small className="stage4-updated">Última modificación: {dateTime(settings.updatedAt)}</small>}
+    </form>
+  );
+}
+
+function SecurityPage({ currentUserId }: { currentUserId: number }) {
+  const [status, setStatus] = useState<SystemStatus | null>(null);
+  const [sessions, setSessions] = useState<SecuritySession[]>([]);
+  const [error, setError] = useState("");
+
+  async function load() {
+    setError("");
+    try {
+      const [statusData, sessionData] = await Promise.all([
+        api<SystemStatus>("/api/admin/system/status"),
+        api<{ sessions: SecuritySession[] }>("/api/admin/security/sessions")
+      ]);
+      setStatus(statusData);
+      setSessions(sessionData.sessions ?? []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo cargar seguridad");
+    }
+  }
+
+  useEffect(() => { void load(); }, []);
+
+  async function revoke(session: SecuritySession) {
+    if (!window.confirm("Cerrar la sesión de " + session.fullName + "?")) return;
+    try {
+      await api("/api/admin/security/sessions/" + session.id + "/revoke", { method: "POST" });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo cerrar la sesión");
+    }
+  }
+
+  const uptime = status ? Math.floor(status.api.uptimeSeconds/3600) + "h " + Math.floor((status.api.uptimeSeconds%3600)/60) + "m" : "—";
+
+  return (
+    <>
+      {error && <div className="error-banner">{error}</div>}
+      <div className="security-status-grid">
+        <OwnerKpi icon={<Activity/>} tone="green" label="API" value={status?.ok ? "En línea" : "—"} />
+        <OwnerKpi icon={<Building2/>} tone="blue" label="Filiales activas" value={String(status?.counts.activeBranches ?? 0)} />
+        <OwnerKpi icon={<Users/>} tone="cyan" label="Usuarios activos" value={String(status?.counts.activeUsers ?? 0)} />
+        <OwnerKpi icon={<ShieldCheck/>} tone="purple" label="Sesiones activas" value={String(status?.counts.activeSessions ?? 0)} />
+        <OwnerKpi icon={<WalletCards/>} tone="orange" label="Cajas abiertas" value={String(status?.counts.openCashSessions ?? 0)} />
+      </div>
+
+      <div className="security-detail-grid">
+        <section className="card security-runtime-card">
+          <div className="card-head"><div><strong>Entorno local</strong><span>Estado del LXC/Docker visto desde la API.</span></div><RefreshCw size={16}/></div>
+          <div className="runtime-list">
+            <div><span>Uptime API</span><strong>{uptime}</strong></div>
+            <div><span>Node.js</span><strong>{status?.api.node ?? "—"}</strong></div>
+            <div><span>Memoria API</span><strong>{status ? String(status.api.memoryMb) + " MB" : "—"}</strong></div>
+            <div><span>MariaDB</span><strong>{status?.database.version ?? "—"}</strong></div>
+            <div><span>Operaciones hoy</span><strong>{status?.counts.operationsToday ?? 0}</strong></div>
+          </div>
+          <button className="soft full" onClick={()=>void load()}><RefreshCw size={14}/> Actualizar estado</button>
+          <div className="stage4-command-note"><strong>Diagnóstico del LXC</strong><code>cd /opt/z-flow &amp;&amp; bash scripts/diagnose.sh</code></div>
+        </section>
+
+        <section className="card security-runtime-card">
+          <div className="card-head"><div><strong>Protecciones activas</strong><span>Políticas de seguridad local.</span></div><ShieldCheck size={16}/></div>
+          <div className="security-checks">
+            <div><CheckCircle2 size={15}/><span>Sesiones HttpOnly del lado del servidor</span></div>
+            <div><CheckCircle2 size={15}/><span>Bloqueo temporal por intentos fallidos</span></div>
+            <div><CheckCircle2 size={15}/><span>Permisos por rol y filial validados en backend</span></div>
+            <div><CheckCircle2 size={15}/><span>Anulaciones y reversos con motivo y auditoría</span></div>
+            <div><CheckCircle2 size={15}/><span>Health checks de MariaDB, API y Web</span></div>
+          </div>
+        </section>
+      </div>
+
+      <section className="card page-card">
+        <div className="card-head"><div><strong>Sesiones</strong><span>Control de accesos abiertos y recientes.</span></div></div>
+        <div className="table-wrap">
+          <table className="admin-table">
+            <thead><tr><th>Usuario</th><th>Rol / Filial</th><th>IP</th><th>Inicio</th><th>Expira</th><th>Estado</th><th>Acción</th></tr></thead>
+            <tbody>
+              {sessions.map((item)=><tr key={item.id}>
+                <td><strong>{item.fullName}</strong><br/><small>@{item.username}</small></td>
+                <td>{item.roleName}<br/><small>{item.branchName ?? "Global"}</small></td>
+                <td>{item.ipAddress ?? "—"}</td>
+                <td>{dateTime(item.createdAt)}</td>
+                <td>{dateTime(item.expiresAt)}</td>
+                <td><span className={item.active?"branch-status open":"branch-status closed"}>{item.current?"Actual":item.active?"Activa":"Cerrada"}</span></td>
+                <td>{item.active && !item.current ? <button className="mini-button danger-mini" onClick={()=>void revoke(item)}>Cerrar sesión</button> : item.current && item.userId===currentUserId ? "Esta sesión" : "—"}</td>
+              </tr>)}
+              {!sessions.length && <tr><td colSpan={7} className="empty-cell">No hay sesiones registradas.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </>
+  );
+}
+
+
 function OwnerProfile({ user }: { user: AuthUser }) {
   return (
     <div className="detail-grid">
