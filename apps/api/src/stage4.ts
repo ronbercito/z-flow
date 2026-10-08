@@ -117,6 +117,11 @@ export async function ensureStage4Schema() {
   `);
 
   await db.query(`
+    ALTER TABLE daily_closures
+      ADD COLUMN IF NOT EXISTS closed_by_user_id BIGINT UNSIGNED NULL AFTER cash_session_id
+  `);
+
+  await db.query(`
     CREATE TABLE IF NOT EXISTS system_settings (
       id TINYINT UNSIGNED NOT NULL DEFAULT 1,
       business_name VARCHAR(140) NOT NULL DEFAULT 'Z-FLOW',
