@@ -94,6 +94,65 @@ async function authorizeBranch(
   return auth;
 }
 
+
+async function cashClosurePreview(branchId: number) {
+  const [sessionRows] = await db.query<any[]>(
+    `SELECT cs.id, cs.user_id, cs.initial_cash, cs.initial_wallet,
+            DATE_FORMAT(cs.started_at, '%Y-%m-%dT%H:%i:%s') AS started_at,
+            u.full_name AS assigned_to
+     FROM cash_sessions cs
+     LEFT JOIN users u ON u.id=cs.user_id
+     WHERE cs.branch_id=? AND cs.status='OPEN'
+     ORDER BY cs.started_at DESC LIMIT 1`,
+    [branchId]
+  );
+
+  if (!sessionRows.length) return null;
+  const session = sessionRows[0];
+
+  const [summaryRows] = await db.query<any[]>(
+    `SELECT
+       COALESCE(SUM(CASE WHEN operation_type='YAPE_TO_CASH' AND status='COMPLETED' THEN amount ELSE 0 END),0) AS yape_received,
+       COALESCE(SUM(CASE WHEN operation_type='YAPE_TO_CASH' AND status='COMPLETED' THEN net_amount ELSE 0 END),0) AS cash_delivered,
+       COALESCE(SUM(CASE WHEN operation_type='CASH_TO_YAPE' AND status='COMPLETED' THEN amount ELSE 0 END),0) AS cash_received,
+       COALESCE(SUM(CASE WHEN operation_type='CASH_TO_YAPE' AND status='COMPLETED' THEN net_amount ELSE 0 END),0) AS yape_sent,
+       COUNT(CASE WHEN status='COMPLETED' THEN 1 END) AS operation_count,
+       COALESCE(SUM(CASE WHEN status='COMPLETED' THEN commission ELSE 0 END),0) AS commission_total,
+       COALESCE(SUM(CASE WHEN status='COMPLETED' THEN staff_share_amount ELSE 0 END),0) AS staff_share_total,
+       COALESCE(SUM(CASE WHEN status='COMPLETED' THEN partner_share_amount ELSE 0 END),0) AS partner_share_total
+     FROM operations
+     WHERE branch_id=? AND cash_session_id=?`,
+    [branchId, session.id]
+  );
+
+  const s = summaryRows[0] ?? {};
+  const expectedCash = money(
+    Number(session.initial_cash) + Number(s.cash_received ?? 0) - Number(s.cash_delivered ?? 0)
+  );
+  const expectedWallet = money(
+    Number(session.initial_wallet) + Number(s.yape_received ?? 0) - Number(s.yape_sent ?? 0)
+  );
+
+  return {
+    sessionId: Number(session.id),
+    assignedUserId: session.user_id == null ? null : Number(session.user_id),
+    assignedTo: session.assigned_to ?? null,
+    startedAt: session.started_at,
+    initialCash: money(Number(session.initial_cash ?? 0)),
+    initialWallet: money(Number(session.initial_wallet ?? 0)),
+    operationCount: Number(s.operation_count ?? 0),
+    commissionTotal: money(Number(s.commission_total ?? 0)),
+    staffShareTotal: money(Number(s.staff_share_total ?? 0)),
+    partnerShareTotal: money(Number(s.partner_share_total ?? 0)),
+    yapeReceived: money(Number(s.yape_received ?? 0)),
+    cashDelivered: money(Number(s.cash_delivered ?? 0)),
+    cashReceived: money(Number(s.cash_received ?? 0)),
+    yapeSent: money(Number(s.yape_sent ?? 0)),
+    expectedCash,
+    expectedWallet
+  };
+}
+
 app.get("/health", async () => {
   await db.query("SELECT 1");
   return { ok: true, service: "z-flow-api", auth: "enabled" };
@@ -340,6 +399,18 @@ app.post("/api/branches/:branchId/cash/open", async (request, reply) => {
   return reply.code(201).send({ id: Number(result.insertId), status: "OPEN" });
 });
 
+app.get("/api/branches/:branchId/cash/close-preview", async (request, reply) => {
+  const parsed = branchParams.safeParse(request.params);
+  if (!parsed.success) return reply.code(400).send({ error: "Filial inválida" });
+
+  const auth = await authorizeBranch(request, reply, parsed.data.branchId);
+  if (!auth) return;
+
+  const preview = await cashClosurePreview(parsed.data.branchId);
+  if (!preview) return reply.code(409).send({ error: "No hay una caja abierta para cerrar" });
+  return preview;
+});
+
 app.post("/api/branches/:branchId/cash/close", async (request, reply) => {
   const parsedParams = branchParams.safeParse(request.params);
   const parsedBody = closeCashBody.safeParse(request.body);
@@ -352,95 +423,84 @@ app.post("/api/branches/:branchId/cash/close", async (request, reply) => {
   const auth = await authorizeBranch(request, reply, branchId, true);
   if (!auth) return;
 
-  const [sessionRows] = await db.query<any[]>(
-    `SELECT id, initial_cash, initial_wallet
-     FROM cash_sessions
-     WHERE branch_id = ? AND status = 'OPEN'
-     ORDER BY started_at DESC LIMIT 1`,
-    [branchId]
-  );
-
-  if (!sessionRows.length) {
+  const preview = await cashClosurePreview(branchId);
+  if (!preview) {
     return reply.code(409).send({ error: "No hay una caja abierta para cerrar" });
   }
 
-  const session = sessionRows[0];
-  const [summaryRows] = await db.query<any[]>(
-    `SELECT
-       COALESCE(SUM(CASE WHEN operation_type = 'YAPE_TO_CASH' AND status = 'COMPLETED' THEN amount ELSE 0 END), 0) AS yape_received,
-       COALESCE(SUM(CASE WHEN operation_type = 'YAPE_TO_CASH' AND status = 'COMPLETED' THEN net_amount ELSE 0 END), 0) AS cash_delivered,
-       COALESCE(SUM(CASE WHEN operation_type = 'CASH_TO_YAPE' AND status = 'COMPLETED' THEN amount ELSE 0 END), 0) AS cash_received,
-       COALESCE(SUM(CASE WHEN operation_type = 'CASH_TO_YAPE' AND status = 'COMPLETED' THEN net_amount ELSE 0 END), 0) AS yape_sent,
-       COUNT(CASE WHEN status = 'COMPLETED' THEN 1 END) AS operation_count,
-       COALESCE(SUM(CASE WHEN status = 'COMPLETED' THEN commission ELSE 0 END), 0) AS commission_total,
-       COALESCE(SUM(CASE WHEN status = 'COMPLETED' THEN staff_share_amount ELSE 0 END), 0) AS staff_share_total,
-       COALESCE(SUM(CASE WHEN status = 'COMPLETED' THEN partner_share_amount ELSE 0 END), 0) AS partner_share_total
-     FROM operations
-     WHERE branch_id = ? AND cash_session_id = ?`,
-    [branchId, session.id]
-  );
-
-  const s = summaryRows[0] ?? {};
-  const expectedCash = money(
-    Number(session.initial_cash) + Number(s.cash_received ?? 0) - Number(s.cash_delivered ?? 0)
-  );
-  const expectedWallet = money(
-    Number(session.initial_wallet) + Number(s.yape_received ?? 0) - Number(s.yape_sent ?? 0)
-  );
-
   const declaredCash = money(parsedBody.data.declaredCash);
   const declaredWallet = money(parsedBody.data.declaredWallet);
-  const differenceCash = money(declaredCash - expectedCash);
-  const differenceWallet = money(declaredWallet - expectedWallet);
+  const differenceCash = money(declaredCash - preview.expectedCash);
+  const differenceWallet = money(declaredWallet - preview.expectedWallet);
+  const hasDifference = Math.abs(differenceCash) >= 0.005 || Math.abs(differenceWallet) >= 0.005;
+
+  if (hasDifference && !parsedBody.data.notes?.trim()) {
+    return reply.code(422).send({
+      error: "Debes escribir una observación cuando existe diferencia de efectivo o Yape"
+    });
+  }
+
+  const resultType =
+    !hasDifference ? "BALANCED"
+    : differenceCash < 0 || differenceWallet < 0
+      ? (differenceCash > 0 || differenceWallet > 0 ? "MIXED" : "SHORTAGE")
+      : "SURPLUS";
 
   const connection = await db.getConnection();
+  let closureId = 0;
   try {
     await connection.beginTransaction();
 
-    const operationCount = Number(s.operation_count ?? 0);
-    const commissionTotal = money(Number(s.commission_total ?? 0));
-    const staffShareTotal = money(Number(s.staff_share_total ?? 0));
-    const partnerShareTotal = money(Number(s.partner_share_total ?? 0));
-
     const [closure] = await connection.execute<any>(
       `INSERT INTO daily_closures
-       (branch_id, cash_session_id, operation_count, commission_total,
+       (branch_id, cash_session_id, closed_by_user_id, operation_count, commission_total,
         staff_share_total, partner_share_total, expected_cash, declared_cash,
         expected_wallet, declared_wallet, difference_cash, difference_wallet, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         branchId,
-        session.id,
-        operationCount,
-        commissionTotal,
-        staffShareTotal,
-        partnerShareTotal,
-        expectedCash,
+        preview.sessionId,
+        auth.userId,
+        preview.operationCount,
+        preview.commissionTotal,
+        preview.staffShareTotal,
+        preview.partnerShareTotal,
+        preview.expectedCash,
         declaredCash,
-        expectedWallet,
+        preview.expectedWallet,
         declaredWallet,
         differenceCash,
         differenceWallet,
         parsedBody.data.notes ?? null
       ]
     );
+    closureId = Number(closure.insertId);
 
     await connection.execute(
       `UPDATE cash_sessions
-       SET declared_cash = ?, declared_wallet = ?, status = 'CLOSED', ended_at = NOW()
-       WHERE id = ?`,
-      [declaredCash, declaredWallet, session.id]
+       SET declared_cash=?, declared_wallet=?, status='CLOSED', ended_at=NOW()
+       WHERE id=?`,
+      [declaredCash, declaredWallet, preview.sessionId]
     );
 
     await connection.execute(
       `INSERT INTO audit_logs
         (branch_id, user_id, action, entity_type, entity_id, details, ip_address, user_agent)
        VALUES (?, ?, 'CASH_CLOSED', 'DAILY_CLOSURE', ?,
-         JSON_OBJECT('difference_cash', ?, 'difference_wallet', ?), ?, ?)`,
+         JSON_OBJECT(
+           'result_type', ?,
+           'operation_count', ?,
+           'commission_total', ?,
+           'difference_cash', ?,
+           'difference_wallet', ?
+         ), ?, ?)`,
       [
         branchId,
         auth.userId,
-        Number(closure.insertId),
+        closureId,
+        resultType,
+        preview.operationCount,
+        preview.commissionTotal,
         differenceCash,
         differenceWallet,
         request.ip,
@@ -457,20 +517,23 @@ app.post("/api/branches/:branchId/cash/close", async (request, reply) => {
   }
 
   return {
+    closureId,
     status: "CLOSED",
-    expectedCash,
+    resultType,
+    expectedCash: preview.expectedCash,
     declaredCash,
     differenceCash,
-    expectedWallet,
+    expectedWallet: preview.expectedWallet,
     declaredWallet,
     differenceWallet,
-    operationCount: Number(s.operation_count ?? 0),
-    commissionTotal: money(Number(s.commission_total ?? 0)),
-    staffShareTotal: money(Number(s.staff_share_total ?? 0)),
-    partnerShareTotal: money(Number(s.partner_share_total ?? 0))
+    operationCount: preview.operationCount,
+    commissionTotal: preview.commissionTotal,
+    staffShareTotal: preview.staffShareTotal,
+    partnerShareTotal: preview.partnerShareTotal,
+    assignedTo: preview.assignedTo,
+    notes: parsedBody.data.notes ?? null
   };
 });
-
 app.get("/api/branches/:branchId/settings", async (request, reply) => {
   const parsed = branchParams.safeParse(request.params);
   if (!parsed.success) {
