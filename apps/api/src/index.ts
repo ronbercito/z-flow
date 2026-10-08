@@ -24,7 +24,7 @@ import {
   requireAuth
 } from "./auth.js";
 
-const app = Fastify({ logger: true });
+const app = Fastify({ logger: true, trustProxy: true });
 
 await app.register(cookie);
 await app.register(cors, {
