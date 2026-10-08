@@ -180,6 +180,7 @@ CREATE TABLE IF NOT EXISTS system_settings (
   ruc VARCHAR(20) NULL,
   address VARCHAR(255) NULL,
   phone VARCHAR(40) NULL,
+  logo_data_url LONGTEXT NULL,
   currency_code VARCHAR(8) NOT NULL DEFAULT 'PEN',
   timezone_name VARCHAR(80) NOT NULL DEFAULT 'America/Lima',
   ticket_footer VARCHAR(255) NULL,
