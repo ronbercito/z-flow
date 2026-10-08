@@ -166,3 +166,84 @@ CREATE TABLE IF NOT EXISTS receipt_sequences (
   PRIMARY KEY (branch_id),
   CONSTRAINT fk_receipt_sequences_branch FOREIGN KEY (branch_id) REFERENCES branches(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- Stage 4 local production schema
+ALTER TABLE audit_logs
+  ADD COLUMN IF NOT EXISTS ip_address VARCHAR(64) NULL AFTER details,
+  ADD COLUMN IF NOT EXISTS user_agent VARCHAR(255) NULL AFTER ip_address;
+
+CREATE TABLE IF NOT EXISTS system_settings (
+  id TINYINT UNSIGNED NOT NULL DEFAULT 1,
+  business_name VARCHAR(140) NOT NULL DEFAULT 'Z-FLOW',
+  legal_name VARCHAR(180) NULL,
+  ruc VARCHAR(20) NULL,
+  address VARCHAR(255) NULL,
+  phone VARCHAR(40) NULL,
+  currency_code VARCHAR(8) NOT NULL DEFAULT 'PEN',
+  timezone_name VARCHAR(80) NOT NULL DEFAULT 'America/Lima',
+  ticket_footer VARCHAR(255) NULL,
+  receipt_prefix VARCHAR(12) NOT NULL DEFAULT 'ZF',
+  default_max_operation_amount DECIMAL(14,2) NOT NULL DEFAULT 50.00,
+  default_commission_type ENUM('FLAT','PERCENT') NOT NULL DEFAULT 'FLAT',
+  default_commission_value DECIMAL(14,2) NOT NULL DEFAULT 1.00,
+  default_staff_share_pct DECIMAL(5,2) NULL,
+  default_partner_share_pct DECIMAL(5,2) NULL,
+  require_cash_to_yape_reference TINYINT(1) NOT NULL DEFAULT 0,
+  allow_cashier_cancel TINYINT(1) NOT NULL DEFAULT 1,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  CONSTRAINT chk_system_settings_singleton CHECK (id = 1)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO system_settings (id, business_name)
+VALUES (1, 'Z-FLOW')
+ON DUPLICATE KEY UPDATE id = VALUES(id);
+
+CREATE TABLE IF NOT EXISTS operation_events (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  operation_id BIGINT UNSIGNED NOT NULL,
+  branch_id BIGINT UNSIGNED NOT NULL,
+  user_id BIGINT UNSIGNED NULL,
+  action ENUM('CANCEL','REVERSE') NOT NULL,
+  reason VARCHAR(255) NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_operation_events_operation (operation_id),
+  KEY idx_operation_events_branch (branch_id, created_at),
+  CONSTRAINT fk_operation_events_operation FOREIGN KEY (operation_id) REFERENCES operations(id),
+  CONSTRAINT fk_operation_events_branch FOREIGN KEY (branch_id) REFERENCES branches(id),
+  CONSTRAINT fk_operation_events_user FOREIGN KEY (user_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS cash_session_handoffs (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  cash_session_id BIGINT UNSIGNED NOT NULL,
+  branch_id BIGINT UNSIGNED NOT NULL,
+  from_user_id BIGINT UNSIGNED NULL,
+  to_user_id BIGINT UNSIGNED NOT NULL,
+  changed_by_user_id BIGINT UNSIGNED NOT NULL,
+  notes VARCHAR(255) NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_handoffs_session (cash_session_id, created_at),
+  CONSTRAINT fk_handoff_session FOREIGN KEY (cash_session_id) REFERENCES cash_sessions(id),
+  CONSTRAINT fk_handoff_branch FOREIGN KEY (branch_id) REFERENCES branches(id),
+  CONSTRAINT fk_handoff_from_user FOREIGN KEY (from_user_id) REFERENCES users(id),
+  CONSTRAINT fk_handoff_to_user FOREIGN KEY (to_user_id) REFERENCES users(id),
+  CONSTRAINT fk_handoff_changed_by FOREIGN KEY (changed_by_user_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS branch_partner_assignments (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  branch_id BIGINT UNSIGNED NOT NULL,
+  user_id BIGINT UNSIGNED NOT NULL,
+  pool_share_pct DECIMAL(5,2) NOT NULL DEFAULT 100.00,
+  active TINYINT(1) NOT NULL DEFAULT 1,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_branch_partner (branch_id, user_id),
+  CONSTRAINT fk_branch_partner_branch FOREIGN KEY (branch_id) REFERENCES branches(id),
+  CONSTRAINT fk_branch_partner_user FOREIGN KEY (user_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
