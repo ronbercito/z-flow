@@ -978,7 +978,7 @@ function UserDetailModal({ userId, onClose, onEdit }: { userId: number; onClose:
         </div>
         <div className="user-recent-activity">
           <strong>Actividad reciente</strong>
-          <div className="table-wrap"><table className="admin-table compact-user-table">
+          <div className="user-activity-table-wrap"><table className="admin-table compact-user-table">
             <thead><tr><th>Fecha</th><th>Tipo</th><th>Monto</th><th>Ganancia</th><th>Estado</th></tr></thead>
             <tbody>
               {detail.recentOperations.map((op)=><tr key={op.id}>
@@ -1569,7 +1569,7 @@ function CreateUserModal({ branches, users, onClose, onCreated }: { branches: Br
         {branches.map((branch)=><option key={branch.id} value={branch.id} disabled={occupiedBranchIds.has(branch.id)}>{branch.name}{occupiedBranchIds.has(branch.id)?" · ya tiene encargado":""}</option>)}
       </select></label>
     </div>
-    <label>Contraseña temporal<input type="password" value={password} onChange={(e)=>setPassword(e.target.value)} placeholder="Mín. 10 caracteres, mayúscula, minúscula y número" required /></label>
+    <label>Contraseña<input type="password" value={password} onChange={(e)=>setPassword(e.target.value)} placeholder="Mín. 10 caracteres, mayúscula, minúscula y número" required /></label>
     {!firstAvailable && <div className="friendly-info"><UserCog size={16}/><span>Todas las filiales activas ya tienen un encargado.</span></div>}
     {error && <div className="modal-error">{error}</div>}
     <div className="modal-actions">
