@@ -37,18 +37,6 @@ const reasonBody = z.object({
   reason: z.string().trim().min(5).max(255)
 });
 
-const handoffBody = z.object({
-  toUserId: z.coerce.number().int().positive(),
-  notes: z.string().trim().max(255).optional()
-});
-
-const partnerAssignmentBody = z.object({
-  branchId: z.coerce.number().int().positive(),
-  userId: z.coerce.number().int().positive(),
-  poolSharePct: z.coerce.number().min(0).max(100),
-  active: z.boolean().default(true)
-});
-
 const rolePermissionBody = z.object({
   permissions: z.array(z.enum([
     "GLOBAL_READ","GLOBAL_WRITE","BRANCH_READ","BRANCH_WRITE",
@@ -57,7 +45,7 @@ const rolePermissionBody = z.object({
 });
 
 const roleCodeParams = z.object({
-  roleCode: z.enum(["PARTNER","BRANCH_ADMIN","CASHIER","AUDITOR"])
+  roleCode: z.literal("CASHIER")
 });
 
 async function requireOwner(request: FastifyRequest, reply: FastifyReply) {
@@ -254,59 +242,11 @@ export async function ensureStage4Schema() {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS cash_session_handoffs (
-      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-      cash_session_id BIGINT UNSIGNED NOT NULL,
-      branch_id BIGINT UNSIGNED NOT NULL,
-      from_user_id BIGINT UNSIGNED NULL,
-      to_user_id BIGINT UNSIGNED NOT NULL,
-      changed_by_user_id BIGINT UNSIGNED NOT NULL,
-      notes VARCHAR(255) NULL,
-      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY (id),
-      KEY idx_handoffs_session (cash_session_id, created_at),
-      CONSTRAINT fk_handoff_session FOREIGN KEY (cash_session_id) REFERENCES cash_sessions(id),
-      CONSTRAINT fk_handoff_branch FOREIGN KEY (branch_id) REFERENCES branches(id),
-      CONSTRAINT fk_handoff_from_user FOREIGN KEY (from_user_id) REFERENCES users(id),
-      CONSTRAINT fk_handoff_to_user FOREIGN KEY (to_user_id) REFERENCES users(id),
-      CONSTRAINT fk_handoff_changed_by FOREIGN KEY (changed_by_user_id) REFERENCES users(id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-  `);
 
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS branch_partner_assignments (
-      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-      branch_id BIGINT UNSIGNED NOT NULL,
-      user_id BIGINT UNSIGNED NOT NULL,
-      pool_share_pct DECIMAL(5,2) NOT NULL DEFAULT 100.00,
-      active TINYINT(1) NOT NULL DEFAULT 1,
-      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      PRIMARY KEY (id),
-      UNIQUE KEY uq_branch_partner (branch_id, user_id),
-      CONSTRAINT fk_branch_partner_branch FOREIGN KEY (branch_id) REFERENCES branches(id),
-      CONSTRAINT fk_branch_partner_user FOREIGN KEY (user_id) REFERENCES users(id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-  `);
 
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS operation_partner_shares (
-      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-      operation_id BIGINT UNSIGNED NOT NULL,
-      branch_id BIGINT UNSIGNED NOT NULL,
-      user_id BIGINT UNSIGNED NOT NULL,
-      pool_share_pct DECIMAL(5,2) NOT NULL,
-      amount DECIMAL(14,2) NOT NULL,
-      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY (id),
-      UNIQUE KEY uq_operation_partner_share (operation_id, user_id),
-      KEY idx_partner_share_user (user_id, created_at),
-      CONSTRAINT fk_operation_partner_share_operation FOREIGN KEY (operation_id) REFERENCES operations(id),
-      CONSTRAINT fk_operation_partner_share_branch FOREIGN KEY (branch_id) REFERENCES branches(id),
-      CONSTRAINT fk_operation_partner_share_user FOREIGN KEY (user_id) REFERENCES users(id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-  `);
+
+
+
 }
 
 export async function registerStage4Routes(app: FastifyInstance) {
@@ -578,129 +518,6 @@ export async function registerStage4Routes(app: FastifyInstance) {
     await audit(request, null, auth.userId, "ROLE_PERMISSIONS_UPDATED", "ROLE", roleId, {
       roleCode: parsedParams.data.roleCode,
       permissions: parsedBody.data.permissions
-    });
-    return { ok: true };
-  });
-
-  app.get("/api/admin/partners/assignments", async (request, reply) => {
-    const auth = await requireOwner(request, reply);
-    if (!auth) return;
-    const [rows] = await db.query<any[]>(`
-      SELECT a.id, a.branch_id, a.user_id, a.pool_share_pct, a.active,
-             b.name AS branch_name, u.full_name, u.username,
-             COALESCE(SUM(CASE WHEN o.status='COMPLETED' THEN ops.amount ELSE 0 END),0) AS earnings
-      FROM branch_partner_assignments a
-      JOIN branches b ON b.id=a.branch_id
-      JOIN users u ON u.id=a.user_id
-      LEFT JOIN operation_partner_shares ops
-        ON ops.branch_id=a.branch_id AND ops.user_id=a.user_id
-      LEFT JOIN operations o ON o.id=ops.operation_id
-      GROUP BY a.id, a.branch_id, a.user_id, a.pool_share_pct, a.active,
-               b.name, u.full_name, u.username
-      ORDER BY b.name, u.full_name
-    `);
-    return { assignments: rows };
-  });
-
-  app.post("/api/admin/partners/assignments", async (request, reply) => {
-    const auth = await requireOwner(request, reply);
-    if (!auth) return;
-    const parsed = partnerAssignmentBody.safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send({ error: "Asignación inválida" });
-    const body = parsed.data;
-
-    const [userRows] = await db.query<any[]>(`
-      SELECT u.id FROM users u JOIN roles r ON r.id=u.role_id
-      WHERE u.id=? AND r.code='PARTNER' LIMIT 1
-    `, [body.userId]);
-    if (!userRows.length) return reply.code(400).send({ error: "El usuario seleccionado no tiene rol Socio" });
-
-    const [sumRows] = await db.query<any[]>(`
-      SELECT COALESCE(SUM(pool_share_pct),0) AS total
-      FROM branch_partner_assignments
-      WHERE branch_id=? AND user_id<>? AND active=1
-    `, [body.branchId, body.userId]);
-    if (body.active && Number(sumRows[0]?.total ?? 0) + body.poolSharePct > 100.01) {
-      return reply.code(422).send({ error: "La distribución de socios de la filial no puede superar 100%" });
-    }
-
-    await db.execute(`
-      INSERT INTO branch_partner_assignments (branch_id,user_id,pool_share_pct,active)
-      VALUES (?,?,?,?)
-      ON DUPLICATE KEY UPDATE pool_share_pct=VALUES(pool_share_pct), active=VALUES(active)
-    `, [body.branchId, body.userId, body.poolSharePct, body.active ? 1 : 0]);
-
-    await audit(request, body.branchId, auth.userId, "PARTNER_ASSIGNMENT_UPDATED", "USER", body.userId, {
-      poolSharePct: body.poolSharePct,
-      active: body.active
-    });
-    return { ok: true };
-  });
-
-  app.get("/api/branches/:branchId/staff", async (request, reply) => {
-    const parsed = branchParams.safeParse(request.params);
-    if (!parsed.success) return reply.code(400).send({ error: "Filial inválida" });
-    const auth = await requireAuth(request, reply);
-    if (!auth) return;
-    if (!canWriteBranch(auth, parsed.data.branchId)) return reply.code(403).send({ error: "Acceso denegado" });
-
-    const [rows] = await db.query<any[]>(`
-      SELECT u.id, u.username, u.full_name, r.code AS role_code, r.name AS role_name
-      FROM users u
-      JOIN roles r ON r.id=u.role_id
-      WHERE u.branch_id=? AND u.active=1 AND r.code IN ('CASHIER','BRANCH_ADMIN')
-      ORDER BY u.full_name
-    `, [parsed.data.branchId]);
-    return { users: rows };
-  });
-
-  app.post("/api/branches/:branchId/cash/handoff", async (request, reply) => {
-    const parsedParams = branchParams.safeParse(request.params);
-    const parsedBody = handoffBody.safeParse(request.body);
-    if (!parsedParams.success || !parsedBody.success) return reply.code(400).send({ error: "Datos inválidos" });
-
-    const auth = await requireAuth(request, reply);
-    if (!auth) return;
-    if (!canWriteBranch(auth, parsedParams.data.branchId)) return reply.code(403).send({ error: "Acceso denegado" });
-
-    const [sessions] = await db.query<any[]>(`
-      SELECT id,user_id FROM cash_sessions
-      WHERE branch_id=? AND status='OPEN'
-      ORDER BY started_at DESC LIMIT 1
-    `, [parsedParams.data.branchId]);
-    if (!sessions.length) return reply.code(409).send({ error: "No hay una caja abierta" });
-
-    const [users] = await db.query<any[]>(`
-      SELECT u.id FROM users u JOIN roles r ON r.id=u.role_id
-      WHERE u.id=? AND u.branch_id=? AND u.active=1 AND r.code IN ('CASHIER','BRANCH_ADMIN')
-      LIMIT 1
-    `, [parsedBody.data.toUserId, parsedParams.data.branchId]);
-    if (!users.length) return reply.code(400).send({ error: "El nuevo encargado no pertenece a esta filial" });
-
-    const session = sessions[0];
-    const connection = await db.getConnection();
-    try {
-      await connection.beginTransaction();
-      await connection.execute(`
-        INSERT INTO cash_session_handoffs
-          (cash_session_id,branch_id,from_user_id,to_user_id,changed_by_user_id,notes)
-        VALUES (?,?,?,?,?,?)
-      `, [
-        session.id, parsedParams.data.branchId, session.user_id ?? null,
-        parsedBody.data.toUserId, auth.userId, parsedBody.data.notes ?? null
-      ]);
-      await connection.execute("UPDATE cash_sessions SET user_id=? WHERE id=?", [parsedBody.data.toUserId, session.id]);
-      await connection.commit();
-    } catch (error) {
-      await connection.rollback();
-      throw error;
-    } finally {
-      connection.release();
-    }
-
-    await audit(request, parsedParams.data.branchId, auth.userId, "CASH_HANDOFF", "CASH_SESSION", Number(session.id), {
-      fromUserId: session.user_id,
-      toUserId: parsedBody.data.toUserId
     });
     return { ok: true };
   });
