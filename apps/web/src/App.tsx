@@ -557,7 +557,7 @@ function LoginScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
           <h1>Inicia sesión</h1>
           <p>Ingresa con la cuenta asignada por el administrador de Z-FLOW.</p>
           <form onSubmit={submit}>
-            <label>Usuario<input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" placeholder="Tu usuario" required /></label>
+            <label>Usuario<input type="text" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" placeholder="Tu usuario" required /></label>
             <label>Contraseña<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" placeholder="Tu contraseña" required /></label>
             <label className="remember"><input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> Mantener sesión iniciada</label>
             {error && <div className="modal-error">{error}</div>}
