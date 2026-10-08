@@ -306,6 +306,16 @@ type FinancialReport = {
     staffShareTotal: number;
     partnerShareTotal: number;
   }>;
+  branchComparison: Array<{
+    id: number;
+    code: string;
+    name: string;
+    operationCount: number;
+    amountTotal: number;
+    commissionTotal: number;
+    staffShareTotal: number;
+    partnerShareTotal: number;
+  }>;
   operations: Array<GlobalOperation & { series?: string | null; sequence_number?: number | null }>;
 };
 
@@ -1062,7 +1072,20 @@ function AdminReports({ overview }: { overview: Overview; operations: GlobalOper
 
   useEffect(() => { void loadReport(); }, [from, to, branch]);
 
-  const maxAmount = Math.max(...(report?.branches.map((x) => x.amountTotal) ?? [1]), 1);
+  const comparisonBranches = overview.branches.map((branchInfo) => {
+    const id = Number(branchInfo.id);
+    return report?.branchComparison.find((item) => item.id === id) ?? {
+      id,
+      code: branchInfo.code,
+      name: branchInfo.name,
+      operationCount: 0,
+      amountTotal: 0,
+      commissionTotal: 0,
+      staffShareTotal: 0,
+      partnerShareTotal: 0
+    };
+  });
+  const maxAmount = Math.max(...comparisonBranches.map((x) => x.amountTotal), 1);
   const registerRows = (report?.operations ?? []).filter((row) => flow === "ALL" || row.operation_type === flow);
   const enteredTotal = registerRows.reduce((sum, row) => sum + Number(row.amount), 0);
   const deliveredTotal = registerRows.reduce((sum, row) => sum + Number(row.net_amount), 0);
@@ -1080,7 +1103,7 @@ function AdminReports({ overview }: { overview: Overview; operations: GlobalOper
         <div className="report-toolbar-title"><BarChart3 size={19}/><div><strong>Reporte financiero</strong><span>Filtra por filial y periodo. Exporta el resultado en PDF o Excel.</span></div></div>
         <div className="admin-filters admin-filters-wide">
           <select value={branch} onChange={(e)=>setBranch(e.target.value)} aria-label="Filtrar por filial">
-            <option value="ALL">Todas las filiales</option>
+            <option value="ALL">Mostrar todos</option>
             {overview.branches.map((item)=><option value={item.id} key={item.id}>{item.name}</option>)}
           </select>
           <label className="date-filter"><span>Desde</span><input type="date" value={from} onChange={(e)=>setFrom(e.target.value)} /></label>
@@ -1101,16 +1124,25 @@ function AdminReports({ overview }: { overview: Overview; operations: GlobalOper
         </div>
 
         <section className="card page-card">
-          <div className="card-head"><div><strong>Comparativo por filial</strong><span>{from || "Inicio"} → {to || "Hoy"}</span></div></div>
+          <div className="card-head">
+            <div><strong>Comparativo por filial</strong><span>Selecciona una filial para ver su reporte · {from || "Inicio"} → {to || "Hoy"}</span></div>
+            <button type="button" className={`filter ${branch==="ALL"?"active":""}`} onClick={()=>setBranch("ALL")}>Mostrar todos</button>
+          </div>
           <div className="report-bars owner-report-bars">
-            {report.branches.map((item) => (
-              <div className="report-bar-row" key={item.id}>
+            {comparisonBranches.map((item) => (
+              <button
+                type="button"
+                className={`report-bar-row report-branch-select ${branch===String(item.id)?"selected":""}`}
+                key={item.id}
+                aria-pressed={branch===String(item.id)}
+                onClick={()=>setBranch(String(item.id))}
+              >
                 <div><strong>{item.name}</strong><span>{item.operationCount} operaciones · {currency(item.amountTotal)} · Comisión {currency(item.commissionTotal)}</span></div>
                 <div className="progress"><i className="purple" style={{ width: `${Math.max(3,(item.amountTotal/maxAmount)*100)}%` }} /></div>
                 <div className="split-report-line"><span>Ganancia encargado: {currency(item.commissionTotal)}</span></div>
-              </div>
+              </button>
             ))}
-            {!report.branches.length && <div className="empty-cell">No hay operaciones en el periodo seleccionado.</div>}
+            {!comparisonBranches.length && <div className="empty-cell">No hay filiales disponibles.</div>}
           </div>
         </section>
 
