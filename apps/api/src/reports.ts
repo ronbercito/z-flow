@@ -440,6 +440,10 @@ export async function registerReportRoutes(app: FastifyInstance) {
       doc.font("Helvetica-Bold").fontSize(11).fillColor("#172235").text("Resumen operativo");
       doc.moveDown(0.5);
 
+      const pendingCommission = Math.max(
+        0,
+        money(row.commission_total) - money(row.staff_share_total) - money(row.partner_share_total)
+      );
       const items = [
         ["Operaciones", String(row.operation_count ?? 0)],
         ["Comisión total", pen(row.commission_total)],
@@ -456,6 +460,12 @@ export async function registerReportRoutes(app: FastifyInstance) {
         doc.fillColor("#101828").font("Helvetica-Bold").fontSize(12).text(value, x + 10, yy + 21);
       });
       doc.y = y + 56;
+
+      if (pendingCommission > 0) {
+        doc.font("Helvetica").fontSize(8).fillColor("#8A5A12")
+          .text(`Pendiente de repartir: ${pen(pendingCommission)}`);
+        doc.moveDown(0.7);
+      }
 
       doc.font("Helvetica-Bold").fontSize(11).fillColor("#172235").text("Conciliación");
       doc.moveDown(0.5);
