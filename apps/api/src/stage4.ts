@@ -398,7 +398,7 @@ export async function registerStage4Routes(app: FastifyInstance) {
     const parsed = userParams.safeParse(request.params);
     if (!parsed.success) return reply.code(400).send({ error: "Usuario inválido" });
 
-    const params: unknown[] = [parsed.data.userId];
+    const params: number[] = [parsed.data.userId];
     let sql = "UPDATE auth_sessions SET revoked_at=NOW() WHERE user_id=? AND revoked_at IS NULL";
     if (parsed.data.userId === auth.userId) {
       sql += " AND id<>?";
