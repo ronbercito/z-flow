@@ -29,10 +29,7 @@
 - [x] Comprobante interno correlativo y PDF 80 mm
 - [x] Backup local y restauración
 - [x] Backup local automático diario
-- [ ] Backup externo fuera del LXC
-- [ ] Despliegue en nube
-- [ ] Dominio y HTTPS
-- [ ] Integración tributaria/electrónica SUNAT una vez definida contablemente
+- [x] Base local lista para consolidación en Proxmox
 
 
 ## Fase 2.1
@@ -44,3 +41,46 @@
 - [x] Historial de operaciones por filial
 - [x] Historial de cierres por filial
 - [x] Filtros por filial y rango de fechas
+
+
+## Fase 4 — Producción local en Proxmox
+- [x] Configuración general del negocio
+- [x] Logo, datos comerciales y pie de ticket
+- [x] Moneda y zona horaria local
+- [x] Prefijo configurable de comprobantes internos
+- [x] Reglas centrales y aplicación masiva a filiales
+- [x] Referencia obligatoria configurable para Efectivo → Yape
+- [x] Anulación de operaciones durante turno abierto con motivo
+- [x] Reverso de propietario para correcciones posteriores
+- [x] Bloqueo de edición de operaciones cerradas
+- [x] Cambio de encargado sin cerrar la caja
+- [x] Varios encargados por filial
+- [x] Asignación de socios por filial
+- [x] Distribución histórica individual de ganancia de socios
+- [x] Permisos configurables por rol con validación en backend
+- [x] Gestión y cierre remoto de sesiones
+- [x] Auditoría de login fallido, logout, IP y agente de usuario
+- [x] Health checks MariaDB/API/Web
+- [x] Reinicio automático de contenedores
+- [x] Rotación de logs Docker
+- [x] Zona horaria America/Lima en contenedores
+- [x] Diagnóstico local del LXC
+- [x] Actualizador local seguro con backup previo
+- [x] Verificación de restauración en base temporal
+- [x] Endurecimiento de permisos de .env
+- [ ] Pruebas paso a paso en el LXC real con las filiales
+
+## Fase 5 — Pruebas reales
+- [ ] Simulación completa de apertura → operaciones → cambio de turno → cierre
+- [ ] Prueba multiusuario simultánea
+- [ ] Prueba de anulación y reverso
+- [ ] Prueba de permisos personalizados
+- [ ] Prueba de backup y restauración
+- [ ] Prueba de reinicio del LXC/Proxmox
+- [ ] Validación con las 5 filiales
+
+## Fase final — Nube
+- [ ] Backup externo fuera del LXC
+- [ ] Despliegue en nube
+- [ ] Dominio y HTTPS
+- [ ] Integración tributaria/electrónica SUNAT una vez definida contablemente
