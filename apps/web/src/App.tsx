@@ -191,6 +191,9 @@ function App() {
 
   const branchId = authUser?.branch?.id ?? authUser?.defaultBranch?.id ?? null;
   const canWrite = Boolean(authUser?.permissions.includes("BRANCH_WRITE") || authUser?.permissions.includes("GLOBAL_WRITE"));
+  const visibleSidebar = canWrite
+    ? sidebar
+    : sidebar.filter((item) => !["cash", "close"].includes(item.page));
 
   async function checkAuth() {
     try {
@@ -328,7 +331,7 @@ function App() {
         </div>
 
         <nav>
-          {sidebar.map(({ page: itemPage, label, icon: Icon }) => (
+          {visibleSidebar.map(({ page: itemPage, label, icon: Icon }) => (
             <button
               className={`nav-item ${page === itemPage ? "active" : ""}`}
               key={itemPage}
@@ -404,8 +407,8 @@ function App() {
             <div className="scope-banner">
               <LockKeyhole size={19} />
               <div>
-                <strong>Solo puedes ver y gestionar la información de tu filial: {branchName}</strong>
-                <span>No tienes acceso a otras filiales ni a configuraciones generales del sistema.</span>
+                <strong>{canWrite ? "Solo puedes ver y gestionar" : "Puedes consultar"} la información de tu filial: {branchName}</strong>
+                <span>{canWrite ? "No tienes acceso a otras filiales ni a configuraciones generales del sistema." : "Tu acceso es de consulta; las acciones de caja y registro están reservadas para encargados."}</span>
               </div>
             </div>
           )}
@@ -420,6 +423,7 @@ function App() {
               onNavigate={navigate}
               onNewOperation={(type) => setOperationModal(type)}
               onCloseCash={() => setCloseCashModal(true)}
+              canWrite={canWrite}
             />
           )}
 
@@ -428,6 +432,7 @@ function App() {
               operations={operations}
               onNewOperation={(type) => setOperationModal(type)}
               onReceipt={setReceipt}
+              canCreate={canWrite}
               canCancel={Boolean(canWrite && dashboard?.session && (authUser.role.code !== "CASHIER" || settings?.allow_cashier_cancel))}
               onCancel={async (op) => {
                 const reason = window.prompt("Motivo de anulación (mínimo 5 caracteres):");
@@ -468,7 +473,7 @@ function App() {
 
           {page === "profile" && <ProfilePage dashboard={dashboard} user={authUser} />}
 
-          {page === "help" && <HelpPage onNavigate={navigate} />}
+          {page === "help" && <HelpPage onNavigate={navigate} canWrite={canWrite} />}
         </section>
       </main>
 
@@ -581,7 +586,8 @@ function HomePage({
   hourlyData,
   onNavigate,
   onNewOperation,
-  onCloseCash
+  onCloseCash,
+  canWrite
 }: {
   dashboard: Dashboard | null;
   operations: Operation[];
@@ -589,10 +595,11 @@ function HomePage({
   onNavigate: (page: Page) => void;
   onNewOperation: (type: "YAPE_TO_CASH" | "CASH_TO_YAPE") => void;
   onCloseCash: () => void;
+  canWrite: boolean;
 }) {
   return (
     <>
-      <div className="quick-actions">
+      {canWrite && <div className="quick-actions">
         <button className="quick yape" onClick={() => onNewOperation("YAPE_TO_CASH")}><Smartphone size={20} /><div><strong>Yape → Efectivo</strong><span>Registrar recepción Yape</span></div><ChevronRight size={17} /></button>
         <button className="quick cash" onClick={() => onNewOperation("CASH_TO_YAPE")}><Send size={20} /><div><strong>Efectivo → Yape</strong><span>Registrar envío Yape</span></div><ChevronRight size={17} /></button>
       </div>
@@ -645,9 +652,11 @@ function HomePage({
 
         <section className="card checklist">
           <div className="card-head">
-            <div><strong>Checklist de caja</strong><span>Hoy</span></div>
+            <div><strong>{canWrite ? "Checklist de caja" : "Resumen de consulta"}</strong><span>Hoy</span></div>
             <Settings2 size={17} className="muted" />
           </div>
+          {!canWrite && <div className="readonly-summary"><LockKeyhole size={18}/><div><strong>Acceso de consulta</strong><span>Puedes revisar operaciones, comprobantes y reportes de tu filial.</span></div></div>}
+          {canWrite && <>
           {[
             ["Caja abierta", Boolean(dashboard?.session)],
             ["Registrar operaciones", (dashboard?.metrics.operationsToday ?? 0) > 0],
@@ -661,6 +670,7 @@ function HomePage({
             </div>
           ))}
           {dashboard?.session && <button className="close-day" onClick={onCloseCash}><LockKeyhole size={17} /> Cerrar caja</button>}
+          </>}
         </section>
       </div>
     </>
@@ -671,12 +681,14 @@ function OperationsPage({
   operations,
   onNewOperation,
   onReceipt,
+  canCreate,
   canCancel,
   onCancel
 }: {
   operations: Operation[];
   onNewOperation: (type: "YAPE_TO_CASH" | "CASH_TO_YAPE") => void;
   onReceipt: (op: Operation) => void;
+  canCreate: boolean;
   canCancel: boolean;
   onCancel: (op: Operation) => void | Promise<void>;
 }) {
@@ -685,7 +697,7 @@ function OperationsPage({
 
   return (
     <>
-      <div className="quick-actions">
+      {canCreate && <div className="quick-actions">
         <button className="quick yape" onClick={() => onNewOperation("YAPE_TO_CASH")}><Smartphone size={20} /><div><strong>Yape → Efectivo</strong><span>Cliente paga por Yape</span></div><Plus size={17} /></button>
         <button className="quick cash" onClick={() => onNewOperation("CASH_TO_YAPE")}><Send size={20} /><div><strong>Efectivo → Yape</strong><span>Cliente entrega efectivo</span></div><Plus size={17} /></button>
       </div>
@@ -1021,12 +1033,16 @@ function ProfilePage({ dashboard, user }: { dashboard: Dashboard | null; user: A
   );
 }
 
-function HelpPage({ onNavigate }: { onNavigate: (page: Page) => void }) {
-  const items: Array<[string, string, Page]> = [
+function HelpPage({ onNavigate, canWrite }: { onNavigate: (page: Page) => void; canWrite: boolean }) {
+  const items: Array<[string, string, Page]> = canWrite ? [
     ["Registrar una operación", "Usa Operaciones y selecciona Yape → Efectivo o Efectivo → Yape.", "operations"],
     ["Controlar la caja", "Revisa efectivo, saldo Yape y estado del turno.", "cash"],
     ["Cerrar el día", "Declara los montos reales y compara la diferencia.", "close"],
     ["Ver comprobantes", "Consulta el comprobante interno de cada movimiento.", "receipts"]
+  ] : [
+    ["Consultar operaciones", "Revisa los movimientos registrados en tu filial.", "operations"],
+    ["Ver comprobantes", "Consulta los comprobantes internos disponibles.", "receipts"],
+    ["Revisar reportes", "Consulta actividad, comisiones y reparto.", "reports"]
   ];
 
   return (
