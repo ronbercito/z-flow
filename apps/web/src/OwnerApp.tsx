@@ -55,7 +55,6 @@ type AdminPage =
   | "operations"
   | "cash"
   | "users"
-  | "partners"
   | "commissions"
   | "reports"
   | "audit"
@@ -163,7 +162,34 @@ type AdminUser = {
   role_name: string;
   branch_id: number | null;
   branch_name: string | null;
-  partner_branches?: string | null;
+};
+
+type UserDetail = {
+  user: AdminUser;
+  metrics: {
+    operationsToday: number;
+    operationsTotal: number;
+    earningsToday: number;
+    earningsTotal: number;
+    cancelledTotal: number;
+  };
+  openCash: {
+    id: number;
+    status: string;
+    initial_cash: number;
+    initial_wallet: number;
+    started_at: string;
+  } | null;
+  recentOperations: Array<{
+    id: number;
+    operation_type: "YAPE_TO_CASH" | "CASH_TO_YAPE";
+    reference_code: string | null;
+    amount: number;
+    commission: number;
+    net_amount: number;
+    status: string;
+    created_at: string;
+  }>;
 };
 
 type Closure = {
@@ -249,17 +275,6 @@ type SystemStatus = {
   };
 };
 
-type PartnerAssignment = {
-  id: number;
-  branch_id: number;
-  user_id: number;
-  pool_share_pct: number;
-  active: number;
-  branch_name: string;
-  full_name: string;
-  username: string;
-  earnings?: number;
-};
 
 type RolePermissionInfo = {
   id: number;
@@ -362,7 +377,6 @@ const nav: Array<{ page: AdminPage; label: string; icon: typeof Home }> = [
   { page: "operations", label: "Operaciones", icon: ReceiptText },
   { page: "cash", label: "Cajas / Cierres", icon: WalletCards },
   { page: "users", label: "Usuarios", icon: Users },
-  { page: "partners", label: "Socios", icon: Landmark },
   { page: "commissions", label: "Comisiones", icon: CircleDollarSign },
   { page: "reports", label: "Reportes", icon: BarChart3 },
   { page: "audit", label: "Auditoría", icon: FileSearch },
@@ -438,6 +452,7 @@ export default function OwnerApp({ user, onLogout }: { user: AuthUser; onLogout:
   const [settingsBranch, setSettingsBranch] = useState<Branch | null>(null);
   const [detailBranchId, setDetailBranchId] = useState<number | null>(null);
   const [editingUser, setEditingUser] = useState<AdminUser | null>(null);
+  const [detailUserId, setDetailUserId] = useState<number | null>(null);
 
   const initials = user.fullName.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
 
@@ -488,8 +503,7 @@ export default function OwnerApp({ user, onLogout }: { user: AuthUser; onLogout:
     operations: ["Operaciones globales", "Movimientos registrados en todas las filiales"],
     cash: ["Cajas y cierres", "Estado operativo y conciliaciones de todas las filiales"],
     users: ["Usuarios y roles", "Control de accesos y asignación de personal"],
-    partners: ["Socios", "Usuarios con rol de socio y su alcance"],
-    commissions: ["Comisiones", "Reglas de cobro y reparto por filial"],
+    commissions: ["Comisiones", "Reglas de cobro por filial"],
     reports: ["Reportes", "Consolidado operativo y financiero"],
     audit: ["Auditoría", "Historial de acciones sensibles dentro de Z-FLOW"],
     settings: ["Configuración general", "Datos del negocio y reglas centrales del sistema local"],
@@ -556,7 +570,7 @@ export default function OwnerApp({ user, onLogout }: { user: AuthUser; onLogout:
             </div>
             <div className="page-actions">
               {page === "branches" && <button className="primary" onClick={() => setBranchModal(true)}><Plus size={17} /> Nueva filial</button>}
-              {(page === "users" || page === "partners") && <button className="primary" onClick={() => setUserModal(true)}><Plus size={17} /> Nuevo usuario</button>}
+              {page === "users" && <button className="primary" onClick={() => setUserModal(true)}><Plus size={17} /> Nuevo usuario</button>}
             </div>
           </div>}
 
@@ -567,8 +581,7 @@ export default function OwnerApp({ user, onLogout }: { user: AuthUser; onLogout:
           {page === "branches" && overview && <BranchesPage branches={overview.branches} onSettings={setSettingsBranch} onDetail={(branch) => setDetailBranchId(branch.id)} />}
           {page === "operations" && <GlobalOperationsPage operations={operations} branches={overview?.branches ?? []} onRefresh={refreshAll} />}
           {page === "cash" && <CashAdminPage branches={overview?.branches ?? []} closures={closures} />}
-          {page === "users" && <UsersPage users={users} branches={overview?.branches ?? []} onRefresh={refreshAll} onEdit={setEditingUser} />}
-          {page === "partners" && <PartnersPage users={users} branches={overview?.branches ?? []} />}
+          {page === "users" && <UsersPage users={users} branches={overview?.branches ?? []} onDetail={setDetailUserId} />}
           {page === "commissions" && overview && <CommissionsPage branches={overview.branches} onSettings={setSettingsBranch} />}
           {page === "reports" && overview && <AdminReports overview={overview} operations={operations} closures={closures} />}
           {page === "audit" && <AuditPage rows={auditRows} />}
@@ -579,10 +592,11 @@ export default function OwnerApp({ user, onLogout }: { user: AuthUser; onLogout:
       </main>
 
       {branchModal && <CreateBranchModal onClose={() => setBranchModal(false)} onCreated={async () => { setBranchModal(false); await refreshAll(); }} />}
-      {userModal && <CreateUserModal branches={overview?.branches ?? []} onClose={() => setUserModal(false)} onCreated={async () => { setUserModal(false); await refreshAll(); }} />}
+      {userModal && <CreateUserModal branches={overview?.branches ?? []} users={users} onClose={() => setUserModal(false)} onCreated={async () => { setUserModal(false); await refreshAll(); }} />}
       {settingsBranch && <BranchSettingsModal branch={settingsBranch} onClose={() => setSettingsBranch(null)} onSaved={async () => { setSettingsBranch(null); await refreshAll(); }} />}
       {detailBranchId && <BranchDetailModal branchId={detailBranchId} onClose={() => setDetailBranchId(null)} onChanged={refreshAll} />}
-      {editingUser && <EditUserModal user={editingUser} branches={overview?.branches ?? []} currentUserId={user.id} onClose={() => setEditingUser(null)} onSaved={async () => { setEditingUser(null); await refreshAll(); }} />}
+      {detailUserId && <UserDetailModal userId={detailUserId} onClose={() => setDetailUserId(null)} onEdit={(target) => { setDetailUserId(null); setEditingUser(target); }} />}
+      {editingUser && <EditUserModal user={editingUser} branches={overview?.branches ?? []} users={users} currentUserId={user.id} onClose={() => setEditingUser(null)} onSaved={async () => { setEditingUser(null); await refreshAll(); }} />}
     </div>
   );
 }
@@ -907,30 +921,27 @@ function CashAdminPage({ branches, closures }: { branches: Branch[]; closures: C
   );
 }
 
-function UsersPage({ users, branches, onRefresh, onEdit }: { users: AdminUser[]; branches: Branch[]; onRefresh: () => Promise<void>; onEdit: (user: AdminUser) => void }) {
-  async function toggle(user: AdminUser) {
-    await api(`/api/admin/users/${user.id}/status`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ active: !Boolean(user.active) })
-    });
-    await onRefresh();
-  }
-
+function UsersPage({ users, branches, onDetail }: { users: AdminUser[]; branches: Branch[]; onDetail: (userId: number) => void }) {
+  const staff = users.filter((item) => item.role_code === "CASHIER");
   return (
     <section className="card page-card">
-      <div className="card-head"><div><strong>Usuarios del sistema</strong><span>{users.length} cuentas registradas · {branches.length} filiales</span></div></div>
+      <div className="card-head"><div><strong>Encargados de filial</strong><span>{staff.filter((item)=>Boolean(item.active)).length} activos · {branches.length} filiales</span></div></div>
       <div className="table-wrap">
         <table className="admin-table">
-          <thead><tr><th>Nombre</th><th>Usuario</th><th>Rol</th><th>Filial</th><th>Último acceso</th><th>Estado</th><th>Acciones</th></tr></thead>
+          <thead><tr><th>Nombre</th><th>Usuario</th><th>Rol</th><th>Filial</th><th>Último acceso</th><th>Estado</th><th></th></tr></thead>
           <tbody>
-            {users.map((item) => (
+            {staff.map((item) => (
               <tr key={item.id}>
-                <td><strong>{item.full_name}</strong></td><td>{item.username}</td><td>{item.role_name}</td><td>{item.role_code==="PARTNER" ? (item.partner_branches ?? "Sin filial") : (item.branch_name ?? "Global")}</td><td>{dateTime(item.last_login_at)}</td>
+                <td><strong>{item.full_name}</strong></td>
+                <td>{item.username}</td>
+                <td>Cajero / Encargado</td>
+                <td>{item.branch_name ?? "Sin filial"}</td>
+                <td>{dateTime(item.last_login_at)}</td>
                 <td><span className={item.active ? "branch-status open" : "branch-status closed"}>{item.active ? "Activo" : "Inactivo"}</span></td>
-                <td><div className="inline-actions"><button className="mini-button" onClick={() => onEdit(item)}><Pencil size={12} /> Editar</button><button className={item.active ? "mini-button danger-mini" : "mini-button"} onClick={() => void toggle(item)}>{item.active ? "Desactivar" : "Activar"}</button></div></td>
+                <td><button className="mini-button" onClick={() => onDetail(item.id)}><Eye size={13}/> Detalles</button></td>
               </tr>
             ))}
+            {!staff.length && <tr><td colSpan={7} className="empty-cell">Todavía no hay encargados creados.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -938,113 +949,64 @@ function UsersPage({ users, branches, onRefresh, onEdit }: { users: AdminUser[];
   );
 }
 
-function PartnersPage({ users, branches }: { users: AdminUser[]; branches: Branch[] }) {
-  const partners = users.filter((item) => item.role_code === "PARTNER");
-  const [assignments, setAssignments] = useState<PartnerAssignment[]>([]);
-  const [branchId, setBranchId] = useState(branches[0] ? String(branches[0].id) : "");
-  const [userId, setUserId] = useState(partners[0] ? String(partners[0].id) : "");
-  const [share, setShare] = useState("100");
+function UserDetailModal({ userId, onClose, onEdit }: { userId: number; onClose: () => void; onEdit: (user: AdminUser) => void }) {
+  const [detail, setDetail] = useState<UserDetail | null>(null);
   const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
-
-  async function loadAssignments() {
-    try {
-      const data = await api<{ assignments: PartnerAssignment[] }>("/api/admin/partners/assignments");
-      setAssignments(data.assignments ?? []);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudieron cargar las asignaciones");
-    }
-  }
-
-  useEffect(() => { void loadAssignments(); }, []);
 
   useEffect(() => {
-    if (!branchId && branches[0]) setBranchId(String(branches[0].id));
-    if (!userId && partners[0]) setUserId(String(partners[0].id));
-  }, [branches.length, partners.length]);
+    void (async () => {
+      try {
+        setDetail(await api<UserDetail>(`/api/admin/users/${userId}/detail`));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "No se pudo cargar el detalle");
+      }
+    })();
+  }, [userId]);
 
-  async function saveAssignment(event: FormEvent) {
-    event.preventDefault();
-    setError(""); setMessage("");
-    try {
-      await api("/api/admin/partners/assignments", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          branchId: Number(branchId),
-          userId: Number(userId),
-          poolSharePct: Number(share),
-          active: true
-        })
-      });
-      setMessage("Socio asignado a la filial.");
-      await loadAssignments();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo guardar la asignación");
-    }
-  }
-
-  async function disableAssignment(item: PartnerAssignment) {
-    try {
-      await api("/api/admin/partners/assignments", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          branchId: item.branch_id,
-          userId: item.user_id,
-          poolSharePct: Number(item.pool_share_pct),
-          active: false
-        })
-      });
-      await loadAssignments();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo desactivar la asignación");
-    }
-  }
-
-  return (
-    <>
-      <div className="partner-stage4-grid">
-        <section className="card partner-assignment-card">
-          <div className="card-head"><div><strong>Asignar socio a filial</strong><span>El porcentaje distribuye la parte total de socios de esa filial.</span></div></div>
-          <form className="partner-assignment-form" onSubmit={saveAssignment}>
-            <label>Filial<select value={branchId} onChange={(e)=>setBranchId(e.target.value)} required>{branches.map((item)=><option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
-            <label>Socio<select value={userId} onChange={(e)=>setUserId(e.target.value)} required>{partners.map((item)=><option value={item.id} key={item.id}>{item.full_name}</option>)}</select></label>
-            <label>% del reparto de socios<input type="number" min="0" max="100" step="0.01" value={share} onChange={(e)=>setShare(e.target.value)} required /></label>
-            <button className="primary" disabled={!partners.length || !branches.length}>Guardar asignación</button>
-            {error && <div className="modal-error">{error}</div>}
-            {message && <div className="success-message">{message}</div>}
-          </form>
-        </section>
-
-        <section className="card page-card partner-list-card">
-          <div className="card-head"><div><strong>Socios registrados</strong><span>{partners.length} usuarios con rol Socio</span></div></div>
-          <div className="partner-grid">
-            {partners.map((item) => (
-              <div className="partner-card" key={item.id}>
-                <div className="avatar">{item.full_name.split(/\s+/).slice(0,2).map((x) => x[0]).join("")}</div>
-                <div><strong>{item.full_name}</strong><span>@{item.username}</span><small>Acceso global de lectura</small></div>
-              </div>
-            ))}
-            {!partners.length && <div className="empty-state compact-empty"><Landmark size={28} /><strong>Aún no hay socios creados</strong><span>Usa “Nuevo usuario” y asigna el rol Socio.</span></div>}
-          </div>
-        </section>
+  return <div className="modal-backdrop">
+    <div className="modal user-detail-modal">
+      <div className="modal-head">
+        <div><h2>Detalles del encargado</h2><p>{detail ? `${detail.user.full_name} · ${detail.user.branch_name ?? "Sin filial"}` : "Cargando información…"}</p></div>
+        <button type="button" className="icon-btn" onClick={onClose}><X size={18}/></button>
       </div>
-
-      <section className="card page-card">
-        <div className="card-head"><div><strong>Asignaciones por filial</strong><span>La suma activa por filial no puede superar 100%.</span></div></div>
-        <div className="table-wrap">
-          <table className="admin-table">
-            <thead><tr><th>Filial</th><th>Socio</th><th>Usuario</th><th>% de reparto del socio</th><th>Ganancia acumulada</th><th>Estado</th><th>Acción</th></tr></thead>
-            <tbody>
-              {assignments.map((item)=><tr key={item.id}><td><strong>{item.branch_name}</strong></td><td>{item.full_name}</td><td>{item.username}</td><td>{Number(item.pool_share_pct).toFixed(2)}%</td><td><strong>{currency(item.earnings ?? 0)}</strong></td><td><span className={item.active?"branch-status open":"branch-status closed"}>{item.active?"Activo":"Inactivo"}</span></td><td>{item.active?<button className="mini-button danger-mini" onClick={()=>void disableAssignment(item)}>Desactivar</button>:"—"}</td></tr>)}
-              {!assignments.length && <tr><td colSpan={7} className="empty-cell">Todavía no hay socios asignados a filiales.</td></tr>}
-            </tbody>
-          </table>
+      {error && <div className="modal-error">{error}</div>}
+      {!detail && !error && <div className="owner-loading">Cargando…</div>}
+      {detail && <>
+        <div className="user-earnings-grid">
+          <div><span>Ganancia hoy</span><strong>{currency(detail.metrics.earningsToday)}</strong></div>
+          <div><span>Ganancia acumulada</span><strong>{currency(detail.metrics.earningsTotal)}</strong></div>
+          <div><span>Operaciones hoy</span><strong>{detail.metrics.operationsToday}</strong></div>
+          <div><span>Operaciones acumuladas</span><strong>{detail.metrics.operationsTotal}</strong></div>
         </div>
-      </section>
-    </>
-  );
+        <div className="user-detail-summary">
+          <div><span>Usuario</span><strong>{detail.user.username}</strong></div>
+          <div><span>Filial</span><strong>{detail.user.branch_name ?? "—"}</strong></div>
+          <div><span>Último acceso</span><strong>{dateTime(detail.user.last_login_at)}</strong></div>
+          <div><span>Caja actual</span><strong>{detail.openCash ? "Abierta" : "Cerrada"}</strong></div>
+        </div>
+        <div className="user-recent-activity">
+          <strong>Actividad reciente</strong>
+          <div className="table-wrap"><table className="admin-table compact-user-table">
+            <thead><tr><th>Fecha</th><th>Tipo</th><th>Monto</th><th>Ganancia</th><th>Estado</th></tr></thead>
+            <tbody>
+              {detail.recentOperations.map((op)=><tr key={op.id}>
+                <td>{dateTime(op.created_at)}</td>
+                <td>{op.operation_type==="YAPE_TO_CASH"?"Yape → Efectivo":"Efectivo → Yape"}</td>
+                <td>{currency(op.amount)}</td>
+                <td><strong>{currency(op.commission)}</strong></td>
+                <td>{op.status==="COMPLETED"?"Completada":op.status==="CANCELLED"?"Anulada":op.status==="REVERSED"?"Revertida":"En proceso"}</td>
+              </tr>)}
+              {!detail.recentOperations.length && <tr><td colSpan={5} className="empty-cell">Sin operaciones todavía.</td></tr>}
+            </tbody>
+          </table></div>
+        </div>
+        <div className="modal-actions">
+          <button className="ghost-button" onClick={onClose}>Cerrar</button>
+          <button className="primary" onClick={() => onEdit(detail.user)}><Pencil size={14}/> Editar cuenta</button>
+        </div>
+      </>}
+    </div>
+  </div>;
 }
 
 function CommissionsPage({ branches, onSettings }: { branches: Branch[]; onSettings: (branch: Branch) => void }) {
