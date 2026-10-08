@@ -20,6 +20,11 @@ const receiptParams = z.object({
   operationId: z.coerce.number().int().positive()
 });
 
+const closureParams = z.object({
+  branchId: z.coerce.number().int().positive(),
+  closureId: z.coerce.number().int().positive()
+});
+
 type ReportFilters = z.infer<typeof reportQuery>;
 
 function money(value: unknown) {
@@ -349,6 +354,161 @@ export async function registerReportRoutes(app: FastifyInstance) {
     const buffer = await pdfBuffer(report, "Reporte de filial");
     reply.header("Content-Type", "application/pdf");
     reply.header("Content-Disposition", contentDisposition("z-flow-filial.pdf"));
+    return reply.send(buffer);
+  });
+
+  app.get("/api/branches/:branchId/closures/:closureId/pdf", async (request, reply) => {
+    const parsed = closureParams.safeParse(request.params);
+    if (!parsed.success) return reply.code(400).send({ error: "Cierre inválido" });
+
+    const auth = await requireAuth(request, reply);
+    if (!auth) return;
+    if (!canReadBranch(auth, parsed.data.branchId)) return reply.code(403).send({ error: "Acceso denegado" });
+
+    const [rows] = await db.query<any[]>(`
+      SELECT dc.id, dc.operation_count, dc.commission_total,
+             dc.staff_share_total, dc.partner_share_total,
+             dc.expected_cash, dc.declared_cash, dc.expected_wallet,
+             dc.declared_wallet, dc.difference_cash, dc.difference_wallet,
+             dc.notes, DATE_FORMAT(dc.closed_at, '%d/%m/%Y %H:%i') AS closed_at,
+             b.code AS branch_code, b.name AS branch_name, b.address AS branch_address,
+             u.full_name AS closed_by,
+             DATE_FORMAT(cs.started_at, '%d/%m/%Y %H:%i') AS started_at
+      FROM daily_closures dc
+      JOIN branches b ON b.id=dc.branch_id
+      JOIN cash_sessions cs ON cs.id=dc.cash_session_id
+      LEFT JOIN users u ON u.id=dc.closed_by_user_id
+      WHERE dc.id=? AND dc.branch_id=?
+      LIMIT 1
+    `, [parsed.data.closureId, parsed.data.branchId]);
+
+    if (!rows.length) return reply.code(404).send({ error: "Cierre no encontrado" });
+    const row = rows[0];
+
+    const [settingRows] = await db.query<any[]>(`
+      SELECT business_name, legal_name, ruc, address, phone, logo_data_url
+      FROM system_settings WHERE id=1 LIMIT 1
+    `);
+    const branding = settingRows[0] ?? {};
+
+    const resultLabel =
+      Math.abs(Number(row.difference_cash)) < 0.005 && Math.abs(Number(row.difference_wallet)) < 0.005
+        ? "CUADRA"
+        : Number(row.difference_cash) < 0 || Number(row.difference_wallet) < 0
+          ? (Number(row.difference_cash) > 0 || Number(row.difference_wallet) > 0 ? "DIFERENCIAS MIXTAS" : "FALTANTE")
+          : "SOBRANTE";
+
+    const buffer = await new Promise<Buffer>((resolve, reject) => {
+      const doc = new PDFDocument({ size: "A4", margins: { top: 34, bottom: 34, left: 42, right: 42 } });
+      const chunks: Buffer[] = [];
+      doc.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+      doc.on("end", () => resolve(Buffer.concat(chunks)));
+      doc.on("error", reject);
+
+      if (branding.logo_data_url) {
+        try {
+          const base64 = String(branding.logo_data_url).split(",")[1] ?? "";
+          if (base64) doc.image(Buffer.from(base64, "base64"), 42, 34, { fit: [80, 42] });
+        } catch {
+          // Continue without logo.
+        }
+      }
+
+      doc.font("Helvetica-Bold").fontSize(18).text(String(branding.business_name ?? "Z-FLOW"), { align: "right" });
+      if (branding.legal_name) doc.font("Helvetica").fontSize(8).text(String(branding.legal_name), { align: "right" });
+      if (branding.ruc) doc.fontSize(8).text(`RUC: ${branding.ruc}`, { align: "right" });
+      if (branding.phone) doc.fontSize(8).text(`Tel: ${branding.phone}`, { align: "right" });
+
+      doc.moveDown(1.7);
+      doc.font("Helvetica-Bold").fontSize(15).fillColor("#172235").text("REPORTE DE CIERRE DIARIO");
+      doc.font("Helvetica").fontSize(9).fillColor("#667085")
+        .text(`Cierre N.° ${row.id} - ${row.branch_name}`);
+      doc.moveDown(0.9);
+
+      const left = 42;
+      const width = 511;
+      doc.roundedRect(left, doc.y, width, 58, 6).fillAndStroke("#F8FAFC", "#E4E7EC");
+      const top = doc.y + 10;
+      doc.fillColor("#667085").fontSize(8).text("Turno iniciado", left + 12, top);
+      doc.fillColor("#101828").font("Helvetica-Bold").fontSize(9).text(row.started_at ?? "—", left + 12, top + 15);
+      doc.fillColor("#667085").font("Helvetica").fontSize(8).text("Cierre", left + 180, top);
+      doc.fillColor("#101828").font("Helvetica-Bold").fontSize(9).text(row.closed_at ?? "—", left + 180, top + 15);
+      doc.fillColor("#667085").font("Helvetica").fontSize(8).text("Responsable", left + 330, top);
+      doc.fillColor("#101828").font("Helvetica-Bold").fontSize(9).text(row.closed_by ?? "—", left + 330, top + 15);
+      doc.y += 72;
+
+      doc.font("Helvetica-Bold").fontSize(11).fillColor("#172235").text("Resumen operativo");
+      doc.moveDown(0.5);
+
+      const items = [
+        ["Operaciones", String(row.operation_count ?? 0)],
+        ["Comisión total", pen(row.commission_total)],
+        ["Parte encargado", pen(row.staff_share_total)],
+        ["Parte socio", pen(row.partner_share_total)]
+      ];
+      let y = doc.y;
+      items.forEach(([label, value], index) => {
+        const x = left + (index % 2) * 255;
+        if (index === 2) y += 54;
+        const yy = index < 2 ? y : y;
+        doc.roundedRect(x, yy, 238, 42, 5).stroke("#E4E7EC");
+        doc.fillColor("#667085").font("Helvetica").fontSize(8).text(label, x + 10, yy + 8);
+        doc.fillColor("#101828").font("Helvetica-Bold").fontSize(12).text(value, x + 10, yy + 21);
+      });
+      doc.y = y + 56;
+
+      doc.font("Helvetica-Bold").fontSize(11).fillColor("#172235").text("Conciliación");
+      doc.moveDown(0.5);
+
+      const rowsData = [
+        ["Efectivo", pen(row.expected_cash), pen(row.declared_cash), pen(row.difference_cash)],
+        ["Yape", pen(row.expected_wallet), pen(row.declared_wallet), pen(row.difference_wallet)]
+      ];
+      const tx = left;
+      const col = [150, 115, 115, 115];
+      const headers = ["Concepto", "Esperado", "Declarado", "Diferencia"];
+      let tableY = doc.y;
+      let x = tx;
+      headers.forEach((h, i) => {
+        doc.rect(x, tableY, col[i], 24).fillAndStroke("#EEF2F6", "#DDE3EA");
+        doc.fillColor("#344054").font("Helvetica-Bold").fontSize(8).text(h, x + 7, tableY + 8);
+        x += col[i];
+      });
+      tableY += 24;
+      rowsData.forEach((data) => {
+        x = tx;
+        data.forEach((value, i) => {
+          doc.rect(x, tableY, col[i], 28).stroke("#E4E7EC");
+          doc.fillColor("#344054").font(i === 0 ? "Helvetica-Bold" : "Helvetica").fontSize(8.5)
+            .text(value, x + 7, tableY + 9);
+          x += col[i];
+        });
+        tableY += 28;
+      });
+      doc.y = tableY + 16;
+
+      const balanced = resultLabel === "CUADRA";
+      doc.roundedRect(left, doc.y, width, 48, 6)
+        .fillAndStroke(balanced ? "#ECFDF3" : "#FFF4E5", balanced ? "#ABEFC6" : "#FEC84B");
+      doc.fillColor(balanced ? "#067647" : "#B54708").font("Helvetica-Bold").fontSize(11)
+        .text(`Resultado: ${resultLabel}`, left + 12, doc.y + 10);
+      doc.font("Helvetica").fontSize(8)
+        .text(balanced ? "No se registraron diferencias en el cierre." : "El cierre registra diferencias y requiere revisión.", left + 12, doc.y + 27);
+      doc.y += 62;
+
+      doc.font("Helvetica-Bold").fontSize(9).fillColor("#344054").text("Observación");
+      doc.font("Helvetica").fontSize(8.5).fillColor("#667085")
+        .text(row.notes || "Sin observaciones.", { width });
+
+      doc.moveDown(2);
+      doc.font("Helvetica").fontSize(7).fillColor("#98A2B3")
+        .text("Documento interno de control de caja generado por Z-FLOW.", { align: "center" });
+
+      doc.end();
+    });
+
+    reply.header("Content-Type", "application/pdf");
+    reply.header("Content-Disposition", `inline; filename="cierre-${row.branch_code}-${row.id}.pdf"`);
     return reply.send(buffer);
   });
 
