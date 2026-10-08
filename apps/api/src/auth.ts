@@ -42,10 +42,16 @@ function tempPassword() {
 async function permissionsForRoleFromDb(roleId: number, roleCode: RoleCode) {
   try {
     const [rows] = await db.query<any[]>(
-      "SELECT permission_code FROM role_permissions WHERE role_id=? AND enabled=1 ORDER BY permission_code",
+      "SELECT permission_code, enabled FROM role_permissions WHERE role_id=? ORDER BY permission_code",
       [roleId]
     );
-    if (rows.length) return rows.map((row) => String(row.permission_code));
+    // Return an empty list when every permission was intentionally disabled.
+    // The hard-coded defaults are only for databases that predate this schema.
+    if (rows.length) {
+      return rows
+        .filter((row) => Number(row.enabled) === 1)
+        .map((row) => String(row.permission_code));
+    }
   } catch {
     // Stage 4 schema may not exist during an initial bootstrap; fall back to defaults.
   }
