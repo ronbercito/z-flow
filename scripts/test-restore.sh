@@ -5,6 +5,13 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BACKUP_FILE="${1:-}"
 cd "$ROOT_DIR"
 
+if [ -f .env ]; then
+  set -a
+  # shellcheck disable=SC1091
+  source .env
+  set +a
+fi
+
 if [ -z "$BACKUP_FILE" ]; then
   BACKUP_FILE="$(find "$ROOT_DIR/backups" -maxdepth 1 -type f -name 'zflow_*.sql.gz' -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n1 | cut -d' ' -f2- || true)"
 fi
