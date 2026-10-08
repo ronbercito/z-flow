@@ -59,6 +59,8 @@ type AdminPage =
   | "commissions"
   | "reports"
   | "audit"
+  | "settings"
+  | "security"
   | "profile";
 
 type Branch = {
@@ -193,6 +195,66 @@ type AuditRow = {
   username: string | null;
 };
 
+type SystemSettings = {
+  businessName: string;
+  legalName: string | null;
+  ruc: string | null;
+  address: string | null;
+  phone: string | null;
+  currencyCode: string;
+  timezoneName: string;
+  ticketFooter: string | null;
+  receiptPrefix: string;
+  defaultMaxOperationAmount: number;
+  defaultCommissionType: "FLAT" | "PERCENT";
+  defaultCommissionValue: number;
+  defaultStaffSharePct: number | null;
+  defaultPartnerSharePct: number | null;
+  requireCashToYapeReference: boolean;
+  allowCashierCancel: boolean;
+  updatedAt: string;
+};
+
+type SecuritySession = {
+  id: number;
+  userId: number;
+  username: string;
+  fullName: string;
+  roleName: string;
+  branchName: string | null;
+  ipAddress: string | null;
+  userAgent: string | null;
+  createdAt: string;
+  expiresAt: string;
+  revokedAt: string | null;
+  active: boolean;
+  current: boolean;
+};
+
+type SystemStatus = {
+  ok: boolean;
+  api: { uptimeSeconds: number; node: string; memoryMb: number };
+  database: { ok: boolean; version: string; time: string };
+  counts: {
+    activeBranches: number;
+    activeUsers: number;
+    activeSessions: number;
+    openCashSessions: number;
+    operationsToday: number;
+  };
+};
+
+type PartnerAssignment = {
+  id: number;
+  branch_id: number;
+  user_id: number;
+  pool_share_pct: number;
+  active: number;
+  branch_name: string;
+  full_name: string;
+  username: string;
+};
+
 type FinancialReport = {
   filters: { branchId: number | null; from: string | null; to: string | null };
   summary: {
@@ -290,6 +352,8 @@ const nav: Array<{ page: AdminPage; label: string; icon: typeof Home }> = [
   { page: "commissions", label: "Comisiones", icon: CircleDollarSign },
   { page: "reports", label: "Reportes", icon: BarChart3 },
   { page: "audit", label: "Auditoría", icon: FileSearch },
+  { page: "settings", label: "Configuración", icon: Settings2 },
+  { page: "security", label: "Seguridad", icon: ShieldCheck },
   { page: "profile", label: "Mi perfil", icon: UserRound }
 ];
 
@@ -390,6 +454,8 @@ export default function OwnerApp({ user, onLogout }: { user: AuthUser; onLogout:
     commissions: ["Comisiones", "Reglas de cobro y reparto por filial"],
     reports: ["Reportes", "Consolidado operativo y financiero"],
     audit: ["Auditoría", "Historial de acciones sensibles dentro de Z-FLOW"],
+    settings: ["Configuración general", "Datos del negocio y reglas centrales del sistema local"],
+    security: ["Seguridad y sesiones", "Control de sesiones activas y estado del entorno local"],
     profile: ["Mi perfil", "Cuenta propietaria y seguridad"]
   };
 
@@ -461,13 +527,15 @@ export default function OwnerApp({ user, onLogout }: { user: AuthUser; onLogout:
 
           {page === "dashboard" && overview && <OwnerDashboard user={user} overview={overview} onPage={go} />}
           {page === "branches" && overview && <BranchesPage branches={overview.branches} onSettings={setSettingsBranch} onDetail={(branch) => setDetailBranchId(branch.id)} />}
-          {page === "operations" && <GlobalOperationsPage operations={operations} branches={overview?.branches ?? []} />}
+          {page === "operations" && <GlobalOperationsPage operations={operations} branches={overview?.branches ?? []} onRefresh={refreshAll} />}
           {page === "cash" && <CashAdminPage branches={overview?.branches ?? []} closures={closures} />}
           {page === "users" && <UsersPage users={users} branches={overview?.branches ?? []} onRefresh={refreshAll} onEdit={setEditingUser} />}
-          {page === "partners" && <PartnersPage users={users} />}
+          {page === "partners" && <PartnersPage users={users} branches={overview?.branches ?? []} />}
           {page === "commissions" && overview && <CommissionsPage branches={overview.branches} onSettings={setSettingsBranch} />}
           {page === "reports" && overview && <AdminReports overview={overview} operations={operations} closures={closures} />}
           {page === "audit" && <AuditPage rows={auditRows} />}
+          {page === "settings" && <SystemSettingsPage />}
+          {page === "security" && <SecurityPage currentUserId={user.id} />}
           {page === "profile" && <OwnerProfile user={user} />}
         </section>
       </main>
@@ -661,11 +729,26 @@ function BranchesPage({ branches, onSettings, onDetail }: { branches: Branch[]; 
   );
 }
 
-function GlobalOperationsPage({ operations, branches }: { operations: GlobalOperation[]; branches: Branch[] }) {
+function GlobalOperationsPage({ operations, branches, onRefresh }: { operations: GlobalOperation[]; branches: Branch[]; onRefresh: () => Promise<void> }) {
   const [branch, setBranch] = useState("ALL");
   const [type, setType] = useState("ALL");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+
+  async function reverseOperation(op: GlobalOperation) {
+    const reason = window.prompt("Motivo del reverso (mínimo 5 caracteres):");
+    if (!reason) return;
+    try {
+      await api(`/api/admin/operations/${op.id}/reverse`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason })
+      });
+      await onRefresh();
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "No se pudo revertir la operación");
+    }
+  }
 
   const filtered = operations.filter((op) => {
     const day = op.created_at.slice(0, 10);
@@ -694,16 +777,16 @@ function GlobalOperationsPage({ operations, branches }: { operations: GlobalOper
           <button className="filter-clear" onClick={() => { setBranch("ALL"); setType("ALL"); setFrom(""); setTo(""); }}>Limpiar</button>
         </div>
       </div>
-      <GlobalOperationsTable operations={filtered} />
+      <GlobalOperationsTable operations={filtered} onReverse={reverseOperation} />
     </section>
   );
 }
 
-function GlobalOperationsTable({ operations }: { operations: GlobalOperation[] }) {
+function GlobalOperationsTable({ operations, onReverse }: { operations: GlobalOperation[]; onReverse?: (op: GlobalOperation) => void }) {
   return (
     <div className="table-wrap">
       <table className="admin-table">
-        <thead><tr><th>Fecha / Hora</th><th>Filial</th><th>Tipo</th><th>Cliente</th><th>Referencia</th><th>Monto</th><th>Comisión</th><th>Entregado</th><th>Registró</th><th>Estado</th></tr></thead>
+        <thead><tr><th>Fecha / Hora</th><th>Filial</th><th>Tipo</th><th>Cliente</th><th>Referencia</th><th>Monto</th><th>Comisión</th><th>Entregado</th><th>Registró</th><th>Estado</th>{onReverse && <th>Acción</th>}</tr></thead>
         <tbody>
           {operations.map((op) => (
             <tr key={op.id}>
@@ -717,9 +800,10 @@ function GlobalOperationsTable({ operations }: { operations: GlobalOperation[] }
               <td>{currency(op.net_amount)}</td>
               <td>{op.registered_by ?? "—"}</td>
               <td><span className={`status ${op.status === "COMPLETED" ? "ok" : "pending"}`}><i />{op.status === "COMPLETED" ? "Completada" : op.status === "IN_PROGRESS" ? "En proceso" : op.status === "CANCELLED" ? "Anulada" : op.status === "REVERSED" ? "Revertida" : op.status}</span></td>
+              {onReverse && <td>{["COMPLETED","CANCELLED"].includes(op.status) ? <button className="mini-button danger-mini" onClick={() => onReverse(op)}>Revertir</button> : "—"}</td>}
             </tr>
           ))}
-          {!operations.length && <tr><td colSpan={10} className="empty-cell">No hay operaciones.</td></tr>}
+          {!operations.length && <tr><td colSpan={onReverse ? 11 : 10} className="empty-cell">No hay operaciones.</td></tr>}
         </tbody>
       </table>
     </div>
