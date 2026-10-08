@@ -8,7 +8,6 @@ import { registerReportRoutes } from "./reports.js";
 import { ensureStage4Schema, registerStage4Routes } from "./stage4.js";
 import {
   backfillMissingReceipts,
-  calculateCommissionShares,
   ensureBusinessSchema,
   issueInternalReceipt
 } from "./business.js";
@@ -648,11 +647,7 @@ app.post("/api/branches/:branchId/operations", async (request, reply) => {
     });
   }
 
-  const shares = calculateCommissionShares(
-    commission,
-    settings.staff_share_pct == null ? null : Number(settings.staff_share_pct),
-    settings.partner_share_pct == null ? null : Number(settings.partner_share_pct)
-  );
+  const managerEarning = commission;
 
   const connection = await db.getConnection();
   try {
@@ -673,42 +668,14 @@ app.post("/api/branches/:branchId/operations", async (request, reply) => {
         body.customerName ?? null,
         money(body.amount),
         commission,
-        shares.staffShareAmount,
-        shares.partnerShareAmount,
+        managerEarning,
+        0,
         netAmount,
         body.notes ?? null
       ]
     );
 
     const operationId = Number(result.insertId);
-
-    if (shares.partnerShareAmount > 0) {
-      const [partnerRows] = await connection.query<any[]>(`
-        SELECT user_id, pool_share_pct
-        FROM branch_partner_assignments
-        WHERE branch_id=? AND active=1
-        ORDER BY id
-      `, [branchId]);
-
-      for (const partner of partnerRows) {
-        const individualAmount = money(
-          shares.partnerShareAmount * (Number(partner.pool_share_pct) / 100)
-        );
-        if (individualAmount <= 0) continue;
-        await connection.execute(
-          `INSERT INTO operation_partner_shares
-            (operation_id,branch_id,user_id,pool_share_pct,amount)
-           VALUES (?,?,?,?,?)`,
-          [
-            operationId,
-            branchId,
-            Number(partner.user_id),
-            Number(partner.pool_share_pct),
-            individualAmount
-          ]
-        );
-      }
-    }
 
     const receipt = await issueInternalReceipt(
       connection,
@@ -721,7 +688,7 @@ app.post("/api/branches/:branchId/operations", async (request, reply) => {
       `INSERT INTO audit_logs
         (branch_id, user_id, action, entity_type, entity_id, details, ip_address, user_agent)
        VALUES (?, ?, 'OPERATION_CREATED', 'OPERATION', ?,
-         JSON_OBJECT('type', ?, 'amount', ?, 'commission', ?, 'staff_share', ?, 'partner_share', ?), ?, ?)`,
+         JSON_OBJECT('type', ?, 'amount', ?, 'commission', ?), ?, ?)`,
       [
         branchId,
         auth.userId,
@@ -729,8 +696,6 @@ app.post("/api/branches/:branchId/operations", async (request, reply) => {
         body.operationType,
         money(body.amount),
         commission,
-        shares.staffShareAmount,
-        shares.partnerShareAmount,
         request.ip,
         String(request.headers["user-agent"] ?? "").slice(0, 255)
       ]
@@ -743,9 +708,9 @@ app.post("/api/branches/:branchId/operations", async (request, reply) => {
       operationType: body.operationType,
       amount: money(body.amount),
       commission,
-      staffShareAmount: shares.staffShareAmount,
-      partnerShareAmount: shares.partnerShareAmount,
-      unassignedCommission: shares.unassignedAmount,
+      staffShareAmount: managerEarning,
+      partnerShareAmount: 0,
+      unassignedCommission: 0,
       netAmount,
       referenceCode: body.referenceCode ?? null,
       receipt: {
