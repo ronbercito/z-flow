@@ -58,3 +58,48 @@ Crea una base temporal, importa el último backup, comprueba tablas principales 
 Dentro del LXC, Docker queda habilitado por `install-local-production.sh` y los contenedores usan `restart: unless-stopped`.
 
 En el host Proxmox también debe activarse **Start at boot** para el CT de Z-FLOW. Desde la interfaz de Proxmox se puede habilitar en las opciones del contenedor. La prueba final de reinicio forma parte de la Fase 5.
+
+
+## Validación final antes de uso real
+
+Ejecutar dentro del LXC:
+
+```bash
+cd /opt/z-flow
+bash scripts/verify-local-production.sh
+```
+
+Esta prueba es no destructiva. Verifica:
+
+- permisos de `.env`;
+- Docker y políticas de reinicio;
+- salud de MariaDB/API/Web;
+- creación de un backup nuevo;
+- restauración del backup en una base temporal;
+- igualdad de conteos de filiales, usuarios, operaciones, cierres y comprobantes;
+- backup automático diario.
+
+Debe terminar con:
+
+```text
+Z-FLOW LOCAL: VALIDACIÓN COMPLETA OK
+```
+
+## Prueba final de reinicio del LXC
+
+Primero habilitar **Start at boot** para el CT de Z-FLOW desde Proxmox.
+
+Reiniciar el contenedor desde el host Proxmox. Cuando vuelva a iniciar, entrar al LXC y ejecutar:
+
+```bash
+cd /opt/z-flow
+bash scripts/verify-after-reboot.sh
+```
+
+Debe terminar con:
+
+```text
+REINICIO DEL LXC: PRUEBA APROBADA
+```
+
+No es necesario ejecutar `docker compose up` manualmente después del reinicio: Docker debe iniciar con el sistema y los servicios de Z-FLOW usan `restart: unless-stopped`.
