@@ -2020,3 +2020,62 @@ tr:last-child td { border-bottom:0; }
   font-size: 8px;
   line-height: 1.45;
 }
+
+
+/* Friendly manager detail */
+.user-detail-modal {
+  width: min(760px, 100%);
+}
+.user-earnings-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0,1fr));
+  gap: 9px;
+}
+.user-earnings-grid > div,
+.user-detail-summary > div {
+  border: 1px solid #e7edf4;
+  border-radius: 10px;
+  background: #fbfdff;
+  padding: 11px;
+  display: grid;
+  gap: 4px;
+}
+.user-earnings-grid span,
+.user-detail-summary span {
+  color: #7b899b;
+  font-size: 8px;
+}
+.user-earnings-grid strong {
+  color: #1f6f4a;
+  font-size: 14px;
+}
+.user-detail-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0,1fr));
+  gap: 9px;
+}
+.user-detail-summary strong {
+  color: #344054;
+  font-size: 9px;
+}
+.user-recent-activity {
+  display: grid;
+  gap: 8px;
+}
+.user-recent-activity > strong {
+  color: #344054;
+  font-size: 10px;
+}
+.compact-user-table th,
+.compact-user-table td {
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+@media (max-width: 760px) {
+  .user-earnings-grid,
+  .user-detail-summary { grid-template-columns: repeat(2,1fr); }
+}
+@media (max-width: 480px) {
+  .user-earnings-grid,
+  .user-detail-summary { grid-template-columns: 1fr; }
+}
