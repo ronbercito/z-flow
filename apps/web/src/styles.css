@@ -1990,3 +1990,33 @@ tr:last-child td { border-bottom:0; }
   flex: 0 0 auto;
   color: #3274c6;
 }
+
+
+.readonly-summary {
+  margin-top: 8px;
+  padding: 12px;
+  border: 1px solid #dce9f7;
+  border-radius: 9px;
+  background: #f5f9ff;
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  color: #58708d;
+}
+.readonly-summary svg {
+  flex: 0 0 auto;
+  color: #3f78bd;
+}
+.readonly-summary > div {
+  display: grid;
+  gap: 3px;
+}
+.readonly-summary strong {
+  color: #334b68;
+  font-size: 9px;
+}
+.readonly-summary span {
+  color: #718399;
+  font-size: 8px;
+  line-height: 1.45;
+}
