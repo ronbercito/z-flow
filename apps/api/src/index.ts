@@ -467,10 +467,13 @@ app.get("/api/branches/:branchId/settings", async (request, reply) => {
   if (!auth) return;
 
   const [rows] = await db.query<any[]>(
-    `SELECT max_operation_amount, commission_type, commission_value,
-            staff_share_pct, partner_share_pct
-     FROM branch_settings
-     WHERE branch_id = ? LIMIT 1`,
+    `SELECT bs.max_operation_amount, bs.commission_type, bs.commission_value,
+            bs.staff_share_pct, bs.partner_share_pct,
+            ss.require_cash_to_yape_reference, ss.allow_cashier_cancel
+     FROM branch_settings bs
+     CROSS JOIN system_settings ss
+     WHERE bs.branch_id = ? AND ss.id=1
+     LIMIT 1`,
     [parsed.data.branchId]
   );
 
