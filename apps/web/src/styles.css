@@ -1525,3 +1525,134 @@ tr:last-child td { border-bottom:0; }
   .hour-chart { overflow-x: auto; grid-template-columns: repeat(13,40px); }
   .day-summary-list { grid-template-columns: 1fr; }
 }
+
+
+/* Stage 4 - local production administration */
+.stage4-settings-layout {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: repeat(2,minmax(0,1fr));
+  gap: 12px;
+}
+.stage4-settings-card { overflow: hidden; }
+.settings-form-body { padding: 16px; display: grid; gap: 11px; }
+.settings-form-body label {
+  display: grid;
+  gap: 6px;
+  color: #56657a;
+  font-size: 9px;
+  font-weight: 700;
+}
+.settings-form-body input,
+.settings-form-body select,
+.partner-assignment-form input,
+.partner-assignment-form select {
+  height: 39px;
+  border: 1px solid #dce5ef;
+  border-radius: 8px;
+  background: #fff;
+  padding: 0 10px;
+  color: #2f3d52;
+  font-size: 9px;
+  outline: none;
+}
+.stage4-policy-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 9px;
+  border: 1px solid #dce8f6;
+  background: #f5f9ff;
+  color: #53708f;
+  font-size: 8px;
+  line-height: 1.45;
+}
+.stage4-settings-actions {
+  grid-column: 1/-1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.stage4-updated {
+  grid-column: 1/-1;
+  color: #8996a8;
+  font-size: 8px;
+}
+.security-status-grid {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: repeat(5,minmax(0,1fr));
+  gap: 10px;
+}
+.security-detail-grid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(2,minmax(0,1fr));
+  gap: 12px;
+}
+.security-runtime-card { overflow: hidden; }
+.runtime-list { padding: 8px 15px; display: grid; }
+.runtime-list > div {
+  min-height: 39px;
+  border-bottom: 1px solid #eef2f6;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.runtime-list > div:last-child { border-bottom: 0; }
+.runtime-list span { color: #7d8a9d; font-size: 9px; }
+.runtime-list strong { color: #2e3d54; font-size: 9px; }
+.security-runtime-card > .full { width: calc(100% - 30px); margin: 8px 15px 12px; }
+.security-checks { padding: 12px 15px; display: grid; gap: 10px; }
+.security-checks > div {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #566980;
+  font-size: 9px;
+}
+.security-checks svg { color: #17945a; }
+.stage4-command-note {
+  margin: 0 15px 15px;
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border-radius: 9px;
+  background: #111827;
+  color: #d8e1ee;
+}
+.stage4-command-note strong { font-size: 8px; }
+.stage4-command-note code { font-size: 8px; overflow-wrap: anywhere; color: #a9c8f8; }
+
+.partner-stage4-grid {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: minmax(280px,.65fr) minmax(0,1.35fr);
+  gap: 12px;
+}
+.partner-assignment-card { overflow: hidden; align-self: start; }
+.partner-assignment-form { padding: 15px; display: grid; gap: 10px; }
+.partner-assignment-form label {
+  display: grid;
+  gap: 5px;
+  color: #58687d;
+  font-size: 9px;
+  font-weight: 700;
+}
+.partner-list-card { margin-top: 0; }
+
+@media (max-width: 1050px) {
+  .stage4-settings-layout,
+  .security-detail-grid,
+  .partner-stage4-grid { grid-template-columns: 1fr; }
+  .security-status-grid { grid-template-columns: repeat(2,1fr); }
+}
+@media (max-width: 650px) {
+  .security-status-grid { grid-template-columns: 1fr; }
+  .stage4-settings-actions { align-items: stretch; flex-direction: column; }
+  .stage4-settings-actions .primary { width: 100%; }
+}
