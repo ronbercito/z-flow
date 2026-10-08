@@ -380,7 +380,7 @@ export async function registerReportRoutes(app: FastifyInstance) {
     if (!row.series) return reply.code(409).send({ error: "La operación todavía no tiene comprobante interno asignado" });
 
     const [settingRows] = await db.query<any[]>(`
-      SELECT business_name, legal_name, ruc, address, phone, ticket_footer
+      SELECT business_name, legal_name, ruc, address, phone, logo_data_url, ticket_footer
       FROM system_settings WHERE id=1 LIMIT 1
     `);
     const branding = settingRows[0] ?? {};
@@ -393,6 +393,17 @@ export async function registerReportRoutes(app: FastifyInstance) {
       doc.on("error", reject);
 
       const receiptNo = `${row.series}-${String(row.sequence_number).padStart(6,"0")}`;
+      if (branding.logo_data_url) {
+        try {
+          const base64 = String(branding.logo_data_url).split(",")[1] ?? "";
+          if (base64) {
+            doc.image(Buffer.from(base64, "base64"), { fit: [70, 40], align: "center" });
+            doc.moveDown(0.2);
+          }
+        } catch {
+          // If the stored image is invalid, continue rendering the text-only ticket.
+        }
+      }
       doc.font("Helvetica-Bold").fontSize(15).text(String(branding.business_name ?? "Z-FLOW"), { align: "center" });
       if (branding.legal_name) doc.font("Helvetica").fontSize(7).text(String(branding.legal_name), { align: "center" });
       if (branding.ruc) doc.fontSize(7).text(`RUC: ${branding.ruc}`, { align: "center" });
