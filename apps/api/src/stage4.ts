@@ -53,6 +53,17 @@ const partnerAssignmentBody = z.object({
   active: z.boolean().default(true)
 });
 
+const rolePermissionBody = z.object({
+  permissions: z.array(z.enum([
+    "GLOBAL_READ","GLOBAL_WRITE","BRANCH_READ","BRANCH_WRITE",
+    "USER_ADMIN","BRANCH_USER_ADMIN","AUDIT_READ","CANCEL_OPERATION"
+  ])).max(8)
+});
+
+const roleCodeParams = z.object({
+  roleCode: z.enum(["PARTNER","BRANCH_ADMIN","CASHIER","AUDITOR"])
+});
+
 async function requireOwner(request: FastifyRequest, reply: FastifyReply) {
   const auth = await requireAuth(request, reply);
   if (!auth) return null;
@@ -131,6 +142,37 @@ export async function ensureStage4Schema() {
     VALUES (1, 'Z-FLOW')
     ON DUPLICATE KEY UPDATE id = VALUES(id)
   `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS role_permissions (
+      role_id BIGINT UNSIGNED NOT NULL,
+      permission_code VARCHAR(60) NOT NULL,
+      enabled TINYINT(1) NOT NULL DEFAULT 1,
+      PRIMARY KEY (role_id, permission_code),
+      CONSTRAINT fk_role_permissions_role FOREIGN KEY (role_id) REFERENCES roles(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  const defaultPermissions: Record<string, string[]> = {
+    OWNER: ["GLOBAL_READ","GLOBAL_WRITE","BRANCH_READ","BRANCH_WRITE","USER_ADMIN","BRANCH_USER_ADMIN","AUDIT_READ","CANCEL_OPERATION"],
+    PARTNER: ["GLOBAL_READ","BRANCH_READ"],
+    BRANCH_ADMIN: ["BRANCH_READ","BRANCH_WRITE","BRANCH_USER_ADMIN","CANCEL_OPERATION"],
+    CASHIER: ["BRANCH_READ","BRANCH_WRITE","CANCEL_OPERATION"],
+    AUDITOR: ["GLOBAL_READ","BRANCH_READ","AUDIT_READ"]
+  };
+
+  for (const [roleCode, permissions] of Object.entries(defaultPermissions)) {
+    const [roleRows] = await db.query<any[]>("SELECT id FROM roles WHERE code=? LIMIT 1", [roleCode]);
+    if (!roleRows.length) continue;
+    for (const permission of permissions) {
+      await db.execute(
+        `INSERT INTO role_permissions (role_id,permission_code,enabled)
+         VALUES (?,?,1)
+         ON DUPLICATE KEY UPDATE permission_code=VALUES(permission_code)`,
+        [roleRows[0].id, permission]
+      );
+    }
+  }
 
   await db.query(`
     CREATE TABLE IF NOT EXISTS operation_events (
@@ -409,6 +451,76 @@ export async function registerStage4Routes(app: FastifyInstance) {
     return { ok: true, changed: Number(result.affectedRows ?? 0) };
   });
 
+  app.get("/api/admin/security/roles", async (request, reply) => {
+    const auth = await requireOwner(request, reply);
+    if (!auth) return;
+
+    const [roles] = await db.query<any[]>(`
+      SELECT id,code,name FROM roles ORDER BY id
+    `);
+    const [permissions] = await db.query<any[]>(`
+      SELECT r.code AS role_code, rp.permission_code
+      FROM role_permissions rp
+      JOIN roles r ON r.id=rp.role_id
+      WHERE rp.enabled=1
+      ORDER BY r.id,rp.permission_code
+    `);
+
+    return {
+      roles: roles.map((role) => ({
+        id: Number(role.id),
+        code: role.code,
+        name: role.name,
+        permissions: permissions
+          .filter((item) => item.role_code === role.code)
+          .map((item) => item.permission_code)
+      })),
+      availablePermissions: [
+        "GLOBAL_READ","GLOBAL_WRITE","BRANCH_READ","BRANCH_WRITE",
+        "USER_ADMIN","BRANCH_USER_ADMIN","AUDIT_READ","CANCEL_OPERATION"
+      ]
+    };
+  });
+
+  app.post("/api/admin/security/roles/:roleCode/permissions", async (request, reply) => {
+    const auth = await requireOwner(request, reply);
+    if (!auth) return;
+
+    const parsedParams = roleCodeParams.safeParse(request.params);
+    const parsedBody = rolePermissionBody.safeParse(request.body);
+    if (!parsedParams.success || !parsedBody.success) {
+      return reply.code(400).send({ error: "Configuración de permisos inválida" });
+    }
+
+    const [roleRows] = await db.query<any[]>("SELECT id FROM roles WHERE code=? LIMIT 1", [parsedParams.data.roleCode]);
+    if (!roleRows.length) return reply.code(404).send({ error: "Rol no encontrado" });
+    const roleId = Number(roleRows[0].id);
+
+    const connection = await db.getConnection();
+    try {
+      await connection.beginTransaction();
+      await connection.execute("DELETE FROM role_permissions WHERE role_id=?", [roleId]);
+      for (const permission of parsedBody.data.permissions) {
+        await connection.execute(
+          "INSERT INTO role_permissions (role_id,permission_code,enabled) VALUES (?,?,1)",
+          [roleId, permission]
+        );
+      }
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+
+    await audit(request, null, auth.userId, "ROLE_PERMISSIONS_UPDATED", "ROLE", roleId, {
+      roleCode: parsedParams.data.roleCode,
+      permissions: parsedBody.data.permissions
+    });
+    return { ok: true };
+  });
+
   app.get("/api/admin/partners/assignments", async (request, reply) => {
     const auth = await requireOwner(request, reply);
     if (!auth) return;
@@ -542,6 +654,9 @@ export async function registerStage4Routes(app: FastifyInstance) {
     const auth = await requireAuth(request, reply);
     if (!auth) return;
     if (!canWriteBranch(auth, parsedParams.data.branchId)) return reply.code(403).send({ error: "Acceso denegado" });
+    if (!auth.permissions.includes("CANCEL_OPERATION")) {
+      return reply.code(403).send({ error: "Tu rol no tiene permiso para anular operaciones" });
+    }
 
     const [settingRows] = await db.query<any[]>("SELECT allow_cashier_cancel FROM system_settings WHERE id=1");
     if (auth.roleCode === "CASHIER" && !Boolean(settingRows[0]?.allow_cashier_cancel)) {
