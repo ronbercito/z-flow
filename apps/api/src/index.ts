@@ -144,6 +144,12 @@ async function cashClosurePreview(branchId: number) {
     commissionTotal: money(Number(s.commission_total ?? 0)),
     staffShareTotal: money(Number(s.staff_share_total ?? 0)),
     partnerShareTotal: money(Number(s.partner_share_total ?? 0)),
+    unassignedCommission: money(Math.max(
+      0,
+      Number(s.commission_total ?? 0)
+        - Number(s.staff_share_total ?? 0)
+        - Number(s.partner_share_total ?? 0)
+    )),
     yapeReceived: money(Number(s.yape_received ?? 0)),
     cashDelivered: money(Number(s.cash_delivered ?? 0)),
     cashReceived: money(Number(s.cash_received ?? 0)),
@@ -530,6 +536,7 @@ app.post("/api/branches/:branchId/cash/close", async (request, reply) => {
     commissionTotal: preview.commissionTotal,
     staffShareTotal: preview.staffShareTotal,
     partnerShareTotal: preview.partnerShareTotal,
+    unassignedCommission: preview.unassignedCommission,
     assignedTo: preview.assignedTo,
     notes: parsedBody.data.notes ?? null
   };
