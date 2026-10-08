@@ -37,8 +37,8 @@ CREATE TABLE IF NOT EXISTS branch_settings (
   max_operation_amount DECIMAL(14,2) NOT NULL DEFAULT 50.00,
   commission_type ENUM('FLAT','PERCENT') NOT NULL DEFAULT 'FLAT',
   commission_value DECIMAL(14,2) NOT NULL DEFAULT 1.00,
-  staff_share_pct DECIMAL(5,2) NULL,
-  partner_share_pct DECIMAL(5,2) NULL,
+  staff_share_pct DECIMAL(5,2) NOT NULL DEFAULT 100.00,
+  partner_share_pct DECIMAL(5,2) NOT NULL DEFAULT 0.00,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (branch_id),
   CONSTRAINT fk_branch_settings_branch FOREIGN KEY (branch_id) REFERENCES branches(id)
@@ -190,8 +190,8 @@ CREATE TABLE IF NOT EXISTS system_settings (
   default_max_operation_amount DECIMAL(14,2) NOT NULL DEFAULT 50.00,
   default_commission_type ENUM('FLAT','PERCENT') NOT NULL DEFAULT 'FLAT',
   default_commission_value DECIMAL(14,2) NOT NULL DEFAULT 1.00,
-  default_staff_share_pct DECIMAL(5,2) NULL,
-  default_partner_share_pct DECIMAL(5,2) NULL,
+  default_staff_share_pct DECIMAL(5,2) NOT NULL DEFAULT 100.00,
+  default_partner_share_pct DECIMAL(5,2) NOT NULL DEFAULT 0.00,
   require_cash_to_yape_reference TINYINT(1) NOT NULL DEFAULT 0,
   allow_cashier_cancel TINYINT(1) NOT NULL DEFAULT 1,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -237,36 +237,8 @@ CREATE TABLE IF NOT EXISTS cash_session_handoffs (
   CONSTRAINT fk_handoff_changed_by FOREIGN KEY (changed_by_user_id) REFERENCES users(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS branch_partner_assignments (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  branch_id BIGINT UNSIGNED NOT NULL,
-  user_id BIGINT UNSIGNED NOT NULL,
-  pool_share_pct DECIMAL(5,2) NOT NULL DEFAULT 100.00,
-  active TINYINT(1) NOT NULL DEFAULT 1,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (id),
-  UNIQUE KEY uq_branch_partner (branch_id, user_id),
-  CONSTRAINT fk_branch_partner_branch FOREIGN KEY (branch_id) REFERENCES branches(id),
-  CONSTRAINT fk_branch_partner_user FOREIGN KEY (user_id) REFERENCES users(id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
-CREATE TABLE IF NOT EXISTS operation_partner_shares (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  operation_id BIGINT UNSIGNED NOT NULL,
-  branch_id BIGINT UNSIGNED NOT NULL,
-  user_id BIGINT UNSIGNED NOT NULL,
-  pool_share_pct DECIMAL(5,2) NOT NULL,
-  amount DECIMAL(14,2) NOT NULL,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id),
-  UNIQUE KEY uq_operation_partner_share (operation_id, user_id),
-  KEY idx_partner_share_user (user_id, created_at),
-  CONSTRAINT fk_operation_partner_share_operation FOREIGN KEY (operation_id) REFERENCES operations(id),
-  CONSTRAINT fk_operation_partner_share_branch FOREIGN KEY (branch_id) REFERENCES branches(id),
-  CONSTRAINT fk_operation_partner_share_user FOREIGN KEY (user_id) REFERENCES users(id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
 CREATE TABLE IF NOT EXISTS role_permissions (
