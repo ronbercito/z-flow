@@ -306,6 +306,7 @@ type FinancialReport = {
     staffShareTotal: number;
     partnerShareTotal: number;
   }>;
+  operations: Array<GlobalOperation & { series?: string | null; sequence_number?: number | null }>;
 };
 
 type BranchDetail = {
@@ -1035,6 +1036,7 @@ function AdminReports({ overview }: { overview: Overview; operations: GlobalOper
   const [from, setFrom] = useState(localToday.slice(0,8) + "01");
   const [to, setTo] = useState(localToday);
   const [branch, setBranch] = useState("ALL");
+  const [flow, setFlow] = useState<"ALL" | "YAPE_TO_CASH" | "CASH_TO_YAPE">("ALL");
   const [report, setReport] = useState<FinancialReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -1061,6 +1063,12 @@ function AdminReports({ overview }: { overview: Overview; operations: GlobalOper
   useEffect(() => { void loadReport(); }, [from, to, branch]);
 
   const maxAmount = Math.max(...(report?.branches.map((x) => x.amountTotal) ?? [1]), 1);
+  const registerRows = (report?.operations ?? []).filter((row) => flow === "ALL" || row.operation_type === flow);
+  const enteredTotal = registerRows.reduce((sum, row) => sum + Number(row.amount), 0);
+  const deliveredTotal = registerRows.reduce((sum, row) => sum + Number(row.net_amount), 0);
+  const commissionTotal = registerRows.reduce((sum, row) => sum + Number(row.commission), 0);
+  const enteredLabel = flow === "YAPE_TO_CASH" ? "Ingreso Yape" : flow === "CASH_TO_YAPE" ? "Ingreso efectivo" : "Entrada según operación";
+  const deliveredLabel = flow === "YAPE_TO_CASH" ? "Salida efectivo" : flow === "CASH_TO_YAPE" ? "Salida Yape" : "Entrega según operación";
 
   function download(kind: "xlsx" | "pdf") {
     window.open(`/api/admin/reports/export.${kind}?${queryString()}`, "_blank");
@@ -1069,9 +1077,9 @@ function AdminReports({ overview }: { overview: Overview; operations: GlobalOper
   return (
     <>
       <section className="card report-toolbar">
-        <div className="report-toolbar-title"><BarChart3 size={19}/><div><strong>Reporte financiero</strong><span>Filtra el periodo y exporta el resultado.</span></div></div>
+        <div className="report-toolbar-title"><BarChart3 size={19}/><div><strong>Reporte financiero</strong><span>Filtra por filial y periodo. Exporta el resultado en PDF o Excel.</span></div></div>
         <div className="admin-filters admin-filters-wide">
-          <select value={branch} onChange={(e)=>setBranch(e.target.value)}>
+          <select value={branch} onChange={(e)=>setBranch(e.target.value)} aria-label="Filtrar por filial">
             <option value="ALL">Todas las filiales</option>
             {overview.branches.map((item)=><option value={item.id} key={item.id}>{item.name}</option>)}
           </select>
@@ -1104,6 +1112,42 @@ function AdminReports({ overview }: { overview: Overview; operations: GlobalOper
             ))}
             {!report.branches.length && <div className="empty-cell">No hay operaciones en el periodo seleccionado.</div>}
           </div>
+        </section>
+
+        <section className="card report-register-card">
+          <div className="report-register-heading">
+            <div><strong>Registro diario de operaciones</strong><span>{branch === "ALL" ? "Todas las filiales" : overview.branches.find((item)=>String(item.id)===branch)?.name} · {from} a {to}</span></div>
+            <div className="report-flow-filters" aria-label="Filtrar tipo de operación">
+              <button type="button" className={flow==="ALL"?"active":""} onClick={()=>setFlow("ALL")}>Todas</button>
+              <button type="button" className={flow==="YAPE_TO_CASH"?"active":""} onClick={()=>setFlow("YAPE_TO_CASH")}>Yape → Efectivo</button>
+              <button type="button" className={flow==="CASH_TO_YAPE"?"active":""} onClick={()=>setFlow("CASH_TO_YAPE")}>Efectivo → Yape</button>
+            </div>
+          </div>
+          <div className="report-register-wrap">
+            <table className="report-register-table">
+              <thead><tr>
+                <th>Fecha / hora</th><th>N.º operación / referencia</th><th>Concepto / cliente / filial</th>
+                <th>{enteredLabel} (S/)</th><th>{deliveredLabel} (S/)</th>
+                <th>Comisión / ingreso real (S/)</th><th>N.º comprobante interno</th>
+              </tr></thead>
+              <tbody>
+                {registerRows.map((row)=><tr key={row.id}>
+                  <td>{dateTime(row.created_at)}</td>
+                  <td><strong>Op. {row.id}</strong><small>Ref. {row.reference_code ?? "—"}</small></td>
+                  <td><span className={`report-flow-pill ${row.operation_type==="YAPE_TO_CASH"?"yape":"cash"}`}>{row.operation_type==="YAPE_TO_CASH"?"Yape → Efectivo":"Efectivo → Yape"}</span><small>{row.customer_name || "Sin nombre"} · {row.branch_name}</small></td>
+                  <td>{currency(row.amount)}</td><td>{currency(row.net_amount)}</td><td>{currency(row.commission)}</td>
+                  <td>{row.series && row.sequence_number ? `${row.series}-${String(row.sequence_number).padStart(6,"0")}` : "—"}</td>
+                </tr>)}
+                {!registerRows.length && <tr><td colSpan={7} className="empty-cell">{loading ? "Actualizando reporte…" : "No hay operaciones para estos filtros."}</td></tr>}
+              </tbody>
+              {registerRows.length>0 && <tfoot><tr>
+                <th colSpan={3}>TOTAL DEL PERIODO · {registerRows.length} operaciones</th>
+                <th>{currency(enteredTotal)}</th><th>{currency(deliveredTotal)}</th><th>{currency(commissionTotal)}</th><th>{registerRows.filter((row)=>row.series && row.sequence_number).length} comprobantes</th>
+              </tr></tfoot>}
+            </table>
+          </div>
+          <div className="report-register-note">Los movimientos de entrada y entrega cambian según el tipo de operación. El comprobante listado es interno y no es una boleta electrónica SUNAT.</div>
+          {(report.operations?.length ?? 0)>=5000 && <div className="report-register-limit">Se muestran como máximo 5,000 operaciones. Reduce el periodo para consultar más detalle.</div>}
         </section>
       </>}
     </>
