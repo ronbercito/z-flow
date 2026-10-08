@@ -1129,7 +1129,7 @@ function AdminReports({ overview }: { overview: Overview; operations: GlobalOper
 
         <section className="card page-card">
           <div className="card-head">
-            <div><strong>{branch === "ALL" ? "Comparativo por filial" : `Reporte de filial: ${selectedBranchName ?? "Filial"}`}</strong><span>{branch === "ALL" ? "Selecciona una filial para ver solo su reporte" : "Vista individual"} · {from || "Inicio"} → {to || "Hoy"}</span></div>
+            <div className="branch-report-heading-copy"><strong>{branch === "ALL" ? "Comparativo por filial" : `Reporte de ${selectedBranchName ?? "filial"}`}</strong><span>{branch === "ALL" ? "Elige una filial para filtrar el reporte" : `Vista individual · ${from || "Inicio"} → ${to || "Hoy"}`}</span></div>
             <button type="button" className={`filter ${branch==="ALL"?"active":""}`} onClick={()=>setBranch("ALL")}>Mostrar todos</button>
           </div>
           <div className={`report-bars owner-report-bars ${branch === "ALL" ? "all-branch-comparison" : ""}`}>
@@ -1141,9 +1141,13 @@ function AdminReports({ overview }: { overview: Overview; operations: GlobalOper
                 aria-pressed={branch===String(item.id)}
                 onClick={()=>setBranch(String(item.id))}
               >
-                <div><strong>{item.name}</strong><span>{item.operationCount} operaciones · {currency(item.amountTotal)} · Comisión {currency(item.commissionTotal)}</span></div>
+                <div className="branch-report-card-top">
+                  <span className="branch-report-mark" aria-hidden="true">{item.name.slice(0,1).toUpperCase()}</span>
+                  <span className="branch-report-name"><strong>{item.name}</strong><small>{item.operationCount} operaciones</small></span>
+                  <span className="branch-report-amount"><strong>{currency(item.amountTotal)}</strong><small>Monto movilizado</small></span>
+                </div>
                 <div className="progress"><i className="purple" style={{ width: `${Math.max(3,(item.amountTotal/maxAmount)*100)}%` }} /></div>
-                <div className="split-report-line"><span>Ganancia encargado: {currency(item.commissionTotal)}</span></div>
+                <div className="branch-report-card-bottom"><span>{branch===String(item.id) ? "Filial seleccionada" : "Ver reporte"}</span><span>Comisión {currency(item.commissionTotal)}</span></div>
               </button>
             ))}
             {!comparisonBranches.length && <div className="empty-cell">No hay filiales disponibles.</div>}
