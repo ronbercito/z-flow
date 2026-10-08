@@ -14,6 +14,7 @@ export type AuthContext = {
   branchId: number | null;
   branchName: string | null;
   sessionId: number;
+  permissions: string[];
 };
 
 const COOKIE_NAME = "zflow_session";
@@ -35,6 +36,19 @@ function tokenHash(token: string) {
 
 function tempPassword() {
   return `Zf!${randomBytes(10).toString("base64url")}`;
+}
+
+async function permissionsForRoleFromDb(roleId: number, roleCode: RoleCode) {
+  try {
+    const [rows] = await db.query<any[]>(
+      "SELECT permission_code FROM role_permissions WHERE role_id=? AND enabled=1 ORDER BY permission_code",
+      [roleId]
+    );
+    if (rows.length) return rows.map((row) => String(row.permission_code));
+  } catch {
+    // Stage 4 schema may not exist during an initial bootstrap; fall back to defaults.
+  }
+  return permissionsForRole(roleCode);
 }
 
 export function permissionsForRole(role: RoleCode) {
@@ -277,7 +291,7 @@ export async function requireAuth(
 
   const [rows] = await db.query<any[]>(
     `SELECT s.id AS session_id, u.id AS user_id, u.username, u.full_name,
-            u.branch_id, r.code AS role_code, r.name AS role_name,
+            u.branch_id, r.id AS role_id, r.code AS role_code, r.name AS role_name,
             b.name AS branch_name
      FROM auth_sessions s
      JOIN users u ON u.id = s.user_id
@@ -306,25 +320,25 @@ export async function requireAuth(
     roleName: row.role_name,
     branchId: row.branch_id == null ? null : Number(row.branch_id),
     branchName: row.branch_name ?? null,
-    sessionId: Number(row.session_id)
+    sessionId: Number(row.session_id),
+    permissions: await permissionsForRoleFromDb(Number(row.role_id), row.role_code as RoleCode)
   };
 }
 
 export function canReadBranch(auth: AuthContext, branchId: number) {
-  if (["OWNER", "PARTNER", "AUDITOR"].includes(auth.roleCode)) return true;
-  return auth.branchId === branchId;
+  if (auth.permissions.includes("GLOBAL_READ")) return true;
+  return auth.permissions.includes("BRANCH_READ") && auth.branchId === branchId;
 }
 
 export function canWriteBranch(auth: AuthContext, branchId: number) {
-  if (auth.roleCode === "OWNER") return true;
-  if (!["BRANCH_ADMIN", "CASHIER"].includes(auth.roleCode)) return false;
-  return auth.branchId === branchId;
+  if (auth.permissions.includes("GLOBAL_WRITE")) return true;
+  return auth.permissions.includes("BRANCH_WRITE") && auth.branchId === branchId;
 }
 
 export async function publicUserById(userId: number) {
   const [rows] = await db.query<any[]>(
     `SELECT u.id, u.username, u.full_name, u.branch_id, u.last_login_at,
-            r.code AS role_code, r.name AS role_name,
+            r.id AS role_id, r.code AS role_code, r.name AS role_name,
             b.id AS branch_real_id, b.code AS branch_code, b.name AS branch_name,
             b.address AS branch_address
      FROM users u
@@ -353,7 +367,7 @@ export async function publicUserById(userId: number) {
       code: row.role_code,
       name: row.role_name
     },
-    permissions: permissionsForRole(row.role_code as RoleCode),
+    permissions: await permissionsForRoleFromDb(Number(row.role_id), row.role_code as RoleCode),
     branch: row.branch_id == null ? null : {
       id: Number(row.branch_real_id),
       code: row.branch_code,
