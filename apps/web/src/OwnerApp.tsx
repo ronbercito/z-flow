@@ -163,6 +163,7 @@ type AdminUser = {
   role_name: string;
   branch_id: number | null;
   branch_name: string | null;
+  partner_branches?: string | null;
 };
 
 type Closure = {
@@ -925,7 +926,7 @@ function UsersPage({ users, branches, onRefresh, onEdit }: { users: AdminUser[];
           <tbody>
             {users.map((item) => (
               <tr key={item.id}>
-                <td><strong>{item.full_name}</strong></td><td>{item.username}</td><td>{item.role_name}</td><td>{item.branch_name ?? "Global"}</td><td>{dateTime(item.last_login_at)}</td>
+                <td><strong>{item.full_name}</strong></td><td>{item.username}</td><td>{item.role_name}</td><td>{item.role_code==="PARTNER" ? (item.partner_branches ?? "Sin filial") : (item.branch_name ?? "Global")}</td><td>{dateTime(item.last_login_at)}</td>
                 <td><span className={item.active ? "branch-status open" : "branch-status closed"}>{item.active ? "Activo" : "Inactivo"}</span></td>
                 <td><div className="inline-actions"><button className="mini-button" onClick={() => onEdit(item)}><Pencil size={12} /> Editar</button><button className={item.active ? "mini-button danger-mini" : "mini-button"} onClick={() => void toggle(item)}>{item.active ? "Desactivar" : "Activar"}</button></div></td>
               </tr>
@@ -1609,9 +1610,7 @@ function CreateUserModal({ branches, onClose, onCreated }: { branches: Branch[];
           password
         })
       });
-      if (isPartner && result.partnerAssignmentCreated) {
-        window.alert("Socio creado y asignado a la filial correctamente.");
-      }
+      void result;
       onCreated();
     } catch (err) { setError(err instanceof Error ? err.message : "No se pudo crear el usuario"); }
     finally { setSaving(false); }
