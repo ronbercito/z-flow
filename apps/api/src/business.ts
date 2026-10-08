@@ -34,9 +34,10 @@ export async function ensureBusinessSchema() {
   }
 }
 
-function safeSeries(code: string) {
+function safeSeries(prefix: string, code: string) {
+  const safePrefix = prefix.toUpperCase().replace(/[^A-Z0-9_-]/g, "").slice(0, 12) || "ZF";
   const normalized = code.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12) || "BR";
-  return `ZF-${normalized}`;
+  return `${safePrefix}-${normalized}`;
 }
 
 export async function issueInternalReceipt(
@@ -64,7 +65,10 @@ export async function issueInternalReceipt(
   );
 
   const sequenceNumber = Number(sequenceRows[0]?.next_number ?? 1);
-  const series = safeSeries(branchCode);
+  const [settingRows] = await connection.query<any[]>(
+    "SELECT receipt_prefix FROM system_settings WHERE id=1 LIMIT 1"
+  );
+  const series = safeSeries(String(settingRows[0]?.receipt_prefix ?? "ZF"), branchCode);
 
   const [result] = await connection.execute<any>(
     `INSERT INTO receipts
