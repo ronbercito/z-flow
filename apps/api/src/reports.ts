@@ -242,7 +242,7 @@ function pdfBuffer(report: Awaited<ReturnType<typeof fetchReport>>, title: strin
     report.operations.slice(0, 250).forEach((row: any) => {
       const receipt = row.series && row.sequence_number ? `${row.series}-${String(row.sequence_number).padStart(6,"0")}` : "—";
       doc.fontSize(7.5).text(
-        `${row.created_at} · ${row.branch_name} · ${row.operation_type === "YAPE_TO_CASH" ? "Yape→Efectivo" : "Efectivo→Yape"} · ${pen(row.amount)} · Comisión ${pen(row.commission)} · ${receipt}`
+        `${row.created_at} · ${row.branch_name} · ${row.operation_type === "YAPE_TO_CASH" ? "Yape a Efectivo" : "Efectivo a Yape"} · ${pen(row.amount)} · Comisión ${pen(row.commission)} · ${receipt}`
       );
       doc.moveDown(0.15);
     });
