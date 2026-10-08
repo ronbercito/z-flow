@@ -264,3 +264,12 @@ CREATE TABLE IF NOT EXISTS operation_partner_shares (
   CONSTRAINT fk_operation_partner_share_branch FOREIGN KEY (branch_id) REFERENCES branches(id),
   CONSTRAINT fk_operation_partner_share_user FOREIGN KEY (user_id) REFERENCES users(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+CREATE TABLE IF NOT EXISTS role_permissions (
+  role_id BIGINT UNSIGNED NOT NULL,
+  permission_code VARCHAR(60) NOT NULL,
+  enabled TINYINT(1) NOT NULL DEFAULT 1,
+  PRIMARY KEY (role_id, permission_code),
+  CONSTRAINT fk_role_permissions_role FOREIGN KEY (role_id) REFERENCES roles(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
