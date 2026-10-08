@@ -18,6 +18,10 @@ const settingsBody = z.object({
   ruc: z.string().trim().max(20).nullable().optional(),
   address: z.string().trim().max(255).nullable().optional(),
   phone: z.string().trim().max(40).nullable().optional(),
+  logoDataUrl: z.string().max(3000000).refine(
+    (value) => /^data:image\/(png|jpeg);base64,/.test(value),
+    "El logo debe ser PNG o JPG"
+  ).nullable().optional(),
   currencyCode: z.string().trim().min(3).max(8).default("PEN"),
   timezoneName: z.string().trim().min(3).max(80).default("America/Lima"),
   ticketFooter: z.string().trim().max(255).nullable().optional(),
@@ -135,6 +139,11 @@ export async function ensureStage4Schema() {
       PRIMARY KEY (id),
       CONSTRAINT chk_system_settings_singleton CHECK (id = 1)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  await db.query(`
+    ALTER TABLE system_settings
+      ADD COLUMN IF NOT EXISTS logo_data_url LONGTEXT NULL AFTER phone
   `);
 
   await db.query(`
@@ -257,7 +266,7 @@ export async function registerStage4Routes(app: FastifyInstance) {
     if (!auth) return;
 
     const [rows] = await db.query<any[]>(`
-      SELECT business_name, legal_name, ruc, address, phone, currency_code,
+      SELECT business_name, legal_name, ruc, address, phone, logo_data_url, currency_code,
              timezone_name, ticket_footer, receipt_prefix,
              default_max_operation_amount, default_commission_type,
              default_commission_value, default_staff_share_pct,
@@ -272,6 +281,7 @@ export async function registerStage4Routes(app: FastifyInstance) {
       ruc: row.ruc,
       address: row.address,
       phone: row.phone,
+      logoDataUrl: row.logo_data_url,
       currencyCode: row.currency_code,
       timezoneName: row.timezone_name,
       ticketFooter: row.ticket_footer,
@@ -299,7 +309,7 @@ export async function registerStage4Routes(app: FastifyInstance) {
 
     await db.execute(`
       UPDATE system_settings
-      SET business_name=?, legal_name=?, ruc=?, address=?, phone=?,
+      SET business_name=?, legal_name=?, ruc=?, address=?, phone=?, logo_data_url=?,
           currency_code=?, timezone_name=?, ticket_footer=?, receipt_prefix=?,
           default_max_operation_amount=?, default_commission_type=?,
           default_commission_value=?, default_staff_share_pct=?,
@@ -308,6 +318,7 @@ export async function registerStage4Routes(app: FastifyInstance) {
       WHERE id=1
     `, [
       s.businessName, s.legalName ?? null, s.ruc ?? null, s.address ?? null, s.phone ?? null,
+      s.logoDataUrl ?? null,
       s.currencyCode, s.timezoneName, s.ticketFooter ?? null, s.receiptPrefix.toUpperCase(),
       money(s.defaultMaxOperationAmount), s.defaultCommissionType, money(s.defaultCommissionValue),
       s.defaultStaffSharePct ?? null, s.defaultPartnerSharePct ?? null,
