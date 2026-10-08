@@ -157,10 +157,7 @@ async function excelBuffer(report: Awaited<ReturnType<typeof fetchReport>>, titl
   summary.addRow(["Indicador", "Valor"]);
   summary.addRow(["Operaciones", report.summary.operationCount]);
   summary.addRow(["Monto movilizado", report.summary.amountTotal]);
-  summary.addRow(["Comisión", report.summary.commissionTotal]);
-  summary.addRow(["Parte encargado", report.summary.staffShareTotal]);
-  summary.addRow(["Parte socio", report.summary.partnerShareTotal]);
-  summary.addRow(["Comisión sin reparto", report.summary.unassignedCommission]);
+  summary.addRow(["Ganancia del encargado", report.summary.commissionTotal]);
   summary.addRow(["Yape → Efectivo", report.summary.yapeToCashCount]);
   summary.addRow(["Efectivo → Yape", report.summary.cashToYapeCount]);
   summary.columns = [{ width: 28 }, { width: 20 }];
@@ -173,13 +170,11 @@ async function excelBuffer(report: Awaited<ReturnType<typeof fetchReport>>, titl
     { header: "Código", key: "code", width: 12 },
     { header: "Operaciones", key: "operationCount", width: 14 },
     { header: "Monto", key: "amountTotal", width: 16 },
-    { header: "Comisión", key: "commissionTotal", width: 16 },
-    { header: "Encargado", key: "staffShareTotal", width: 16 },
-    { header: "Socio", key: "partnerShareTotal", width: 16 }
+    { header: "Ganancia encargado", key: "commissionTotal", width: 20 }
   ];
   report.branches.forEach((row) => branches.addRow(row));
   branches.getRow(1).font = { bold: true };
-  ["D","E","F","G"].forEach((col) => { branches.getColumn(col).numFmt = '"S/" #,##0.00'; });
+  ["D","E"].forEach((col) => { branches.getColumn(col).numFmt = '"S/" #,##0.00'; });
 
   const operations = workbook.addWorksheet("Operaciones");
   operations.columns = [
@@ -189,9 +184,7 @@ async function excelBuffer(report: Awaited<ReturnType<typeof fetchReport>>, titl
     { header: "Cliente", key: "customer_name", width: 22 },
     { header: "Referencia", key: "reference_code", width: 18 },
     { header: "Monto", key: "amount", width: 14 },
-    { header: "Comisión", key: "commission", width: 14 },
-    { header: "Encargado", key: "staff_share_amount", width: 14 },
-    { header: "Socio", key: "partner_share_amount", width: 14 },
+    { header: "Ganancia", key: "commission", width: 14 },
     { header: "Entregado", key: "net_amount", width: 14 },
     { header: "Registró", key: "registered_by", width: 22 },
     { header: "Comprobante", key: "receipt", width: 18 }
@@ -202,7 +195,7 @@ async function excelBuffer(report: Awaited<ReturnType<typeof fetchReport>>, titl
     receipt: row.series && row.sequence_number ? `${row.series}-${String(row.sequence_number).padStart(6,"0")}` : ""
   }));
   operations.getRow(1).font = { bold: true };
-  ["F","G","H","I","J"].forEach((col) => { operations.getColumn(col).numFmt = '"S/" #,##0.00'; });
+  ["F","G","H"].forEach((col) => { operations.getColumn(col).numFmt = '"S/" #,##0.00'; });
 
   const out = await workbook.xlsx.writeBuffer();
   return Buffer.from(out);
@@ -225,9 +218,7 @@ function pdfBuffer(report: Awaited<ReturnType<typeof fetchReport>>, title: strin
     const cards = [
       ["Operaciones", String(report.summary.operationCount)],
       ["Monto movilizado", pen(report.summary.amountTotal)],
-      ["Comisión", pen(report.summary.commissionTotal)],
-      ["Encargado", pen(report.summary.staffShareTotal)],
-      ["Socio", pen(report.summary.partnerShareTotal)]
+      ["Ganancia encargados", pen(report.summary.commissionTotal)]
     ];
     cards.forEach(([label, value]) => {
       doc.fontSize(9).fillColor("#667085").text(label, { continued: true, width: 155 });
@@ -240,7 +231,7 @@ function pdfBuffer(report: Awaited<ReturnType<typeof fetchReport>>, title: strin
     doc.font("Helvetica").moveDown(0.4);
     report.branches.forEach((row) => {
       doc.fontSize(8).text(
-        `${row.name}  ·  ${row.operationCount} ops  ·  Monto ${pen(row.amountTotal)}  ·  Comisión ${pen(row.commissionTotal)}  ·  Encargado ${pen(row.staffShareTotal)}  ·  Socio ${pen(row.partnerShareTotal)}`
+        `${row.name}  ·  ${row.operationCount} ops  ·  Monto ${pen(row.amountTotal)}  ·  Ganancia encargado ${pen(row.commissionTotal)}`
       );
       doc.moveDown(0.25);
     });
@@ -440,32 +431,18 @@ export async function registerReportRoutes(app: FastifyInstance) {
       doc.font("Helvetica-Bold").fontSize(11).fillColor("#172235").text("Resumen operativo");
       doc.moveDown(0.5);
 
-      const pendingCommission = Math.max(
-        0,
-        money(row.commission_total) - money(row.staff_share_total) - money(row.partner_share_total)
-      );
       const items = [
         ["Operaciones", String(row.operation_count ?? 0)],
-        ["Comisión total", pen(row.commission_total)],
-        ["Parte encargado", pen(row.staff_share_total)],
-        ["Parte socio", pen(row.partner_share_total)]
+        ["Ganancia del encargado", pen(row.commission_total)]
       ];
-      let y = doc.y;
+      const y = doc.y;
       items.forEach(([label, value], index) => {
-        const x = left + (index % 2) * 255;
-        if (index === 2) y += 54;
-        const yy = index < 2 ? y : y;
-        doc.roundedRect(x, yy, 238, 42, 5).stroke("#E4E7EC");
-        doc.fillColor("#667085").font("Helvetica").fontSize(8).text(label, x + 10, yy + 8);
-        doc.fillColor("#101828").font("Helvetica-Bold").fontSize(12).text(value, x + 10, yy + 21);
+        const x = left + index * 255;
+        doc.roundedRect(x, y, 238, 42, 5).stroke("#E4E7EC");
+        doc.fillColor("#667085").font("Helvetica").fontSize(8).text(label, x + 10, y + 8);
+        doc.fillColor("#101828").font("Helvetica-Bold").fontSize(12).text(value, x + 10, y + 21);
       });
       doc.y = y + 56;
-
-      if (pendingCommission > 0) {
-        doc.font("Helvetica").fontSize(8).fillColor("#8A5A12")
-          .text(`Pendiente de repartir: ${pen(pendingCommission)}`);
-        doc.moveDown(0.7);
-      }
 
       doc.font("Helvetica-Bold").fontSize(11).fillColor("#172235").text("Conciliación");
       doc.moveDown(0.5);
