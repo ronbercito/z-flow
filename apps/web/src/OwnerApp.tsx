@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { Fragment, FormEvent, useEffect, useMemo, useState } from "react";
 import {
   Activity,
   BadgeDollarSign,
@@ -215,6 +215,30 @@ type Closure = {
   branch_name: string;
 };
 
+type ClosureOperation = {
+  id: number;
+  operation_type: "YAPE_TO_CASH" | "CASH_TO_YAPE";
+  reference_code: string | null;
+  customer_name: string | null;
+  amount: number;
+  commission: number;
+  net_amount: number;
+  status: string;
+  notes: string | null;
+  created_at: string;
+  registered_by: string | null;
+  receipt_series: string | null;
+  receipt_number: number | null;
+  latest_event_action: string | null;
+  latest_event_reason: string | null;
+  latest_event_at: string | null;
+};
+
+type ClosureDetail = {
+  closure: Closure & { cash_session_id: number };
+  operations: ClosureOperation[];
+};
+
 type AuditRow = {
   id: number;
   action: string;
@@ -399,7 +423,7 @@ const nav: Array<{ page: AdminPage; label: string; icon: typeof Home }> = [
   { page: "profile", label: "Mi perfil", icon: UserRound }
 ];
 
-const UI_BUILD = "E4.3-20261008";
+const UI_BUILD = "E4.4-20261008";
 
 function currency(value: number | string | null | undefined) {
   return new Intl.NumberFormat("es-PE", {
@@ -879,6 +903,11 @@ function CashAdminPage({ branches, closures }: { branches: Branch[]; closures: C
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [branchPickerOpen, setBranchPickerOpen] = useState(false);
+  const [expandedClosure, setExpandedClosure] = useState<number | null>(null);
+  const [closureDetails, setClosureDetails] = useState<Record<number, ClosureDetail>>({});
+  const [detailLoading, setDetailLoading] = useState<number | null>(null);
+  const [detailErrors, setDetailErrors] = useState<Record<number, string>>({});
+  const [invoiceClosure, setInvoiceClosure] = useState<Closure | null>(null);
   const selectedBranchName = branch === "ALL"
     ? "Mostrar todos"
     : branches.find((item) => String(item.id) === branch)?.name;
@@ -895,6 +924,29 @@ function CashAdminPage({ branches, closures }: { branches: Branch[]; closures: C
   function chooseBranch(value: string) {
     setBranch(value);
     setBranchPickerOpen(false);
+    setExpandedClosure(null);
+  }
+
+  async function toggleClosure(item: Closure) {
+    if (expandedClosure === item.id) {
+      setExpandedClosure(null);
+      return;
+    }
+    setExpandedClosure(item.id);
+    setDetailErrors((current) => ({ ...current, [item.id]: "" }));
+    if (closureDetails[item.id]) return;
+    setDetailLoading(item.id);
+    try {
+      const detail = await api<ClosureDetail>(`/api/branches/${item.branch_id}/closures/${item.id}/detail`);
+      setClosureDetails((current) => ({ ...current, [item.id]: detail }));
+    } catch (err) {
+      setDetailErrors((current) => ({
+        ...current,
+        [item.id]: err instanceof Error ? err.message : "No se pudo cargar el detalle"
+      }));
+    } finally {
+      setDetailLoading(null);
+    }
   }
 
   const branchPicker = (
@@ -952,26 +1004,68 @@ function CashAdminPage({ branches, closures }: { branches: Branch[]; closures: C
             </div>
           </div>
           <div className="table-wrap">
-            <table className="admin-table">
-              <thead><tr><th>Fecha</th><th>Filial</th><th>Responsable</th><th>Resultado</th><th>Operaciones</th><th>Comisión</th><th>Diferencias</th><th>PDF</th></tr></thead>
+            <table className="admin-table cash-closure-table">
+              <thead><tr><th>Fecha</th><th>Filial</th><th>Responsable</th><th>Resultado</th><th>Operaciones</th><th>Comisión</th><th>Diferencias</th><th>Acciones</th></tr></thead>
               <tbody>
-                {filteredClosures.map((item) => (
-                  <tr key={item.id}>
-                    <td>{dateTime(item.closed_at)}</td><td><strong>{item.branch_name}</strong></td>
-                    <td>{item.closed_by ?? "—"}</td>
-                    <td><span className={`branch-status ${closureResult(item).cls}`}>{closureResult(item).label}</span></td>
-                    <td>{item.operation_count ?? 0}</td>
-                    <td><strong>{currency(item.commission_total)}</strong><br/><small>Ganancia del encargado</small></td>
-                    <td><span className={Math.abs(Number(item.difference_cash)) < 0.005 ? "green-text" : "red-text"}>Efectivo {currency(item.difference_cash)}</span><br/><span className={Math.abs(Number(item.difference_wallet)) < 0.005 ? "green-text" : "red-text"}>Yape {currency(item.difference_wallet)}</span></td>
-                    <td><button className="mini-button" onClick={() => window.open(`/api/branches/${item.branch_id}/closures/${item.id}/pdf`, "_blank")}><Download size={12}/> PDF</button></td>
-                  </tr>
-                ))}
+                {filteredClosures.map((item) => {
+                  const open = expandedClosure === item.id;
+                  const detail = closureDetails[item.id];
+                  return <Fragment key={item.id}>
+                    <tr>
+                      <td>{dateTime(item.closed_at)}</td><td><strong>{item.branch_name}</strong></td>
+                      <td>{item.closed_by ?? "—"}</td>
+                      <td><span className={`branch-status ${closureResult(item).cls}`}>{closureResult(item).label}</span></td>
+                      <td>{item.operation_count ?? 0}</td>
+                      <td><strong>{currency(item.commission_total)}</strong><br/><small>Ganancia del encargado</small></td>
+                      <td><span className={Math.abs(Number(item.difference_cash)) < 0.005 ? "green-text" : "red-text"}>Efectivo {currency(item.difference_cash)}</span><br/><span className={Math.abs(Number(item.difference_wallet)) < 0.005 ? "green-text" : "red-text"}>Yape {currency(item.difference_wallet)}</span></td>
+                      <td><div className="closure-actions">
+                        <button className="mini-button" aria-expanded={open} onClick={() => void toggleClosure(item)}><ChevronDown size={12} className={open ? "closure-chevron open" : "closure-chevron"}/>{open ? "Ocultar" : "Detalle"}</button>
+                        <button className="mini-button" onClick={() => window.open(`/api/branches/${item.branch_id}/closures/${item.id}/pdf`, "_blank")}><Download size={12}/> PDF</button>
+                        <button className="mini-button closure-invoice-button" title="La emisión se activará al completar la configuración de Factiliza" onClick={() => setInvoiceClosure(item)}><ReceiptText size={12}/> Boleta / factura</button>
+                      </div></td>
+                    </tr>
+                    {open && <tr className="closure-detail-row"><td colSpan={8}>
+                      <div className="closure-detail-panel">
+                        <div className="closure-detail-heading"><div><strong>Detalle del cierre #{item.id}</strong><span>{item.branch_name} · {detail?.operations.length ?? item.operation_count ?? 0} operaciones incluidas</span></div><span>Esperado {currency(detail?.closure.expected_cash ?? item.expected_cash)} efectivo · {currency(detail?.closure.expected_wallet ?? item.expected_wallet)} Yape</span></div>
+                        {detailLoading === item.id && <div className="closure-detail-message">Cargando operaciones de este turno…</div>}
+                        {detailErrors[item.id] && <div className="closure-detail-error">{detailErrors[item.id]}</div>}
+                        {detail && <div className="closure-operation-list">
+                          {!detail.operations.length ? <div className="closure-detail-message">Este cierre no contiene operaciones registradas.</div> :
+                            <div className="table-wrap">
+                              <table className="admin-table closure-operation-table">
+                                <thead><tr><th>Fecha / hora</th><th>Operación</th><th>Cliente</th><th>Referencia</th><th>Importe</th><th>Comisión</th><th>Entregado</th><th>Estado</th><th>Encargado</th></tr></thead>
+                                <tbody>{detail.operations.map((op) => <tr key={op.id}>
+                                  <td>{dateTime(op.created_at)}</td>
+                                  <td><span className={`operation-badge ${op.operation_type === "YAPE_TO_CASH" ? "purple" : "green"}`}>{op.operation_type === "YAPE_TO_CASH" ? "Yape → Efectivo" : "Efectivo → Yape"}</span></td>
+                                  <td>{op.customer_name || "—"}</td>
+                                  <td>{op.reference_code || "—"}{op.receipt_series && <small className="closure-receipt-ref"><br/>Comp. {op.receipt_series}-{String(op.receipt_number ?? "").padStart(6,"0")}</small>}</td>
+                                  <td>{currency(op.amount)}</td><td>{currency(op.commission)}</td><td>{currency(op.net_amount)}</td>
+                                  <td><span className={`status ${op.status === "COMPLETED" ? "ok" : "pending"}`}><i/>{op.status === "COMPLETED" ? "Completada" : op.status === "IN_PROGRESS" ? "En proceso" : op.status === "CANCELLED" ? "Anulada" : op.status === "REVERSED" ? "Revertida" : op.status}</span>{op.latest_event_reason && <small className="closure-event-reason">{op.latest_event_action === "CANCEL" ? "Anulación" : "Reverso"}: {op.latest_event_reason}</small>}</td>
+                                  <td>{op.registered_by || "—"}</td>
+                                </tr>)}</tbody>
+                              </table>
+                            </div>}
+                          <div className="closure-detail-footer"><span>Conciliación declarada: efectivo {currency(detail.closure.declared_cash)} · Yape {currency(detail.closure.declared_wallet)}</span>{detail.closure.notes && <span>Observación: {detail.closure.notes}</span>}</div>
+                        </div>}
+                      </div>
+                    </td></tr>}
+                  </Fragment>;
+                })}
                 {!filteredClosures.length && <tr><td colSpan={8} className="empty-cell">No hay cierres para esos filtros.</td></tr>}
               </tbody>
             </table>
           </div>
         </section>
       </>}
+
+      {invoiceClosure && <div className="modal-backdrop" role="presentation" onClick={() => setInvoiceClosure(null)}>
+        <section className="modal closure-invoice-modal" role="dialog" aria-modal="true" aria-labelledby="closure-invoice-title" onClick={(event) => event.stopPropagation()}>
+          <div className="modal-head"><div><h2 id="closure-invoice-title">Comprobante del cierre #{invoiceClosure.id}</h2><p>{invoiceClosure.branch_name} · {dateTime(invoiceClosure.closed_at)}</p></div><button className="icon-btn" onClick={() => setInvoiceClosure(null)} aria-label="Cerrar"><X size={18}/></button></div>
+          <div className="invoice-setup-notice"><ReceiptText size={18}/><div><strong>Factiliza todavía no está conectada</strong><span>El botón ya está ubicado junto al PDF. La emisión se habilitará al definir el importe, los datos del cliente y configurar las credenciales seguras de Factiliza.</span></div></div>
+          <div className="invoice-closure-summary"><span>Comisión del cierre<strong>{currency(invoiceClosure.commission_total)}</strong></span><span>Monto operado<strong>{currency((closureDetails[invoiceClosure.id]?.operations ?? []).reduce((total, op) => total + Number(op.amount), 0))}</strong></span></div>
+          <div className="modal-actions"><button className="soft" onClick={() => setInvoiceClosure(null)}>Entendido</button></div>
+        </section>
+      </div>}
     </>
   );
 }
