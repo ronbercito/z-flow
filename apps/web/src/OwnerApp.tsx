@@ -255,6 +255,7 @@ type PartnerAssignment = {
   branch_name: string;
   full_name: string;
   username: string;
+  earnings?: number;
 };
 
 type FinancialReport = {
@@ -998,10 +999,10 @@ function PartnersPage({ users, branches }: { users: AdminUser[]; branches: Branc
         <div className="card-head"><div><strong>Asignaciones por filial</strong><span>La suma activa por filial no puede superar 100%.</span></div></div>
         <div className="table-wrap">
           <table className="admin-table">
-            <thead><tr><th>Filial</th><th>Socio</th><th>Usuario</th><th>% pool socio</th><th>Estado</th><th>Acción</th></tr></thead>
+            <thead><tr><th>Filial</th><th>Socio</th><th>Usuario</th><th>% pool socio</th><th>Ganancia acumulada</th><th>Estado</th><th>Acción</th></tr></thead>
             <tbody>
-              {assignments.map((item)=><tr key={item.id}><td><strong>{item.branch_name}</strong></td><td>{item.full_name}</td><td>{item.username}</td><td>{Number(item.pool_share_pct).toFixed(2)}%</td><td><span className={item.active?"branch-status open":"branch-status closed"}>{item.active?"Activo":"Inactivo"}</span></td><td>{item.active?<button className="mini-button danger-mini" onClick={()=>void disableAssignment(item)}>Desactivar</button>:"—"}</td></tr>)}
-              {!assignments.length && <tr><td colSpan={6} className="empty-cell">Todavía no hay socios asignados a filiales.</td></tr>}
+              {assignments.map((item)=><tr key={item.id}><td><strong>{item.branch_name}</strong></td><td>{item.full_name}</td><td>{item.username}</td><td>{Number(item.pool_share_pct).toFixed(2)}%</td><td><strong>{currency(item.earnings ?? 0)}</strong></td><td><span className={item.active?"branch-status open":"branch-status closed"}>{item.active?"Activo":"Inactivo"}</span></td><td>{item.active?<button className="mini-button danger-mini" onClick={()=>void disableAssignment(item)}>Desactivar</button>:"—"}</td></tr>)}
+              {!assignments.length && <tr><td colSpan={7} className="empty-cell">Todavía no hay socios asignados a filiales.</td></tr>}
             </tbody>
           </table>
         </div>
