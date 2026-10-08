@@ -219,23 +219,6 @@ CREATE TABLE IF NOT EXISTS operation_events (
   CONSTRAINT fk_operation_events_user FOREIGN KEY (user_id) REFERENCES users(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS cash_session_handoffs (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  cash_session_id BIGINT UNSIGNED NOT NULL,
-  branch_id BIGINT UNSIGNED NOT NULL,
-  from_user_id BIGINT UNSIGNED NULL,
-  to_user_id BIGINT UNSIGNED NOT NULL,
-  changed_by_user_id BIGINT UNSIGNED NOT NULL,
-  notes VARCHAR(255) NULL,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id),
-  KEY idx_handoffs_session (cash_session_id, created_at),
-  CONSTRAINT fk_handoff_session FOREIGN KEY (cash_session_id) REFERENCES cash_sessions(id),
-  CONSTRAINT fk_handoff_branch FOREIGN KEY (branch_id) REFERENCES branches(id),
-  CONSTRAINT fk_handoff_from_user FOREIGN KEY (from_user_id) REFERENCES users(id),
-  CONSTRAINT fk_handoff_to_user FOREIGN KEY (to_user_id) REFERENCES users(id),
-  CONSTRAINT fk_handoff_changed_by FOREIGN KEY (changed_by_user_id) REFERENCES users(id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
 
