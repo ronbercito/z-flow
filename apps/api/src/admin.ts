@@ -504,13 +504,15 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     `, [branchId]);
 
     const [closureRows] = await db.query<any[]>(`
-      SELECT id, operation_count, commission_total, staff_share_total, partner_share_total,
-             expected_cash, declared_cash, expected_wallet, declared_wallet,
-             difference_cash, difference_wallet, notes,
-             DATE_FORMAT(closed_at, '%Y-%m-%dT%H:%i:%s') AS closed_at
-      FROM daily_closures
-      WHERE branch_id = ?
-      ORDER BY closed_at DESC
+      SELECT dc.id, dc.operation_count, dc.commission_total, dc.staff_share_total, dc.partner_share_total,
+             dc.expected_cash, dc.declared_cash, dc.expected_wallet, dc.declared_wallet,
+             dc.difference_cash, dc.difference_wallet, dc.notes,
+             DATE_FORMAT(dc.closed_at, '%Y-%m-%dT%H:%i:%s') AS closed_at,
+             u.full_name AS closed_by
+      FROM daily_closures dc
+      LEFT JOIN users u ON u.id=dc.closed_by_user_id
+      WHERE dc.branch_id = ?
+      ORDER BY dc.closed_at DESC
       LIMIT 20
     `, [branchId]);
 
