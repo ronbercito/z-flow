@@ -1585,39 +1585,55 @@ function CreateBranchModal({ onClose, onCreated }: { onClose: () => void; onCrea
 function CreateUserModal({ branches, onClose, onCreated }: { branches: Branch[]; onClose: () => void; onCreated: () => void }) {
   const [role, setRole] = useState("CASHIER");
   const [branchId, setBranchId] = useState(branches[0] ? String(branches[0].id) : "");
+  const [partnerShare, setPartnerShare] = useState("100");
   const [fullName, setFullName] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
-  const needsBranch = ["CASHIER", "BRANCH_ADMIN"].includes(role);
+  const needsBranch = ["CASHIER", "BRANCH_ADMIN", "PARTNER"].includes(role);
+  const isPartner = role === "PARTNER";
 
   async function submit(event: FormEvent) {
     event.preventDefault(); setSaving(true); setError("");
     try {
-      await api("/api/admin/users", {
+      const result = await api<{ partnerAssignmentCreated?: boolean }>("/api/admin/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           roleCode: role,
           branchId: needsBranch ? Number(branchId) : null,
+          partnerPoolSharePct: isPartner ? Number(partnerShare) : undefined,
           fullName,
           username,
           password
         })
       });
+      if (isPartner && result.partnerAssignmentCreated) {
+        window.alert("Socio creado y asignado a la filial correctamente.");
+      }
       onCreated();
     } catch (err) { setError(err instanceof Error ? err.message : "No se pudo crear el usuario"); }
     finally { setSaving(false); }
   }
 
   return <div className="modal-backdrop"><form className="modal" onSubmit={submit}>
-    <div className="modal-head"><div><h2>Nuevo usuario</h2><p>Asigna rol, filial y credenciales.</p></div><button type="button" className="icon-btn" onClick={onClose}><X size={18}/></button></div>
+    <div className="modal-head"><div><h2>Nuevo usuario</h2><p>{isPartner ? "Crea el socio y asígnalo a una filial en un solo paso." : "Asigna rol, filial y credenciales."}</p></div><button type="button" className="icon-btn" onClick={onClose}><X size={18}/></button></div>
     <div className="field-grid"><label>Nombre completo<input value={fullName} onChange={(e)=>setFullName(e.target.value)} required /></label><label>Usuario<input value={username} onChange={(e)=>setUsername(e.target.value)} required /></label></div>
-    <div className="field-grid"><label>Rol<select value={role} onChange={(e)=>setRole(e.target.value)}><option value="CASHIER">Cajero / Encargado</option><option value="BRANCH_ADMIN">Administrador de filial</option><option value="PARTNER">Socio</option><option value="AUDITOR">Auditor</option><option value="OWNER">Propietario</option></select></label><label>Filial<select value={branchId} onChange={(e)=>setBranchId(e.target.value)} disabled={!needsBranch}>{needsBranch ? branches.map((b)=><option value={b.id} key={b.id}>{b.name}</option>) : <option value="">Acceso global</option>}</select></label></div>
+    <div className="field-grid">
+      <label>Rol<select value={role} onChange={(e)=>setRole(e.target.value)}><option value="CASHIER">Cajero / Encargado</option><option value="BRANCH_ADMIN">Administrador de filial</option><option value="PARTNER">Socio</option><option value="AUDITOR">Auditor</option><option value="OWNER">Propietario</option></select></label>
+      <label>{isPartner ? "Filial del socio" : "Filial"}<select value={branchId} onChange={(e)=>setBranchId(e.target.value)} disabled={!needsBranch}>{needsBranch ? branches.map((b)=><option value={b.id} key={b.id}>{b.name}</option>) : <option value="">Acceso global</option>}</select></label>
+    </div>
+    {isPartner && <div className="partner-create-inline">
+      <label>Participación del reparto de socios
+        <div className="input-suffix"><input type="number" min="0" max="100" step="0.01" value={partnerShare} onChange={(e)=>setPartnerShare(e.target.value)} required /><span>%</span></div>
+        <small>Normalmente 100% si es el único socio de la filial.</small>
+      </label>
+      <div className="friendly-info"><Landmark size={16}/><span>Al crear el usuario, Z-FLOW también lo registrará automáticamente como socio de esta filial.</span></div>
+    </div>}
     <label>Contraseña temporal<input type="password" value={password} onChange={(e)=>setPassword(e.target.value)} placeholder="Mín. 10 caracteres, mayúscula, minúscula y número" required /></label>
     {error && <div className="modal-error">{error}</div>}
-    <div className="modal-actions"><button type="button" className="ghost-button" onClick={onClose}>Cancelar</button><button className="primary" disabled={saving}>{saving ? "Creando…" : "Crear usuario"}</button></div>
+    <div className="modal-actions"><button type="button" className="ghost-button" onClick={onClose}>Cancelar</button><button className="primary" disabled={saving}>{saving ? "Creando…" : isPartner ? "Crear socio" : "Crear usuario"}</button></div>
   </form></div>;
 }
 
