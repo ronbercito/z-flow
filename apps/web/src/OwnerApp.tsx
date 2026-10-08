@@ -1320,6 +1320,7 @@ function BackupPage() {
       </section>
     </div>
   );
+}
 
 function SystemSettingsPage() {
   const [settings, setSettings] = useState<SystemSettings | null>(null);
