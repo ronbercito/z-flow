@@ -368,6 +368,8 @@ const nav: Array<{ page: AdminPage; label: string; icon: typeof Home }> = [
   { page: "profile", label: "Mi perfil", icon: UserRound }
 ];
 
+const UI_BUILD = "E4.2-20261008";
+
 function currency(value: number | string | null | undefined) {
   return new Intl.NumberFormat("es-PE", {
     style: "currency",
@@ -1340,7 +1342,7 @@ function SecurityPage({ currentUserId }: { currentUserId: number }) {
     <>
       {error && <div className="error-banner">{error}</div>}
       <div className="security-status-grid">
-        <OwnerKpi icon={<Activity/>} tone="green" label="API" value={status?.ok ? "En línea" : "—"} />
+        <OwnerKpi icon={<Activity/>} tone="green" label={"API · " + UI_BUILD} value={status?.ok ? "En línea" : "—"} />
         <OwnerKpi icon={<Building2/>} tone="blue" label="Filiales activas" value={String(status?.counts.activeBranches ?? 0)} />
         <OwnerKpi icon={<Users/>} tone="cyan" label="Usuarios activos" value={String(status?.counts.activeUsers ?? 0)} />
         <OwnerKpi icon={<ShieldCheck/>} tone="purple" label="Sesiones activas" value={String(status?.counts.activeSessions ?? 0)} />
@@ -1372,6 +1374,37 @@ function SecurityPage({ currentUserId }: { currentUserId: number }) {
           </div>
         </section>
       </div>
+
+      <section className="card page-card">
+        <div className="card-head">
+          <div><strong>Permisos por rol</strong><span>Configuración aplicada y validada en backend.</span></div>
+          <span className="build-badge">Build {UI_BUILD}</span>
+        </div>
+        <div className="role-permission-grid">
+          {roles.map((role) => (
+            <div className="role-permission-card" key={role.id}>
+              <div className="role-permission-head">
+                <div><strong>{role.name}</strong><span>{role.code}</span></div>
+                {role.code === "OWNER" && <em>Protegido</em>}
+              </div>
+              <div className="role-permission-options">
+                {availablePermissions.map((permission) => (
+                  <label key={permission}>
+                    <input
+                      type="checkbox"
+                      checked={role.permissions.includes(permission)}
+                      disabled={role.code === "OWNER"}
+                      onChange={() => void togglePermission(role, permission)}
+                    />
+                    <span>{permissionLabels[permission] ?? permission}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          ))}
+          {!roles.length && <div className="empty-cell">No se pudieron cargar los roles.</div>}
+        </div>
+      </section>
 
       <section className="card page-card">
         <div className="card-head"><div><strong>Sesiones</strong><span>Control de accesos abiertos y recientes.</span></div></div>
