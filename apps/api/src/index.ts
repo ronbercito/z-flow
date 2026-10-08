@@ -597,6 +597,35 @@ app.post("/api/branches/:branchId/operations", async (request, reply) => {
     );
 
     const operationId = Number(result.insertId);
+
+    if (shares.partnerShareAmount > 0) {
+      const [partnerRows] = await connection.query<any[]>(`
+        SELECT user_id, pool_share_pct
+        FROM branch_partner_assignments
+        WHERE branch_id=? AND active=1
+        ORDER BY id
+      `, [branchId]);
+
+      for (const partner of partnerRows) {
+        const individualAmount = money(
+          shares.partnerShareAmount * (Number(partner.pool_share_pct) / 100)
+        );
+        if (individualAmount <= 0) continue;
+        await connection.execute(
+          `INSERT INTO operation_partner_shares
+            (operation_id,branch_id,user_id,pool_share_pct,amount)
+           VALUES (?,?,?,?,?)`,
+          [
+            operationId,
+            branchId,
+            Number(partner.user_id),
+            Number(partner.pool_share_pct),
+            individualAmount
+          ]
+        );
+      }
+    }
+
     const receipt = await issueInternalReceipt(
       connection,
       branchId,
