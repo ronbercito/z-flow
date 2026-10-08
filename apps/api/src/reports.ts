@@ -381,6 +381,49 @@ export async function registerReportRoutes(app: FastifyInstance) {
     return reply.send(buffer);
   });
 
+  app.get("/api/branches/:branchId/closures/:closureId/detail", async (request, reply) => {
+    const parsed = closureParams.safeParse(request.params);
+    if (!parsed.success) return reply.code(400).send({ error: "Cierre inválido" });
+
+    const auth = await requireAuth(request, reply);
+    if (!auth) return;
+    if (!canReadBranch(auth, parsed.data.branchId)) return reply.code(403).send({ error: "Acceso denegado" });
+
+    const [closureRows] = await db.query<any[]>(`
+      SELECT dc.id, dc.cash_session_id, dc.operation_count, dc.commission_total,
+             dc.expected_cash, dc.declared_cash, dc.expected_wallet, dc.declared_wallet,
+             dc.difference_cash, dc.difference_wallet, dc.notes, dc.closed_at,
+             b.name AS branch_name, u.full_name AS closed_by
+      FROM daily_closures dc
+      JOIN branches b ON b.id=dc.branch_id
+      LEFT JOIN users u ON u.id=dc.closed_by_user_id
+      WHERE dc.id=? AND dc.branch_id=?
+      LIMIT 1
+    `, [parsed.data.closureId, parsed.data.branchId]);
+
+    if (!closureRows.length) return reply.code(404).send({ error: "Cierre no encontrado" });
+    const closure = closureRows[0];
+
+    const [operationRows] = await db.query<any[]>(`
+      SELECT o.id, o.operation_type, o.reference_code, o.customer_name,
+             o.amount, o.commission, o.net_amount, o.status, o.notes,
+             o.created_at, u.full_name AS registered_by,
+             r.series AS receipt_series, r.sequence_number AS receipt_number,
+             oe.action AS latest_event_action, oe.reason AS latest_event_reason,
+             oe.created_at AS latest_event_at
+      FROM operations o
+      LEFT JOIN users u ON u.id=o.user_id
+      LEFT JOIN receipts r ON r.operation_id=o.id
+      LEFT JOIN operation_events oe ON oe.id=(
+        SELECT MAX(event.id) FROM operation_events event WHERE event.operation_id=o.id
+      )
+      WHERE o.branch_id=? AND o.cash_session_id=?
+      ORDER BY o.created_at ASC, o.id ASC
+    `, [parsed.data.branchId, closure.cash_session_id]);
+
+    return { closure, operations: operationRows };
+  });
+
   app.get("/api/branches/:branchId/closures/:closureId/pdf", async (request, reply) => {
     const parsed = closureParams.safeParse(request.params);
     if (!parsed.success) return reply.code(400).send({ error: "Cierre inválido" });
