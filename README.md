@@ -1,3 +1,12 @@
+## Documentación de continuidad
+
+Para retomar el proyecto sin perder contexto:
+
+- `docs/CONTINUIDAD.md` — estado actual, reglas de trabajo, entorno, pruebas aprobadas y siguiente objetivo.
+- `docs/BITACORA.md` — historial consolidado de decisiones, cambios y validaciones.
+- `docs/ROADMAP.md` — fases completadas y pendientes.
+- `docs/LOCAL_PRODUCTION.md` — operación segura en Proxmox local.
+
 # Z-FLOW
 
 Sistema independiente para gestionar filiales, operaciones Yape/efectivo, cajas, comisiones, cierres, comprobantes, reportes, usuarios y roles.
