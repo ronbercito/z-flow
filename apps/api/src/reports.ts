@@ -221,7 +221,7 @@ function pdfBuffer(report: Awaited<ReturnType<typeof fetchReport>>, title: strin
       ["Ganancia encargados", pen(report.summary.commissionTotal)]
     ];
     cards.forEach(([label, value]) => {
-      doc.fontSize(9).fillColor("#667085").text(label, { continued: true, width: 155 });
+      doc.fontSize(9).fillColor("#667085").text(`${label}: `, { continued: true });
       doc.fillColor("#111827").font("Helvetica-Bold").text(value);
       doc.font("Helvetica");
     });
