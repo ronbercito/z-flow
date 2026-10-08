@@ -14,6 +14,7 @@ import {
   Upload,
   CheckCircle2,
   ChevronRight,
+  ChevronDown,
   CircleDollarSign,
   ClipboardCheck,
   FileSearch,
@@ -1045,7 +1046,8 @@ function AdminReports({ overview }: { overview: Overview; operations: GlobalOper
   const localToday = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0,10);
   const [from, setFrom] = useState(localToday.slice(0,8) + "01");
   const [to, setTo] = useState(localToday);
-  const [branch, setBranch] = useState("ALL");
+  const [branch, setBranch] = useState("");
+  const [branchPickerOpen, setBranchPickerOpen] = useState(false);
   const [flow, setFlow] = useState<"ALL" | "YAPE_TO_CASH" | "CASH_TO_YAPE">("ALL");
   const [report, setReport] = useState<FinancialReport | null>(null);
   const [loading, setLoading] = useState(false);
@@ -1053,13 +1055,14 @@ function AdminReports({ overview }: { overview: Overview; operations: GlobalOper
 
   function queryString() {
     const p = new URLSearchParams();
-    if (branch !== "ALL") p.set("branchId", branch);
+    if (branch && branch !== "ALL") p.set("branchId", branch);
     if (from) p.set("from", from);
     if (to) p.set("to", to);
     return p.toString();
   }
 
   async function loadReport() {
+    if (!branch) { setReport(null); setLoading(false); return; }
     setLoading(true); setError("");
     try {
       setReport(await api<FinancialReport>(`/api/admin/reports/summary?${queryString()}`));
@@ -1070,26 +1073,40 @@ function AdminReports({ overview }: { overview: Overview; operations: GlobalOper
     }
   }
 
-  useEffect(() => { void loadReport(); }, [from, to, branch]);
+  useEffect(() => {
+    if (!branch) { setReport(null); setError(""); setLoading(false); return; }
+    void loadReport();
+  }, [from, to, branch]);
 
-  const comparisonBranches = overview.branches.map((branchInfo) => {
-    const id = Number(branchInfo.id);
-    return report?.branchComparison.find((item) => item.id === id) ?? {
-      id,
-      code: branchInfo.code,
-      name: branchInfo.name,
-      operationCount: 0,
-      amountTotal: 0,
-      commissionTotal: 0,
-      staffShareTotal: 0,
-      partnerShareTotal: 0
-    };
-  });
-  const visibleComparisonBranches = branch === "ALL"
-    ? comparisonBranches
-    : comparisonBranches.filter((item) => String(item.id) === branch);
-  const selectedBranchName = overview.branches.find((item) => String(item.id) === branch)?.name;
-  const maxAmount = Math.max(...comparisonBranches.map((x) => x.amountTotal), 1);
+  const selectedBranchName = branch === "ALL"
+    ? "Mostrar todos"
+    : overview.branches.find((item) => String(item.id) === branch)?.name;
+  function chooseBranch(value: string) {
+    setReport(null);
+    setBranch(value);
+    setBranchPickerOpen(false);
+  }
+  const branchPicker = (
+    <div className={`report-branch-picker ${branch ? "inline" : "start"}`}>
+      <div className="report-branch-picker-copy">
+        <span className="report-branch-picker-icon"><Building2 size={17} /></span>
+        <span><strong>{branch ? "Filial del reporte" : "Selecciona una filial"}</strong><small>{branch ? selectedBranchName : "Elige una opción para cargar el reporte"}</small></span>
+      </div>
+      <div className="report-branch-picker-menu-wrap">
+        <button type="button" className="report-branch-picker-trigger" aria-expanded={branchPickerOpen} onClick={()=>setBranchPickerOpen(!branchPickerOpen)}>
+          <span>{branch ? "Cambiar selección" : "Seleccionar filial"}</span><ChevronDown size={15}/>
+        </button>
+        {branchPickerOpen && <div className="report-branch-picker-menu" aria-label="Seleccionar filial">
+          <button type="button" className={branch==="ALL"?"selected":""} aria-pressed={branch==="ALL"} onClick={()=>chooseBranch("ALL")}>
+            <span className="branch-option-mark"><Building2 size={14}/></span><span><strong>Mostrar todos</strong><small>Reporte consolidado de todas las filiales</small></span>
+          </button>
+          {overview.branches.map((item)=><button type="button" key={item.id} className={branch===String(item.id)?"selected":""} aria-pressed={branch===String(item.id)} onClick={()=>chooseBranch(String(item.id))}>
+            <span className="branch-option-mark"><Building2 size={14}/></span><span><strong>{item.name}</strong><small>Ver reporte de esta filial</small></span>
+          </button>)}
+        </div>}
+      </div>
+    </div>
+  );
   const registerRows = (report?.operations ?? []).filter((row) => flow === "ALL" || row.operation_type === flow);
   const enteredTotal = registerRows.reduce((sum, row) => sum + Number(row.amount), 0);
   const deliveredTotal = registerRows.reduce((sum, row) => sum + Number(row.net_amount), 0);
@@ -1104,55 +1121,29 @@ function AdminReports({ overview }: { overview: Overview; operations: GlobalOper
   return (
     <>
       <section className="card report-toolbar">
-        <div className="report-toolbar-title"><BarChart3 size={19}/><div><strong>Reporte financiero</strong><span>Filtra por filial y periodo. Exporta el resultado en PDF o Excel.</span></div></div>
+        <div className="report-toolbar-title"><BarChart3 size={19}/><div><strong>Reporte financiero</strong><span>Elige una filial para consultar sus operaciones y exportar el resultado.</span></div></div>
         <div className="admin-filters admin-filters-wide">
-          <select value={branch} onChange={(e)=>setBranch(e.target.value)} aria-label="Filtrar por filial">
-            <option value="ALL">Mostrar todos</option>
-            {overview.branches.map((item)=><option value={item.id} key={item.id}>{item.name}</option>)}
-          </select>
           <label className="date-filter"><span>Desde</span><input type="date" value={from} onChange={(e)=>setFrom(e.target.value)} /></label>
           <label className="date-filter"><span>Hasta</span><input type="date" value={to} onChange={(e)=>setTo(e.target.value)} /></label>
-          <button className="soft export-button" onClick={()=>download("pdf")}><Download size={14}/> PDF</button>
-          <button className="primary export-button" onClick={()=>download("xlsx")}><Download size={14}/> Excel</button>
+          <button className="soft export-button" disabled={!branch} onClick={()=>download("pdf")}><Download size={14}/> PDF</button>
+          <button className="primary export-button" disabled={!branch} onClick={()=>download("xlsx")}><Download size={14}/> Excel</button>
         </div>
       </section>
+      {!branch && <section className="card report-select-start">
+        <div><strong>¿Qué reporte deseas consultar?</strong><span>Pulsa el selector, elige una filial o muestra todas para cargar los datos.</span></div>
+        {branchPicker}
+      </section>}
 
       {error && <div className="error-banner">{error}</div>}
-      {loading && !report && <div className="owner-loading">Calculando reporte…</div>}
+      {loading && branch && !report && <div className="owner-loading">Cargando reporte…</div>}
 
-      {report && <>
+      {branch && report && <>
         <div className="owner-kpis reports-owner-kpis stage3-kpis">
           <OwnerKpi icon={<ReceiptText />} tone="blue" label="Operaciones" value={String(report.summary.operationCount)} />
           <OwnerKpi icon={<BadgeDollarSign />} tone="green" label="Monto movilizado" value={currency(report.summary.amountTotal)} />
           <OwnerKpi icon={<CircleDollarSign />} tone="orange" label="Ganancia de encargados" value={currency(report.summary.commissionTotal)} />
+          {branchPicker}
         </div>
-
-        <section className="card page-card">
-          <div className="card-head">
-            <div className="branch-report-heading-copy"><strong>{branch === "ALL" ? "Comparativo por filial" : `Reporte de ${selectedBranchName ?? "filial"}`}</strong><span>{branch === "ALL" ? "Elige una filial para filtrar el reporte" : `Vista individual · ${from || "Inicio"} → ${to || "Hoy"}`}</span></div>
-            <button type="button" className={`filter ${branch==="ALL"?"active":""}`} onClick={()=>setBranch("ALL")}>Mostrar todos</button>
-          </div>
-          <div className={`report-bars owner-report-bars ${branch === "ALL" ? "all-branch-comparison" : ""}`}>
-            {visibleComparisonBranches.map((item) => (
-              <button
-                type="button"
-                className={`report-bar-row report-branch-select ${branch===String(item.id)?"selected":""}`}
-                key={item.id}
-                aria-pressed={branch===String(item.id)}
-                onClick={()=>setBranch(String(item.id))}
-              >
-                <div className="branch-report-card-top">
-                  <span className="branch-report-mark" aria-hidden="true">{item.name.slice(0,1).toUpperCase()}</span>
-                  <span className="branch-report-name"><strong>{item.name}</strong><small>{item.operationCount} operaciones</small></span>
-                  <span className="branch-report-amount"><strong>{currency(item.amountTotal)}</strong><small>Monto movilizado</small></span>
-                </div>
-                <div className="progress"><i className="purple" style={{ width: `${Math.max(3,(item.amountTotal/maxAmount)*100)}%` }} /></div>
-                <div className="branch-report-card-bottom"><span>{branch===String(item.id) ? "Filial seleccionada" : "Ver reporte"}</span><span>Comisión {currency(item.commissionTotal)}</span></div>
-              </button>
-            ))}
-            {!comparisonBranches.length && <div className="empty-cell">No hay filiales disponibles.</div>}
-          </div>
-        </section>
 
         <section className="card report-register-card">
           <div className="report-register-heading">
