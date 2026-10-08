@@ -151,9 +151,16 @@ app.post("/api/auth/change-password", async (request, reply) => {
   }
 
   await db.execute(
-    `INSERT INTO audit_logs (branch_id, user_id, action, entity_type, entity_id)
-     VALUES (?, ?, 'PASSWORD_CHANGED', 'USER', ?)`,
-    [auth.branchId, auth.userId, auth.userId]
+    `INSERT INTO audit_logs
+      (branch_id, user_id, action, entity_type, entity_id, ip_address, user_agent)
+     VALUES (?, ?, 'PASSWORD_CHANGED', 'USER', ?, ?, ?)`,
+    [
+      auth.branchId,
+      auth.userId,
+      auth.userId,
+      request.ip,
+      String(request.headers["user-agent"] ?? "").slice(0, 255)
+    ]
   );
 
   return { ok: true };
@@ -315,14 +322,18 @@ app.post("/api/branches/:branchId/cash/open", async (request, reply) => {
   );
 
   await db.execute(
-    `INSERT INTO audit_logs (branch_id, user_id, action, entity_type, entity_id, details)
-     VALUES (?, ?, 'CASH_OPENED', 'CASH_SESSION', ?, JSON_OBJECT('initial_cash', ?, 'initial_wallet', ?))`,
+    `INSERT INTO audit_logs
+      (branch_id, user_id, action, entity_type, entity_id, details, ip_address, user_agent)
+     VALUES (?, ?, 'CASH_OPENED', 'CASH_SESSION', ?,
+       JSON_OBJECT('initial_cash', ?, 'initial_wallet', ?), ?, ?)`,
     [
       branchId,
       auth.userId,
       Number(result.insertId),
       money(parsedBody.data.initialCash),
-      money(parsedBody.data.initialWallet)
+      money(parsedBody.data.initialWallet),
+      request.ip,
+      String(request.headers["user-agent"] ?? "").slice(0, 255)
     ]
   );
 
@@ -422,15 +433,18 @@ app.post("/api/branches/:branchId/cash/close", async (request, reply) => {
     );
 
     await connection.execute(
-      `INSERT INTO audit_logs (branch_id, user_id, action, entity_type, entity_id, details)
+      `INSERT INTO audit_logs
+        (branch_id, user_id, action, entity_type, entity_id, details, ip_address, user_agent)
        VALUES (?, ?, 'CASH_CLOSED', 'DAILY_CLOSURE', ?,
-         JSON_OBJECT('difference_cash', ?, 'difference_wallet', ?))`,
+         JSON_OBJECT('difference_cash', ?, 'difference_wallet', ?), ?, ?)`,
       [
         branchId,
         auth.userId,
         Number(closure.insertId),
         differenceCash,
-        differenceWallet
+        differenceWallet,
+        request.ip,
+        String(request.headers["user-agent"] ?? "").slice(0, 255)
       ]
     );
 
@@ -634,9 +648,10 @@ app.post("/api/branches/:branchId/operations", async (request, reply) => {
     );
 
     await connection.execute(
-      `INSERT INTO audit_logs (branch_id, user_id, action, entity_type, entity_id, details)
+      `INSERT INTO audit_logs
+        (branch_id, user_id, action, entity_type, entity_id, details, ip_address, user_agent)
        VALUES (?, ?, 'OPERATION_CREATED', 'OPERATION', ?,
-         JSON_OBJECT('type', ?, 'amount', ?, 'commission', ?, 'staff_share', ?, 'partner_share', ?))`,
+         JSON_OBJECT('type', ?, 'amount', ?, 'commission', ?, 'staff_share', ?, 'partner_share', ?), ?, ?)`,
       [
         branchId,
         auth.userId,
@@ -645,7 +660,9 @@ app.post("/api/branches/:branchId/operations", async (request, reply) => {
         money(body.amount),
         commission,
         shares.staffShareAmount,
-        shares.partnerShareAmount
+        shares.partnerShareAmount,
+        request.ip,
+        String(request.headers["user-agent"] ?? "").slice(0, 255)
       ]
     );
 
