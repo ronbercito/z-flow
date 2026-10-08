@@ -2356,3 +2356,33 @@ tr:last-child td { border-bottom:0; }
   .report-branch-picker.inline { grid-column:span 2; }
   .report-branch-picker-trigger { width:100%; }
 }
+
+.cash-admin-overview {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 300px;
+  align-items:start;
+  gap:12px;
+  margin-top:16px;
+}
+.cash-branch-status { min-width:0; overflow:hidden; }
+.cash-branch-status .card-head { min-height:54px; }
+.cash-admin-branch-grid {
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  max-height:min(300px,48vh);
+  overflow-y:auto;
+  align-content:start;
+  gap:9px;
+  padding:12px;
+}
+.cash-admin-branch-grid .branch-cash-card { min-width:0; }
+.cash-picker.inline { grid-column:auto; min-height:0; flex-direction:column; align-items:stretch; }
+.cash-picker .report-branch-picker-copy { align-items:flex-start; }
+.cash-picker .report-branch-picker-menu { right:0; }
+@media (max-width:900px) {
+  .cash-admin-overview { grid-template-columns:1fr; }
+  .cash-picker.inline { flex-direction:row; align-items:center; }
+}
+@media (max-width:650px) {
+  .cash-admin-branch-grid { grid-template-columns:1fr; max-height:260px; }
+  .cash-picker.inline { flex-direction:column; align-items:stretch; }
+}
