@@ -911,6 +911,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
 
     const [rows] = await db.query<any[]>(`
       SELECT a.id, a.action, a.entity_type, a.entity_id, a.details,
+             a.ip_address, a.user_agent,
              DATE_FORMAT(a.created_at, '%Y-%m-%dT%H:%i:%s') AS created_at,
              b.name AS branch_name, u.full_name AS user_name, u.username
       FROM audit_logs a
