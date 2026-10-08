@@ -87,8 +87,8 @@ Implementado en `develop`:
 
 - Reportes por rango de fechas.
 - Exportación PDF y Excel.
-- Reparto de comisión encargado/socio guardado por operación.
-- Cierre de caja con totales de comisión y reparto.
+- Comisión completa asignada al encargado que registra la operación.
+- Cierre de caja con totales de comisión y conciliación.
 - Comprobantes internos correlativos.
 - PDF de comprobante interno en formato aproximado de 80 mm.
 - Backup y restauración de MariaDB.
@@ -116,10 +116,10 @@ La nube queda pospuesta hasta terminar las pruebas reales. La Etapa 4 consolida 
 Incluye:
 
 - Configuración general del negocio, logo y datos de tickets.
-- Reglas centrales de comisión, límites y reparto.
+- Reglas centrales de comisión y límites.
+- Un solo Cajero / Encargado activo por filial.
+- La comisión generada pertenece al encargado de la filial.
 - Anulación controlada durante turno abierto y reverso de propietario.
-- Cambio de encargado sobre una caja abierta.
-- Asignación de socios por filial y distribución individual de su parte.
 - Permisos configurables por rol con aplicación real en backend.
 - Gestión de sesiones activas e IP en auditoría.
 - Health checks de MariaDB, API y Web.
@@ -156,3 +156,13 @@ bash scripts/update-local.sh
 ```
 
 La siguiente fase es probar todo paso por paso en el entorno local antes de cualquier migración a nube.
+
+
+### Modelo de usuarios actual
+
+- El propietario administra el sistema.
+- Cada filial tiene un solo usuario activo con rol **Cajero / Encargado**.
+- Al crear una cuenta se solicita únicamente nombre, nombre de cuenta, filial y contraseña; el rol queda fijado como Cajero / Encargado.
+- No existe módulo de socios en el flujo operativo actual.
+- La comisión completa de las operaciones corresponde al encargado.
+- En **Usuarios → Detalles** se consultan sus ganancias y actividad.
