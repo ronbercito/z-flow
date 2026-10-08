@@ -193,6 +193,8 @@ type AuditRow = {
   branch_name: string | null;
   user_name: string | null;
   username: string | null;
+  ip_address?: string | null;
+  user_agent?: string | null;
 };
 
 type SystemSettings = {
@@ -1124,10 +1126,10 @@ function AuditPage({ rows }: { rows: AuditRow[] }) {
       <div className="card-head"><div><strong>Bitácora de seguridad</strong><span>{rows.length} eventos recientes</span></div></div>
       <div className="table-wrap">
         <table className="admin-table">
-          <thead><tr><th>Fecha / Hora</th><th>Usuario</th><th>Filial</th><th>Acción</th><th>Entidad</th><th>ID</th></tr></thead>
+          <thead><tr><th>Fecha / Hora</th><th>Usuario</th><th>Filial</th><th>IP</th><th>Acción</th><th>Entidad</th><th>ID</th></tr></thead>
           <tbody>
             {rows.map((row) => (
-              <tr key={row.id}><td>{dateTime(row.created_at)}</td><td><strong>{row.user_name ?? "Sistema"}</strong><br/><small>{row.username ?? ""}</small></td><td>{row.branch_name ?? "Global"}</td><td><span className="audit-action">{row.action}</span></td><td>{row.entity_type ?? "—"}</td><td>{row.entity_id ?? "—"}</td></tr>
+              <tr key={row.id}><td>{dateTime(row.created_at)}</td><td><strong>{row.user_name ?? "Sistema"}</strong><br/><small>{row.username ?? ""}</small></td><td>{row.branch_name ?? "Global"}</td><td>{row.ip_address ?? "—"}</td><td><span className="audit-action">{row.action}</span></td><td>{row.entity_type ?? "—"}</td><td>{row.entity_id ?? "—"}</td></tr>
             ))}
           </tbody>
         </table>
