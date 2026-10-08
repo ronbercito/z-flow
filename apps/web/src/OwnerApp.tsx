@@ -659,9 +659,7 @@ function OwnerDashboard({ user, overview, onPage }: { user: AuthUser; overview: 
           <GraphicKpi icon={<Activity/>} tone="blue" label="Operaciones" value={String(data.metrics.operations)} trend={data.comparison.operations} />
           <GraphicKpi icon={<Smartphone/>} tone="purple" label="Yape recibido" value={currency(data.metrics.yapeReceived)} trend={data.comparison.yapeReceived} />
           <GraphicKpi icon={<Banknote/>} tone="green" label="Efectivo entregado" value={currency(data.metrics.cashDelivered)} trend={data.comparison.cashDelivered} />
-          <GraphicKpi icon={<Percent/>} tone="orange" label="Comisión total" value={currency(data.metrics.commissionTotal)} trend={data.comparison.commissionTotal} />
-          <GraphicKpi icon={<UserCog/>} tone="pink" label="Ganancia encargados" value={currency(data.metrics.staffShareTotal)} trend={data.comparison.staffShareTotal} />
-          <GraphicKpi icon={<Users/>} tone="cyan" label="Ganancia socios" value={currency(data.metrics.partnerShareTotal)} trend={data.comparison.partnerShareTotal} />
+          <GraphicKpi icon={<Percent/>} tone="orange" label="Comisión generada" value={currency(data.metrics.commissionTotal)} trend={data.comparison.commissionTotal} />
           <GraphicKpi icon={<WalletCards/>} tone="blue" label="Caja esperada" value={currency(data.metrics.cashExpected)} subtitle="Según cajas abiertas" />
           <GraphicKpi icon={<Scale/>} tone={Math.abs(data.metrics.cashDifference) < 0.005 ? "green" : "red"} label="Diferencia de caja" value={currency(data.metrics.cashDifference)} subtitle={Math.abs(data.metrics.cashDifference) < 0.005 ? "✓ Cuadra" : "Revisar diferencia"} />
         </div>
@@ -701,9 +699,7 @@ function OwnerDashboard({ user, overview, onPage }: { user: AuthUser; overview: 
               <DashboardSummary icon={<ReceiptText/>} label="Total operaciones" value={String(data.metrics.operations)} />
               <DashboardSummary icon={<Smartphone/>} label="Yape recibido" value={currency(data.metrics.yapeReceived)} />
               <DashboardSummary icon={<Banknote/>} label="Efectivo entregado" value={currency(data.metrics.cashDelivered)} />
-              <DashboardSummary icon={<Percent/>} label="Comisión total" value={currency(data.metrics.commissionTotal)} />
-              <DashboardSummary icon={<UserCog/>} label="Ganancia encargados" value={currency(data.metrics.staffShareTotal)} />
-              <DashboardSummary icon={<Users/>} label="Ganancia socios" value={currency(data.metrics.partnerShareTotal)} />
+              <DashboardSummary icon={<Percent/>} label="Comisión generada" value={currency(data.metrics.commissionTotal)} />
               <DashboardSummary icon={<WalletCards/>} label="Caja esperada" value={currency(data.metrics.cashExpected)} />
               <DashboardSummary icon={<Scale/>} label="Diferencia de caja" value={currency(data.metrics.cashDifference)} />
             </div>
@@ -905,7 +901,7 @@ function CashAdminPage({ branches, closures }: { branches: Branch[]; closures: C
                   <td>{item.closed_by ?? "—"}</td>
                   <td><span className={`branch-status ${closureResult(item).cls}`}>{closureResult(item).label}</span></td>
                   <td>{item.operation_count ?? 0}</td>
-                  <td><strong>{currency(item.commission_total)}</strong><br/><small>Enc. {currency(item.staff_share_total)} · Socio {currency(item.partner_share_total)}{pendingCommission(item) > 0 ? ` · Pendiente ${currency(pendingCommission(item))}` : ""}</small></td>
+                  <td><strong>{currency(item.commission_total)}</strong><br/><small>Ganancia del encargado</small></td>
                   <td><span className={Math.abs(Number(item.difference_cash)) < 0.005 ? "green-text" : "red-text"}>Efectivo {currency(item.difference_cash)}</span><br/><span className={Math.abs(Number(item.difference_wallet)) < 0.005 ? "green-text" : "red-text"}>Yape {currency(item.difference_wallet)}</span></td>
                   <td><button className="mini-button" onClick={() => window.open(`/api/branches/${item.branch_id}/closures/${item.id}/pdf`, "_blank")}><Download size={12}/> PDF</button></td>
                 </tr>
@@ -1019,7 +1015,7 @@ function CommissionsPage({ branches, onSettings }: { branches: Branch[]; onSetti
               <strong>{branch.name}</strong>
               <span>Límite {currency(branch.settings.maxOperationAmount)}</span>
               <div className="commission-value">{branch.settings.commissionType === "FLAT" ? currency(branch.settings.commissionValue) : `${branch.settings.commissionValue}%`} <small>por operación</small></div>
-              <div className="share-line"><span>Encargado: {branch.settings.staffSharePct ?? "—"}%</span><span>Socio: {branch.settings.partnerSharePct ?? "—"}%</span></div>
+              <div className="share-line"><span>La comisión corresponde al encargado</span></div>
             </div>
             <button className="mini-button" onClick={() => onSettings(branch)}><Settings2 size={13} /> Editar</button>
           </div>
@@ -1089,10 +1085,7 @@ function AdminReports({ overview }: { overview: Overview; operations: GlobalOper
         <div className="owner-kpis reports-owner-kpis stage3-kpis">
           <OwnerKpi icon={<ReceiptText />} tone="blue" label="Operaciones" value={String(report.summary.operationCount)} />
           <OwnerKpi icon={<BadgeDollarSign />} tone="green" label="Monto movilizado" value={currency(report.summary.amountTotal)} />
-          <OwnerKpi icon={<CircleDollarSign />} tone="orange" label="Comisión total" value={currency(report.summary.commissionTotal)} />
-          <OwnerKpi icon={<UserCog />} tone="purple" label="Parte encargado" value={currency(report.summary.staffShareTotal)} />
-          <OwnerKpi icon={<Landmark />} tone="cyan" label="Parte socio" value={currency(report.summary.partnerShareTotal)} />
-          <OwnerKpi icon={<Activity />} tone="blue" label="Sin reparto" value={currency(report.summary.unassignedCommission)} />
+          <OwnerKpi icon={<CircleDollarSign />} tone="orange" label="Ganancia de encargados" value={currency(report.summary.commissionTotal)} />
         </div>
 
         <section className="card page-card">
@@ -1102,7 +1095,7 @@ function AdminReports({ overview }: { overview: Overview; operations: GlobalOper
               <div className="report-bar-row" key={item.id}>
                 <div><strong>{item.name}</strong><span>{item.operationCount} operaciones · {currency(item.amountTotal)} · Comisión {currency(item.commissionTotal)}</span></div>
                 <div className="progress"><i className="purple" style={{ width: `${Math.max(3,(item.amountTotal/maxAmount)*100)}%` }} /></div>
-                <div className="split-report-line"><span>Encargado {currency(item.staffShareTotal)}</span><span>Socio {currency(item.partnerShareTotal)}</span></div>
+                <div className="split-report-line"><span>Ganancia encargado: {currency(item.commissionTotal)}</span></div>
               </div>
             ))}
             {!report.branches.length && <div className="empty-cell">No hay operaciones en el periodo seleccionado.</div>}
@@ -1133,7 +1126,6 @@ function auditActionLabel(action: string) {
     DEFAULT_RULES_APPLIED_TO_BRANCHES: "Reglas generales aplicadas a filiales",
     SESSION_REVOKED: "Sesión cerrada por administración",
     USER_SESSIONS_REVOKED: "Sesiones de usuario cerradas",
-    PARTNER_ASSIGNMENT_UPDATED: "Asignación de socio actualizada",
     ROLE_PERMISSIONS_UPDATED: "Permisos de rol actualizados",
     BRANCH_CREATED: "Filial creada",
     BRANCH_SETTINGS_UPDATED: "Configuración de filial actualizada",
@@ -1218,7 +1210,7 @@ function SystemSettingsPage() {
   }
 
   async function applyDefaults() {
-    if (!window.confirm("Esto aplicará las reglas generales de comisión, límite y reparto a todas las filiales. ¿Continuar?")) return;
+    if (!window.confirm("Esto aplicará las reglas generales de comisión y límite a todas las filiales. ¿Continuar?")) return;
     try {
       const result = await api<{ affectedBranches: number }>("/api/admin/system/apply-defaults-to-branches", { method: "POST" });
       setMessage("Reglas aplicadas a " + result.affectedBranches + " filiales.");
@@ -1282,10 +1274,7 @@ function SystemSettingsPage() {
             <label>Tipo de comisión<select value={form.defaultCommissionType} onChange={(e)=>setForm({...form,defaultCommissionType:e.target.value as "FLAT"|"PERCENT"})}><option value="FLAT">Monto fijo</option><option value="PERCENT">Porcentaje</option></select></label>
           </div>
           <label>Valor predeterminado<div className="input-prefix"><span>{form.defaultCommissionType==="FLAT"?"S/":"%"}</span><input type="number" min="0.01" step="0.01" value={form.defaultCommissionValue} onChange={(e)=>setForm({...form,defaultCommissionValue:Number(e.target.value)})} /></div></label>
-          <div className="field-grid">
-            <label>% Encargado<input type="number" min="0" max="100" step="0.01" value={form.defaultStaffSharePct ?? ""} onChange={(e)=>setForm({...form,defaultStaffSharePct:e.target.value===""?null:Number(e.target.value)})} /></label>
-            <label>% Socio<input type="number" min="0" max="100" step="0.01" value={form.defaultPartnerSharePct ?? ""} onChange={(e)=>setForm({...form,defaultPartnerSharePct:e.target.value===""?null:Number(e.target.value)})} /></label>
-          </div>
+          <div className="friendly-info"><UserCog size={16}/><span>La comisión generada en cada filial corresponde al encargado asignado.</span></div>
           <label className="active-toggle"><input type="checkbox" checked={form.requireCashToYapeReference} onChange={(e)=>setForm({...form,requireCashToYapeReference:e.target.checked})} /> Exigir referencia también en Efectivo → Yape</label>
           <label className="active-toggle"><input type="checkbox" checked={form.allowCashierCancel} onChange={(e)=>setForm({...form,allowCashierCancel:e.target.checked})} /> Permitir que el cajero anule operaciones mientras su turno está abierto</label>
           <div className="stage4-policy-note"><LockKeyhole size={16}/><span>Las operaciones de turnos cerrados no se editan. Cualquier corrección posterior requiere reverso del propietario y queda en auditoría.</span></div>
@@ -1411,7 +1400,7 @@ function SecurityPage({ currentUserId }: { currentUserId: number }) {
           <span className="build-badge">Versión {UI_BUILD}</span>
         </div>
         <div className="role-permission-grid">
-          {roles.map((role) => (
+          {roles.filter((role) => ["OWNER","CASHIER"].includes(role.code)).map((role) => (
             <div className="role-permission-card" key={role.id}>
               <div className="role-permission-head">
                 <div><strong>{role.name}</strong><span>Permisos del rol</span></div>
@@ -1485,8 +1474,6 @@ function CreateBranchModal({ onClose, onCreated }: { onClose: () => void; onCrea
   const [maxAmount, setMaxAmount] = useState("50");
   const [commissionType, setCommissionType] = useState<"FLAT" | "PERCENT">("FLAT");
   const [commission, setCommission] = useState("1");
-  const [staffShare, setStaffShare] = useState("");
-  const [partnerShare, setPartnerShare] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -1497,8 +1484,6 @@ function CreateBranchModal({ onClose, onCreated }: { onClose: () => void; onCrea
         setMaxAmount(String(defaults.defaultMaxOperationAmount));
         setCommissionType(defaults.defaultCommissionType);
         setCommission(String(defaults.defaultCommissionValue));
-        setStaffShare(defaults.defaultStaffSharePct == null ? "" : String(defaults.defaultStaffSharePct));
-        setPartnerShare(defaults.defaultPartnerSharePct == null ? "" : String(defaults.defaultPartnerSharePct));
       } catch {
         // Keep safe local defaults if general settings cannot be loaded.
       }
@@ -1517,9 +1502,7 @@ function CreateBranchModal({ onClose, onCreated }: { onClose: () => void; onCrea
           address: address || undefined,
           maxOperationAmount: Number(maxAmount),
           commissionType,
-          commissionValue: Number(commission),
-          staffSharePct: staffShare === "" ? null : Number(staffShare),
-          partnerSharePct: partnerShare === "" ? null : Number(partnerShare)
+          commissionValue: Number(commission)
         })
       });
       onCreated();
@@ -1535,9 +1518,7 @@ function CreateBranchModal({ onClose, onCreated }: { onClose: () => void; onCrea
       <label>Límite por operación<div className="input-prefix"><span>S/</span><input value={maxAmount} onChange={(e)=>setMaxAmount(e.target.value)} inputMode="decimal" required /></div></label>
       <label>Tipo de comisión<select value={commissionType} onChange={(e)=>setCommissionType(e.target.value as "FLAT"|"PERCENT")}><option value="FLAT">Monto fijo</option><option value="PERCENT">Porcentaje</option></select></label>
     </div>
-    <label>Valor de comisión<div className="input-prefix"><span>{commissionType === "FLAT" ? "S/" : "%"}</span><input value={commission} onChange={(e)=>setCommission(e.target.value)} inputMode="decimal" required /></div></label>
-    <div className="field-grid"><label>% Encargado<input value={staffShare} onChange={(e)=>setStaffShare(e.target.value)} placeholder="Ej. 30" /></label><label>% Socio<input value={partnerShare} onChange={(e)=>setPartnerShare(e.target.value)} placeholder="Ej. 70" /></label></div>
-    <small>El reparto es opcional al crear. Si completas ambos porcentajes deben sumar 100%.</small>
+    <label>Comisión del encargado<div className="input-prefix"><span>{commissionType === "FLAT" ? "S/" : "%"}</span><input value={commission} onChange={(e)=>setCommission(e.target.value)} inputMode="decimal" required /></div></label>
     {error && <div className="modal-error">{error}</div>}
     <div className="modal-actions"><button type="button" className="ghost-button" onClick={onClose}>Cancelar</button><button className="primary" disabled={saving}>{saving ? "Creando…" : "Crear filial"}</button></div>
   </form></div>;
@@ -1752,8 +1733,6 @@ function BranchDetailModal({
   const [maxAmount, setMaxAmount] = useState("");
   const [commissionType, setCommissionType] = useState<"FLAT"|"PERCENT">("FLAT");
   const [commissionValue, setCommissionValue] = useState("");
-  const [staffShare, setStaffShare] = useState("");
-  const [partnerShare, setPartnerShare] = useState("");
 
   async function loadDetail() {
     setLoading(true); setError("");
@@ -1767,8 +1746,6 @@ function BranchDetailModal({
       setMaxAmount(String(data.branch.settings.maxOperationAmount));
       setCommissionType(data.branch.settings.commissionType);
       setCommissionValue(String(data.branch.settings.commissionValue));
-      setStaffShare(data.branch.settings.staffSharePct == null ? "" : String(data.branch.settings.staffSharePct));
-      setPartnerShare(data.branch.settings.partnerSharePct == null ? "" : String(data.branch.settings.partnerSharePct));
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo cargar la filial");
     } finally {
@@ -1792,9 +1769,7 @@ function BranchDetailModal({
         body: JSON.stringify({
           maxOperationAmount: Number(maxAmount),
           commissionType,
-          commissionValue: Number(commissionValue),
-          staffSharePct: staffShare === "" ? null : Number(staffShare),
-          partnerSharePct: partnerShare === "" ? null : Number(partnerShare)
+          commissionValue: Number(commissionValue)
         })
       });
       setMessage("Filial actualizada correctamente.");
@@ -1843,8 +1818,8 @@ function BranchDetailModal({
             <label className="active-toggle"><input type="checkbox" checked={active} onChange={(e)=>setActive(e.target.checked)} /> Filial activa</label>
             <div className="section-divider">Regla de operación</div>
             <div className="field-grid"><label>Límite por operación<div className="input-prefix"><span>S/</span><input value={maxAmount} onChange={(e)=>setMaxAmount(e.target.value)} required /></div></label><label>Tipo de comisión<select value={commissionType} onChange={(e)=>setCommissionType(e.target.value as "FLAT"|"PERCENT")}><option value="FLAT">Monto fijo</option><option value="PERCENT">Porcentaje</option></select></label></div>
-            <label>Valor de comisión<div className="input-prefix"><span>{commissionType==="FLAT"?"S/":"%"}</span><input value={commissionValue} onChange={(e)=>setCommissionValue(e.target.value)} required /></div></label>
-            <div className="field-grid"><label>% Encargado<input value={staffShare} onChange={(e)=>setStaffShare(e.target.value)} /></label><label>% Socio<input value={partnerShare} onChange={(e)=>setPartnerShare(e.target.value)} /></label></div>
+            <label>Comisión del encargado<div className="input-prefix"><span>{commissionType==="FLAT"?"S/":"%"}</span><input value={commissionValue} onChange={(e)=>setCommissionValue(e.target.value)} required /></div></label>
+            <div className="friendly-info"><UserCog size={16}/><span>Esta comisión pertenece al encargado asignado a la filial.</span></div>
             {message && <div className="success-message">{message}</div>}
             <div className="modal-actions"><button className="primary" disabled={saving}>{saving?"Guardando…":"Guardar cambios"}</button></div>
           </div>
@@ -1870,7 +1845,7 @@ function BranchDetailModal({
       </tbody></table></div></div>}
 
       {!loading && detail && tab==="closures" && <div className="branch-detail-table"><div className="table-wrap"><table className="admin-table"><thead><tr><th>Fecha</th><th>Resultado</th><th>Operaciones</th><th>Comisión</th><th>Diferencias</th><th>PDF</th></tr></thead><tbody>
-        {detail.closures.map((item)=><tr key={item.id}><td>{dateTime(item.closed_at)}</td><td><span className={`branch-status ${closureResult(item as Closure).cls}`}>{closureResult(item as Closure).label}</span></td><td>{item.operation_count ?? 0}</td><td><strong>{currency(item.commission_total)}</strong><br/><small>Enc. {currency(item.staff_share_total)} · Socio {currency(item.partner_share_total)}{pendingCommission(item as Closure)>0 ? ` · Pendiente ${currency(pendingCommission(item as Closure))}` : ""}</small></td><td><span className={Math.abs(Number(item.difference_cash))<0.005?"green-text":"red-text"}>Efectivo {currency(item.difference_cash)}</span><br/><span className={Math.abs(Number(item.difference_wallet))<0.005?"green-text":"red-text"}>Yape {currency(item.difference_wallet)}</span></td><td><button className="mini-button" onClick={()=>window.open(`/api/branches/${detail.branch.id}/closures/${item.id}/pdf`,"_blank")}><Download size={12}/> PDF</button></td></tr>)}
+        {detail.closures.map((item)=><tr key={item.id}><td>{dateTime(item.closed_at)}</td><td><span className={`branch-status ${closureResult(item as Closure).cls}`}>{closureResult(item as Closure).label}</span></td><td>{item.operation_count ?? 0}</td><td><strong>{currency(item.commission_total)}</strong><br/><small>Ganancia del encargado</small></td><td><span className={Math.abs(Number(item.difference_cash))<0.005?"green-text":"red-text"}>Efectivo {currency(item.difference_cash)}</span><br/><span className={Math.abs(Number(item.difference_wallet))<0.005?"green-text":"red-text"}>Yape {currency(item.difference_wallet)}</span></td><td><button className="mini-button" onClick={()=>window.open(`/api/branches/${detail.branch.id}/closures/${item.id}/pdf`,"_blank")}><Download size={12}/> PDF</button></td></tr>)}
         {!detail.closures.length && <tr><td colSpan={6} className="empty-cell">Todavía no hay cierres.</td></tr>}
       </tbody></table></div></div>}
     </div>
