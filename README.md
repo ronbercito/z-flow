@@ -54,7 +54,7 @@ Panel restringido de filial con:
 
 También incluye el primer formulario funcional de **Nueva operación**, conectado a MariaDB mediante la API.
 
-> La autenticación y el RBAC completo se implementarán en el siguiente bloque. La restricción definitiva siempre se hará también en backend, no solamente ocultando menús.
+> La autenticación, sesiones y permisos por rol/filial ya están implementados y se validan también en backend.
 
 ## Ramas
 
@@ -107,3 +107,52 @@ bash scripts/install-backup-cron.sh
 ```
 
 Los backups quedan en `/opt/z-flow/backups` con retención local predeterminada de 14 días.
+
+
+## Etapa 4 — Proxmox local
+
+La nube queda pospuesta hasta terminar las pruebas reales. La Etapa 4 consolida Z-FLOW para uso dentro del LXC de Proxmox.
+
+Incluye:
+
+- Configuración general del negocio, logo y datos de tickets.
+- Reglas centrales de comisión, límites y reparto.
+- Anulación controlada durante turno abierto y reverso de propietario.
+- Cambio de encargado sobre una caja abierta.
+- Asignación de socios por filial y distribución individual de su parte.
+- Permisos configurables por rol con aplicación real en backend.
+- Gestión de sesiones activas e IP en auditoría.
+- Health checks de MariaDB, API y Web.
+- Docker `restart: unless-stopped` y rotación de logs.
+- Zona horaria `America/Lima`.
+- Backup, restauración y prueba de restauración no destructiva.
+- Diagnóstico y actualización segura desde GitHub.
+
+### Preparar el LXC
+
+Después de actualizar:
+
+```bash
+cd /opt/z-flow
+bash scripts/install-local-production.sh
+```
+
+Diagnóstico:
+
+```bash
+bash scripts/diagnose.sh
+```
+
+Probar el último backup sin tocar la base productiva:
+
+```bash
+bash scripts/test-restore.sh
+```
+
+Actualizaciones posteriores:
+
+```bash
+bash scripts/update-local.sh
+```
+
+La siguiente fase es probar todo paso por paso en el entorno local antes de cualquier migración a nube.
