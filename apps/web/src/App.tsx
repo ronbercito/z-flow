@@ -599,8 +599,8 @@ function HomePage({
   return (
     <>
       {canWrite && <div className="quick-actions">
-        <button className="quick yape" onClick={() => onNewOperation("YAPE_TO_CASH")}><Smartphone size={20} /><div><strong>Yape → Efectivo</strong><span>Registrar recepción Yape</span></div><ChevronRight size={17} /></button>
-        <button className="quick cash" onClick={() => onNewOperation("CASH_TO_YAPE")}><Send size={20} /><div><strong>Efectivo → Yape</strong><span>Registrar envío Yape</span></div><ChevronRight size={17} /></button>
+        <button className="quick yape" onClick={() => onNewOperation("YAPE_TO_CASH")}><Smartphone size={20} /><div><strong>Yape → Efectivo</strong><span>Cliente paga por Yape; sube tu saldo Yape y entregas efectivo.</span></div><ChevronRight size={17} /></button>
+        <button className="quick cash" onClick={() => onNewOperation("CASH_TO_YAPE")}><Send size={20} /><div><strong>Efectivo → Yape</strong><span>Recibes efectivo y envías Yape; sube el efectivo y baja tu saldo Yape.</span></div><ChevronRight size={17} /></button>
       </div>}
 
       <div className="kpi-grid">
@@ -697,8 +697,8 @@ function OperationsPage({
   return (
     <>
       {canCreate && <div className="quick-actions">
-        <button className="quick yape" onClick={() => onNewOperation("YAPE_TO_CASH")}><Smartphone size={20} /><div><strong>Yape → Efectivo</strong><span>Cliente paga por Yape</span></div><Plus size={17} /></button>
-        <button className="quick cash" onClick={() => onNewOperation("CASH_TO_YAPE")}><Send size={20} /><div><strong>Efectivo → Yape</strong><span>Cliente entrega efectivo</span></div><Plus size={17} /></button>
+        <button className="quick yape" onClick={() => onNewOperation("YAPE_TO_CASH")}><Smartphone size={20} /><div><strong>Yape → Efectivo</strong><span>Cliente paga por Yape; sube tu saldo Yape y entregas efectivo.</span></div><Plus size={17} /></button>
+        <button className="quick cash" onClick={() => onNewOperation("CASH_TO_YAPE")}><Send size={20} /><div><strong>Efectivo → Yape</strong><span>Recibes efectivo y envías Yape; sube el efectivo y baja tu saldo Yape.</span></div><Plus size={17} /></button>
       </div>}
       <section className="card page-card">
         <div className="card-head">
@@ -1124,8 +1124,8 @@ function OperationModal({
         </div>
         <label>Tipo de operación</label>
         <div className="operation-types">
-          <button type="button" className={type === "YAPE_TO_CASH" ? "selected yape" : ""} onClick={() => setType("YAPE_TO_CASH")}><Smartphone size={19} /> Yape → Efectivo</button>
-          <button type="button" className={type === "CASH_TO_YAPE" ? "selected cash" : ""} onClick={() => setType("CASH_TO_YAPE")}><Send size={19} /> Efectivo → Yape</button>
+          <button type="button" className={type === "YAPE_TO_CASH" ? "selected yape" : ""} onClick={() => setType("YAPE_TO_CASH")}><Smartphone size={19} /><span className="operation-choice-copy"><strong>Yape → Efectivo</strong><small>El cliente paga por Yape; aumenta tu saldo Yape y entregas efectivo.</small></span></button>
+          <button type="button" className={type === "CASH_TO_YAPE" ? "selected cash" : ""} onClick={() => setType("CASH_TO_YAPE")}><Send size={19} /><span className="operation-choice-copy"><strong>Efectivo → Yape</strong><small>Recibes efectivo y envías Yape; aumenta el efectivo y baja tu saldo Yape.</small></span></button>
         </div>
         <div className="field-grid">
           <label>Monto
