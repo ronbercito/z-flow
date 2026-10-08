@@ -899,21 +899,112 @@ function UsersPage({ users, branches, onRefresh, onEdit }: { users: AdminUser[];
   );
 }
 
-function PartnersPage({ users }: { users: AdminUser[] }) {
+function PartnersPage({ users, branches }: { users: AdminUser[]; branches: Branch[] }) {
   const partners = users.filter((item) => item.role_code === "PARTNER");
+  const [assignments, setAssignments] = useState<PartnerAssignment[]>([]);
+  const [branchId, setBranchId] = useState(branches[0] ? String(branches[0].id) : "");
+  const [userId, setUserId] = useState(partners[0] ? String(partners[0].id) : "");
+  const [share, setShare] = useState("100");
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+
+  async function loadAssignments() {
+    try {
+      const data = await api<{ assignments: PartnerAssignment[] }>("/api/admin/partners/assignments");
+      setAssignments(data.assignments ?? []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudieron cargar las asignaciones");
+    }
+  }
+
+  useEffect(() => { void loadAssignments(); }, []);
+
+  useEffect(() => {
+    if (!branchId && branches[0]) setBranchId(String(branches[0].id));
+    if (!userId && partners[0]) setUserId(String(partners[0].id));
+  }, [branches.length, partners.length]);
+
+  async function saveAssignment(event: FormEvent) {
+    event.preventDefault();
+    setError(""); setMessage("");
+    try {
+      await api("/api/admin/partners/assignments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          branchId: Number(branchId),
+          userId: Number(userId),
+          poolSharePct: Number(share),
+          active: true
+        })
+      });
+      setMessage("Socio asignado a la filial.");
+      await loadAssignments();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo guardar la asignación");
+    }
+  }
+
+  async function disableAssignment(item: PartnerAssignment) {
+    try {
+      await api("/api/admin/partners/assignments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          branchId: item.branch_id,
+          userId: item.user_id,
+          poolSharePct: Number(item.pool_share_pct),
+          active: false
+        })
+      });
+      await loadAssignments();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo desactivar la asignación");
+    }
+  }
+
   return (
-    <section className="card page-card">
-      <div className="card-head"><div><strong>Socios</strong><span>{partners.length} usuarios con rol socio</span></div></div>
-      <div className="partner-grid">
-        {partners.map((item) => (
-          <div className="partner-card" key={item.id}>
-            <div className="avatar">{item.full_name.split(/\s+/).slice(0,2).map((x) => x[0]).join("")}</div>
-            <div><strong>{item.full_name}</strong><span>@{item.username}</span><small>{item.branch_name ?? "Acceso global de lectura"}</small></div>
+    <>
+      <div className="partner-stage4-grid">
+        <section className="card partner-assignment-card">
+          <div className="card-head"><div><strong>Asignar socio a filial</strong><span>El porcentaje distribuye la parte total de socios de esa filial.</span></div></div>
+          <form className="partner-assignment-form" onSubmit={saveAssignment}>
+            <label>Filial<select value={branchId} onChange={(e)=>setBranchId(e.target.value)} required>{branches.map((item)=><option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
+            <label>Socio<select value={userId} onChange={(e)=>setUserId(e.target.value)} required>{partners.map((item)=><option value={item.id} key={item.id}>{item.full_name}</option>)}</select></label>
+            <label>% del pool de socios<input type="number" min="0" max="100" step="0.01" value={share} onChange={(e)=>setShare(e.target.value)} required /></label>
+            <button className="primary" disabled={!partners.length || !branches.length}>Guardar asignación</button>
+            {error && <div className="modal-error">{error}</div>}
+            {message && <div className="success-message">{message}</div>}
+          </form>
+        </section>
+
+        <section className="card page-card partner-list-card">
+          <div className="card-head"><div><strong>Socios registrados</strong><span>{partners.length} usuarios con rol Socio</span></div></div>
+          <div className="partner-grid">
+            {partners.map((item) => (
+              <div className="partner-card" key={item.id}>
+                <div className="avatar">{item.full_name.split(/\s+/).slice(0,2).map((x) => x[0]).join("")}</div>
+                <div><strong>{item.full_name}</strong><span>@{item.username}</span><small>Acceso global de lectura</small></div>
+              </div>
+            ))}
+            {!partners.length && <div className="empty-state compact-empty"><Landmark size={28} /><strong>Aún no hay socios creados</strong><span>Usa “Nuevo usuario” y asigna el rol Socio.</span></div>}
           </div>
-        ))}
-        {!partners.length && <div className="empty-state compact-empty"><Landmark size={28} /><strong>Aún no hay socios creados</strong><span>Usa “Nuevo usuario” y asigna el rol Socio.</span></div>}
+        </section>
       </div>
-    </section>
+
+      <section className="card page-card">
+        <div className="card-head"><div><strong>Asignaciones por filial</strong><span>La suma activa por filial no puede superar 100%.</span></div></div>
+        <div className="table-wrap">
+          <table className="admin-table">
+            <thead><tr><th>Filial</th><th>Socio</th><th>Usuario</th><th>% pool socio</th><th>Estado</th><th>Acción</th></tr></thead>
+            <tbody>
+              {assignments.map((item)=><tr key={item.id}><td><strong>{item.branch_name}</strong></td><td>{item.full_name}</td><td>{item.username}</td><td>{Number(item.pool_share_pct).toFixed(2)}%</td><td><span className={item.active?"branch-status open":"branch-status closed"}>{item.active?"Activo":"Inactivo"}</span></td><td>{item.active?<button className="mini-button danger-mini" onClick={()=>void disableAssignment(item)}>Desactivar</button>:"—"}</td></tr>)}
+              {!assignments.length && <tr><td colSpan={6} className="empty-cell">Todavía no hay socios asignados a filiales.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </>
   );
 }
 
