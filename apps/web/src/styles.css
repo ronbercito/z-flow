@@ -115,6 +115,8 @@ tr:last-child td { border-bottom:0; }
 .status { display:inline-flex; align-items:center; gap:5px; font-size:8px; font-weight:700; }
 .status i { width:6px;height:6px;border-radius:50%;background:#f0a124; }
 .status.ok { color:#17804e; }.status.ok i{background:#23b26b}.status.pending{color:#aa7515}
+.status.cancelled { color:#c44747; }.status.cancelled i{background:#e05252}
+.status.reversed { color:#667085; }.status.reversed i{background:#98a2b3}
 
 .checklist { padding-bottom:14px; }
 .check-row { display:grid; grid-template-columns:24px 1fr; gap:9px; padding:10px 14px; align-items:start; }
