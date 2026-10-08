@@ -11,6 +11,7 @@ import {
   Percent,
   Scale,
   TrendingUp,
+  Upload,
   CheckCircle2,
   ChevronRight,
   CircleDollarSign,
@@ -1260,57 +1261,65 @@ function BackupPage() {
     <div className="backup-page">
       {error && <div className="error-banner">{error}</div>}
       {message && <div className="success-banner">{message}</div>}
-      <section className="card page-card">
-        <div className="card-head">
-          <div><strong>Crear copia de seguridad</strong><span>Guarda una copia completa de la base de datos en el servidor.</span></div>
-          <Database size={18}/>
-        </div>
-        <div className="settings-form-body">
-          <p>Las copias se comprimen en formato .sql.gz y se pueden descargar para guardarlas en otro equipo.</p>
-          <button className="primary" type="button" disabled={busy} onClick={()=>void createBackup()}>
-            <Database size={15}/> {busy ? "Procesando…" : "Crear copia ahora"}
-          </button>
-        </div>
-      </section>
 
-      <section className="card page-card">
-        <div className="card-head">
-          <div><strong>Subir copia para restaurar</strong><span>Solo se aceptan archivos .sql.gz de hasta 100 MB.</span></div>
-          <Download size={18}/>
-        </div>
-        <div className="settings-form-body backup-upload">
-          <input type="file" accept=".sql.gz,application/gzip" onChange={(event)=>setFile(event.target.files?.[0] ?? null)} />
-          <button className="soft" type="button" disabled={busy || !file} onClick={()=>void uploadBackup()}>Subir y validar copia</button>
-          <p>La copia subida no reemplaza los datos hasta que elijas Restaurar. La restauración exige cerrar todas las cajas abiertas y crea una copia previa automática.</p>
-        </div>
-      </section>
+      <div className="backup-grid">
+        <section className="card backup-card">
+          <div className="backup-card-heading">
+            <span className="backup-icon backup-icon-blue"><Database size={17}/></span>
+            <div><strong>Crear una copia</strong><span>Guarda el estado actual de toda la base de datos.</span></div>
+          </div>
+          <div className="backup-card-body">
+            <p>La copia queda en este servidor. Descárgala para guardar otra copia en tu equipo.</p>
+            <button className="primary" type="button" disabled={busy} onClick={()=>void createBackup()}>
+              <Database size={14}/> {busy ? "Procesando…" : "Crear copia"}
+            </button>
+          </div>
+        </section>
 
-      <section className="card page-card">
-        <div className="card-head">
-          <div><strong>Copias disponibles</strong><span>{backups.length} archivos guardados en este servidor.</span></div>
+        <section className="card backup-card">
+          <div className="backup-card-heading">
+            <span className="backup-icon backup-icon-purple"><Upload size={17}/></span>
+            <div><strong>Subir una copia</strong><span>Archivo .sql.gz, hasta 100 MB.</span></div>
+          </div>
+          <div className="backup-card-body">
+            <label className="backup-file-picker">
+              <Upload size={15}/>
+              <span>{file ? file.name : "Seleccionar archivo de copia"}</span>
+              <input type="file" accept=".sql.gz,application/gzip" onChange={(event)=>setFile(event.target.files?.[0] ?? null)} />
+            </label>
+            <button className="soft" type="button" disabled={busy || !file} onClick={()=>void uploadBackup()}>
+              {busy ? "Procesando…" : "Subir y validar"}
+            </button>
+            <p>Subir no cambia los datos. Luego podrás elegir Restaurar en la copia.</p>
+          </div>
+        </section>
+      </div>
+
+      <div className="backup-safety-note">
+        <ShieldCheck size={16}/>
+        <span>Antes de restaurar, cierra las cajas abiertas. El sistema crea una copia de seguridad automática.</span>
+      </div>
+
+      <section className="card backup-list-card">
+        <div className="backup-list-heading">
+          <div><strong>Copias guardadas</strong><span>{backups.length} {backups.length === 1 ? "copia disponible" : "copias disponibles"} en este servidor</span></div>
           <button className="soft" type="button" disabled={busy} onClick={()=>void load()}><RefreshCw size={14}/> Actualizar</button>
         </div>
-        <div className="table-wrap">
-          <table>
-            <thead><tr><th>Archivo</th><th>Fecha</th><th>Tamaño</th><th>Acciones</th></tr></thead>
-            <tbody>
-              {backups.map((item)=><tr key={item.filename}>
-                <td>{item.filename}</td>
-                <td>{dateTime(item.createdAt)}</td>
-                <td>{sizeLabel(item.size)}</td>
-                <td className="table-actions">
-                  <a className="mini-button" href={"/api/admin/backups/" + encodeURIComponent(item.filename) + "/download"}><Download size={14}/> Descargar</a>
-                  <button className="mini-button danger-mini" type="button" disabled={busy} onClick={()=>void restoreBackup(item)}>Restaurar</button>
-                </td>
-              </tr>)}
-              {!backups.length && <tr><td colSpan={4} className="empty-cell">Todavía no hay copias guardadas.</td></tr>}
-            </tbody>
-          </table>
-        </div>
+        {backups.length ? (
+          <div className="backup-list">
+            {backups.map((item)=><div className="backup-row" key={item.filename}>
+              <span className="backup-icon backup-icon-muted"><Database size={15}/></span>
+              <div className="backup-file-info"><strong title={item.filename}>{item.filename}</strong><span>{dateTime(item.createdAt)} · {sizeLabel(item.size)}</span></div>
+              <div className="backup-row-actions">
+                <a className="mini-button" href={"/api/admin/backups/" + encodeURIComponent(item.filename) + "/download"}><Download size={13}/> Descargar</a>
+                <button className="mini-button danger-mini" type="button" disabled={busy} onClick={()=>void restoreBackup(item)}>Restaurar</button>
+              </div>
+            </div>)}
+          </div>
+        ) : <div className="backup-empty"><Database size={20}/><strong>Aún no hay copias</strong><span>Crea una copia para verla aquí y poder descargarla o restaurarla.</span></div>}
       </section>
     </div>
   );
-}
 
 function SystemSettingsPage() {
   const [settings, setSettings] = useState<SystemSettings | null>(null);
