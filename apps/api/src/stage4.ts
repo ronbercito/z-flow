@@ -29,16 +29,8 @@ const settingsBody = z.object({
   defaultMaxOperationAmount: z.coerce.number().positive(),
   defaultCommissionType: z.enum(["FLAT", "PERCENT"]),
   defaultCommissionValue: z.coerce.number().positive(),
-  defaultStaffSharePct: z.coerce.number().min(0).max(100).nullable().optional(),
-  defaultPartnerSharePct: z.coerce.number().min(0).max(100).nullable().optional(),
   requireCashToYapeReference: z.boolean(),
   allowCashierCancel: z.boolean()
-}).superRefine((value, ctx) => {
-  if (value.defaultStaffSharePct != null && value.defaultPartnerSharePct != null) {
-    if (Math.abs(value.defaultStaffSharePct + value.defaultPartnerSharePct - 100) > 0.01) {
-      ctx.addIssue({ code: "custom", message: "El reparto encargado + socio debe sumar 100%" });
-    }
-  }
 });
 
 const reasonBody = z.object({
@@ -156,6 +148,58 @@ export async function ensureStage4Schema() {
     VALUES (1, 'Z-FLOW')
     ON DUPLICATE KEY UPDATE id = VALUES(id)
   `);
+
+  // Current operating model: one Cajero / Encargado per filial and 100% of
+  // the commission belongs to that account. Legacy partner data is kept for
+  // historical integrity but partner access/assignments are disabled.
+  await db.query(`
+    UPDATE system_settings
+    SET default_staff_share_pct=100, default_partner_share_pct=0
+    WHERE id=1
+  `);
+
+  await db.query(`
+    UPDATE branch_settings
+    SET staff_share_pct=100, partner_share_pct=0
+  `);
+
+  await db.query(`
+    UPDATE branch_partner_assignments
+    SET active=0
+    WHERE active=1
+  `).catch(() => undefined);
+
+  const [partnerUsers] = await db.query<any[]>(`
+    SELECT u.id
+    FROM users u
+    JOIN roles r ON r.id=u.role_id
+    WHERE r.code='PARTNER' AND u.active=1
+  `);
+  for (const user of partnerUsers) {
+    await db.execute("UPDATE users SET active=0 WHERE id=?", [user.id]);
+    await db.execute("UPDATE auth_sessions SET revoked_at=NOW() WHERE user_id=? AND revoked_at IS NULL", [user.id]);
+  }
+
+  const [duplicateCashiers] = await db.query<any[]>(`
+    SELECT u.branch_id, MIN(u.id) AS keep_id, COUNT(*) AS total
+    FROM users u
+    JOIN roles r ON r.id=u.role_id
+    WHERE r.code='CASHIER' AND u.active=1 AND u.branch_id IS NOT NULL
+    GROUP BY u.branch_id
+    HAVING COUNT(*)>1
+  `);
+  for (const row of duplicateCashiers) {
+    const [extraRows] = await db.query<any[]>(`
+      SELECT u.id
+      FROM users u
+      JOIN roles r ON r.id=u.role_id
+      WHERE u.branch_id=? AND r.code='CASHIER' AND u.active=1 AND u.id<>?
+    `, [row.branch_id, row.keep_id]);
+    for (const extra of extraRows) {
+      await db.execute("UPDATE users SET active=0 WHERE id=?", [extra.id]);
+      await db.execute("UPDATE auth_sessions SET revoked_at=NOW() WHERE user_id=? AND revoked_at IS NULL", [extra.id]);
+    }
+  }
 
   await db.query(`
     CREATE TABLE IF NOT EXISTS role_permissions (
@@ -294,8 +338,6 @@ export async function registerStage4Routes(app: FastifyInstance) {
       defaultMaxOperationAmount: money(row.default_max_operation_amount),
       defaultCommissionType: row.default_commission_type,
       defaultCommissionValue: money(row.default_commission_value),
-      defaultStaffSharePct: row.default_staff_share_pct == null ? null : Number(row.default_staff_share_pct),
-      defaultPartnerSharePct: row.default_partner_share_pct == null ? null : Number(row.default_partner_share_pct),
       requireCashToYapeReference: Boolean(row.require_cash_to_yape_reference),
       allowCashierCancel: Boolean(row.allow_cashier_cancel),
       updatedAt: row.updated_at
@@ -317,8 +359,8 @@ export async function registerStage4Routes(app: FastifyInstance) {
       SET business_name=?, legal_name=?, ruc=?, address=?, phone=?, logo_data_url=?,
           currency_code=?, timezone_name=?, ticket_footer=?, receipt_prefix=?,
           default_max_operation_amount=?, default_commission_type=?,
-          default_commission_value=?, default_staff_share_pct=?,
-          default_partner_share_pct=?, require_cash_to_yape_reference=?,
+          default_commission_value=?, default_staff_share_pct=100,
+          default_partner_share_pct=0, require_cash_to_yape_reference=?,
           allow_cashier_cancel=?
       WHERE id=1
     `, [
@@ -326,7 +368,6 @@ export async function registerStage4Routes(app: FastifyInstance) {
       s.logoDataUrl ?? null,
       s.currencyCode, s.timezoneName, s.ticketFooter ?? null, s.receiptPrefix.toUpperCase(),
       money(s.defaultMaxOperationAmount), s.defaultCommissionType, money(s.defaultCommissionValue),
-      s.defaultStaffSharePct ?? null, s.defaultPartnerSharePct ?? null,
       s.requireCashToYapeReference ? 1 : 0, s.allowCashierCancel ? 1 : 0
     ]);
 
@@ -348,13 +389,11 @@ export async function registerStage4Routes(app: FastifyInstance) {
     const [result] = await db.execute<any>(`
       UPDATE branch_settings
       SET max_operation_amount=?, commission_type=?, commission_value=?,
-          staff_share_pct=?, partner_share_pct=?
+          staff_share_pct=100, partner_share_pct=0
     `, [
       s.default_max_operation_amount,
       s.default_commission_type,
-      s.default_commission_value,
-      s.default_staff_share_pct,
-      s.default_partner_share_pct
+      s.default_commission_value
     ]);
 
     await audit(request, null, auth.userId, "DEFAULT_RULES_APPLIED_TO_BRANCHES", "SYSTEM", 1, {
