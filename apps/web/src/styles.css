@@ -2234,3 +2234,9 @@ tr:last-child td { border-bottom:0; }
 .report-branch-select:hover { background: #f7faff; }
 .report-branch-select.selected { background: #f2f7ff; }
 .report-branch-select:focus-visible { outline: 2px solid #6ea3ee; outline-offset: 2px; }
+
+.owner-report-bars.all-branch-comparison {
+  max-height: min(320px, 55vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
