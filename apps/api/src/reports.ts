@@ -1,6 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import ExcelJS from "exceljs";
 import PDFDocument from "pdfkit";
@@ -28,19 +27,6 @@ const closureParams = z.object({
   closureId: z.coerce.number().int().positive()
 });
 
-const factilizaConfigBody = z.object({
-  apiToken: z.string().trim().max(4096).optional().default(""),
-  baseUrl: z.string().trim().url().max(255),
-  series: z.string().trim().toUpperCase().min(4).max(10).regex(/^[A-Z0-9][A-Z0-9-]{3,9}$/),
-  rusActivityConfirmed: z.boolean()
-});
-
-const closureBoletaBody = z.object({
-  customerDocumentType: z.enum(["1", "6"]),
-  customerDocumentNumber: z.string().trim().regex(/^\d{8}$|^\d{11}$/),
-  customerName: z.string().trim().min(2).max(140),
-  customerAddress: z.string().trim().max(255).optional().default("")
-});
 
 type ReportFilters = z.infer<typeof reportQuery>;
 
@@ -321,45 +307,6 @@ function contentDisposition(filename: string) {
   return `attachment; filename="${filename}"`;
 }
 
-type ElectronicArtifactFormat = "pdf" | "xml";
-
-function factilizaEncryptionKey() {
-  const databaseSecret = process.env.DB_PASSWORD?.trim();
-  if (!databaseSecret) throw new Error("Falta DB_PASSWORD para proteger la credencial de Factiliza.");
-  return createHash("sha256").update("zflow:factiliza-token:v1:").update(databaseSecret).digest();
-}
-
-function encryptFactilizaToken(token: string) {
-  const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", factilizaEncryptionKey(), iv);
-  const encrypted = Buffer.concat([cipher.update(token, "utf8"), cipher.final()]);
-  return ["v1", iv.toString("base64"), cipher.getAuthTag().toString("base64"), encrypted.toString("base64")].join(":");
-}
-
-function decryptFactilizaToken(value: unknown): string | null {
-  if (typeof value !== "string" || !value.startsWith("v1:")) return null;
-  try {
-    const [, ivEncoded, tagEncoded, encryptedEncoded] = value.split(":");
-    const decipher = createDecipheriv("aes-256-gcm", factilizaEncryptionKey(), Buffer.from(ivEncoded, "base64"));
-    decipher.setAuthTag(Buffer.from(tagEncoded, "base64"));
-    return Buffer.concat([decipher.update(Buffer.from(encryptedEncoded, "base64")), decipher.final()]).toString("utf8");
-  } catch {
-    return null;
-  }
-}
-
-async function getFactilizaConfig() {
-  const [rows] = await db.query<any[]>("SELECT token_encrypted, base_url, series, rus_activity_confirmed FROM factiliza_integration_settings WHERE id=1 LIMIT 1");
-  const row = rows[0];
-  return {
-    token: decryptFactilizaToken(row?.token_encrypted) || process.env.FACTILIZA_API_TOKEN?.trim() || "",
-    baseUrl: String(row?.base_url || process.env.FACTILIZA_API_BASE_URL || "https://apife-qa.factiliza.com/api/v1").replace(/\/$/, ""),
-    series: String(row?.series || process.env.FACTILIZA_BOLETA_SERIES || "").trim().toUpperCase(),
-    rusActivityConfirmed: row ? Boolean(Number(row.rus_activity_confirmed)) : process.env.FACTILIZA_RUS_ACTIVITY_CONFIRMED === "true",
-    savedInPanel: Boolean(row)
-  };
-}
-
 function electronicDocumentPaths(branchId: number, closureId: number, series: string, correlativo: number | string) {
   const safeSeries = series.toUpperCase().replace(/[^A-Z0-9_-]/g, "") || "BOLETA";
   const number = String(correlativo).padStart(6, "0");
@@ -377,58 +324,6 @@ function electronicDocumentPaths(branchId: number, closureId: number, series: st
     xml: join(folder, `${stem}.xml`),
     cdr: join(folder, `${stem}.cdr.zip`)
   };
-}
-
-function isExpectedArtifact(data: Buffer, format: ElectronicArtifactFormat) {
-  if (format === "pdf") return data.subarray(0, 5).toString("ascii") === "%PDF-";
-  return data.toString("utf8").replace(/^\uFEFF/, "").trimStart().startsWith("<");
-}
-
-function extractBase64Artifact(value: unknown, format: ElectronicArtifactFormat): Buffer | null {
-  const candidates: string[] = [];
-  const visit = (item: unknown, key = "") => {
-    if (typeof item === "string" && /(base64|content|archivo|documento|pdf|xml|data)/i.test(key)) candidates.push(item);
-    else if (item && typeof item === "object") {
-      for (const [childKey, child] of Object.entries(item as Record<string, unknown>)) visit(child, childKey);
-    }
-  };
-  visit(value);
-  for (const candidate of candidates) {
-    const encoded = candidate.replace(/^data:[^;]+;base64,/i, "").trim();
-    if (!encoded || encoded.length % 4 === 1) continue;
-    const decoded = Buffer.from(encoded, "base64");
-    if (isExpectedArtifact(decoded, format)) return decoded;
-  }
-  return null;
-}
-
-async function fetchAndStoreFactilizaArtifact(
-  baseUrl: string,
-  token: string,
-  issuerRuc: string,
-  branchId: number,
-  closureId: number,
-  series: string,
-  correlativo: number | string,
-  format: ElectronicArtifactFormat
-) {
-  const paths = electronicDocumentPaths(branchId, closureId, series, correlativo);
-  await mkdir(paths.folder, { recursive: true });
-  const response = await fetch(`${baseUrl}/invoice/${format}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ empresa_Ruc: issuerRuc, tipo_Doc: "03", serie: series, correlativo: String(correlativo) }),
-    signal: AbortSignal.timeout(30000)
-  });
-  if (!response.ok) return false;
-  const data = Buffer.from(await response.arrayBuffer());
-  let artifact = isExpectedArtifact(data, format) ? data : null;
-  if (!artifact) {
-    try { artifact = extractBase64Artifact(JSON.parse(data.toString("utf8")), format); } catch { artifact = null; }
-  }
-  if (!artifact) return false;
-  await writeFile(paths[format], artifact);
-  return true;
 }
 
 async function storedElectronicFiles(branchId: number, closureId: number, series: string, correlativo: number | string) {
@@ -466,64 +361,8 @@ export async function registerReportRoutes(app: FastifyInstance) {
       KEY idx_factiliza_branch (branch_id, created_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS factiliza_document_sequences (
-      series VARCHAR(20) NOT NULL,
-      next_number BIGINT UNSIGNED NOT NULL DEFAULT 1,
-      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      PRIMARY KEY (series)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-  `);
-
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS factiliza_integration_settings (
-      id TINYINT UNSIGNED NOT NULL DEFAULT 1,
-      token_encrypted TEXT NULL,
-      base_url VARCHAR(255) NOT NULL,
-      series VARCHAR(20) NOT NULL,
-      rus_activity_confirmed TINYINT(1) NOT NULL DEFAULT 0,
-      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      PRIMARY KEY (id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-  `);
-
-  app.get("/api/admin/factiliza/status", async (request, reply) => {
-    const auth = await requireOwner(request, reply);
-    if (!auth) return;
-    const [settings] = await db.query<any[]>("SELECT ruc FROM system_settings WHERE id=1 LIMIT 1");
-    const config = await getFactilizaConfig();
-    const endpointMode = /qa|prueba|sandbox/i.test(config.baseUrl) ? "PRUEBAS" : "PRODUCCIÓN";
-    return {
-      provider: "Factiliza", documentType: "BOLETA", endpointMode,
-      baseUrl: config.baseUrl, series: config.series,
-      hasToken: Boolean(config.token),
-      hasRuc: Boolean(String(settings[0]?.ruc ?? "").trim()),
-      hasSeries: Boolean(config.series),
-      rusActivityConfirmed: config.rusActivityConfirmed, savedInPanel: config.savedInPanel
-    };
-  });
-
-  app.put("/api/admin/factiliza/config", async (request, reply) => {
-    const auth = await requireOwner(request, reply);
-    if (!auth) return;
-    const parsed = factilizaConfigBody.safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send({ error: "Revisa la URL, la serie y la confirmación del régimen." });
-    let url: URL;
-    try { url = new URL(parsed.data.baseUrl); } catch { return reply.code(400).send({ error: "La URL base no es válida." }); }
-    if (url.protocol !== "https:" || !(url.hostname === "factiliza.com" || url.hostname.endsWith(".factiliza.com"))) {
-      return reply.code(400).send({ error: "Usa una URL HTTPS del dominio oficial de Factiliza." });
-    }
-    const token = parsed.data.apiToken.trim();
-    const encrypted = token ? encryptFactilizaToken(token) : null;
-    await db.execute(
-      `INSERT INTO factiliza_integration_settings (id, token_encrypted, base_url, series, rus_activity_confirmed)
-       VALUES (1, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE token_encrypted=IF(VALUES(token_encrypted) IS NULL, token_encrypted, VALUES(token_encrypted)),
-         base_url=VALUES(base_url), series=VALUES(series), rus_activity_confirmed=VALUES(rus_activity_confirmed)`,
-      [encrypted, url.toString().replace(/\/$/, ""), parsed.data.series, parsed.data.rusActivityConfirmed ? 1 : 0]
-    );
-    return { ok: true };
-  });
+  await db.query("DROP TABLE IF EXISTS factiliza_integration_settings");
+  await db.query("DROP TABLE IF EXISTS factiliza_document_sequences");
 
   app.get("/api/branches/:branchId/closures/:closureId/electronic-document", async (request, reply) => {
     const parsed = closureParams.safeParse(request.params);
@@ -544,215 +383,6 @@ export async function registerReportRoutes(app: FastifyInstance) {
       ? await storedElectronicFiles(parsed.data.branchId, parsed.data.closureId, document.series, document.correlativo)
       : null;
     return { document: document ? { ...document, storedFiles } : null };
-  });
-
-  app.post("/api/branches/:branchId/closures/:closureId/electronic-document", async (request, reply) => {
-    const parsedParams = closureParams.safeParse(request.params);
-    const parsedBody = closureBoletaBody.safeParse(request.body);
-    if (!parsedParams.success || !parsedBody.success) return reply.code(400).send({ error: "Datos de boleta inválidos" });
-
-    const auth = await requireOwner(request, reply);
-    if (!auth) return;
-    if (!canReadBranch(auth, parsedParams.data.branchId)) return reply.code(403).send({ error: "Acceso denegado" });
-
-    const config = await getFactilizaConfig();
-    const { token, baseUrl, series } = config;
-    const [settingsRows] = await db.query<any[]>(
-      "SELECT ruc FROM system_settings WHERE id=1 LIMIT 1"
-    );
-    const issuerRuc = String(settingsRows[0]?.ruc ?? "").replace(/\D/g, "");
-    if (!token || !series || issuerRuc.length !== 11) {
-      return reply.code(503).send({ error: "Completa el token, la serie de boleta y el RUC emisor en la configuración segura del servidor." });
-    }
-    if (!config.rusActivityConfirmed) {
-      return reply.code(409).send({ error: "Confirma con tu contador que la actividad registrada del emisor es compatible con el Nuevo RUS antes de emitir." });
-    }
-
-    const customer = parsedBody.data;
-    if (
-      (customer.customerDocumentType === "1" && customer.customerDocumentNumber.length !== 8)
-      || (customer.customerDocumentType === "6" && customer.customerDocumentNumber.length !== 11)
-    ) return reply.code(422).send({ error: "El número no coincide con el tipo de documento elegido." });
-
-    const connection = await db.getConnection();
-    let documentId = 0;
-    let correlativo = 0;
-    let amount = 0;
-    try {
-      await connection.beginTransaction();
-      const [closureRows] = await connection.execute<any[]>(
-        `SELECT dc.id, dc.commission_total, dc.branch_id,
-                DATE_FORMAT(dc.closed_at, '%d/%m/%Y') AS closed_date, b.name AS branch_name
-         FROM daily_closures dc JOIN branches b ON b.id=dc.branch_id
-         WHERE dc.id=? AND dc.branch_id=? LIMIT 1 FOR UPDATE`,
-        [parsedParams.data.closureId, parsedParams.data.branchId]
-      );
-      if (!closureRows.length) {
-        await connection.rollback();
-        return reply.code(404).send({ error: "Cierre no encontrado." });
-      }
-      const closure = closureRows[0];
-      amount = money(closure.commission_total);
-      if (amount <= 0) {
-        await connection.rollback();
-        return reply.code(422).send({ error: "Este cierre no tiene comisión para emitir una boleta." });
-      }
-
-      const [existingRows] = await connection.execute<any[]>(
-        "SELECT id, status, provider_document_id FROM factiliza_documents WHERE closure_id=? LIMIT 1 FOR UPDATE",
-        [parsedParams.data.closureId]
-      );
-      if (existingRows.length) {
-        await connection.rollback();
-        return reply.code(409).send({
-          error: "Ya existe un intento de emisión para este cierre. No se volverá a enviar para evitar duplicados.",
-          document: existingRows[0]
-        });
-      }
-
-      await connection.execute(
-        "INSERT IGNORE INTO factiliza_document_sequences (series, next_number) VALUES (?, 1)",
-        [series]
-      );
-      const [sequenceRows] = await connection.execute<any[]>(
-        "SELECT next_number FROM factiliza_document_sequences WHERE series=? FOR UPDATE",
-        [series]
-      );
-      correlativo = Number(sequenceRows[0]?.next_number ?? 1);
-      await connection.execute(
-        "UPDATE factiliza_document_sequences SET next_number=? WHERE series=?",
-        [correlativo + 1, series]
-      );
-
-      const [insertResult] = await connection.execute<any>(
-        `INSERT INTO factiliza_documents
-         (branch_id, closure_id, series, correlativo, customer_document_type,
-          customer_document_number, customer_name, customer_address, amount,
-          status, created_by_user_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)`,
-        [
-          parsedParams.data.branchId, parsedParams.data.closureId, series, correlativo,
-          customer.customerDocumentType, customer.customerDocumentNumber,
-          customer.customerName, customer.customerAddress || null, amount, auth.userId
-        ]
-      );
-      documentId = Number(insertResult.insertId);
-      await connection.commit();
-    } catch (error: any) {
-      await connection.rollback();
-      if (error?.code === "ER_DUP_ENTRY") {
-        return reply.code(409).send({ error: "Este cierre ya tiene un comprobante asociado." });
-      }
-      throw error;
-    } finally {
-      connection.release();
-    }
-
-    const now = new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString().replace("Z", "-05:00");
-    const number = String(correlativo).padStart(6, "0");
-    const invoicePayload = {
-      tipo_Operacion: "0101",
-      tipo_Doc: "03",
-      serie: series,
-      correlativo: String(correlativo),
-      tipo_Moneda: "PEN",
-      fecha_Emision: now,
-      empresa_Ruc: issuerRuc,
-      cliente_Tipo_Doc: customer.customerDocumentType,
-      cliente_Num_Doc: customer.customerDocumentNumber,
-      cliente_Razon_Social: customer.customerName,
-      cliente_Direccion: customer.customerAddress || "",
-      monto_Igv: 0,
-      total_Impuestos: 0,
-      valor_Venta: amount,
-      monto_Oper_Gravadas: 0,
-      monto_Oper_Exoneradas: amount,
-      sub_Total: amount,
-      monto_Imp_Venta: amount,
-      estado_Documento: "0",
-      manual: false,
-      id_Base_Dato: `zflow-closure-${parsedParams.data.branchId}-${parsedParams.data.closureId}`,
-      detalle: [{
-        unidad: "NIU",
-        cantidad: 1,
-        cod_Producto: "COMISION_CIERRE",
-        descripcion: "Comisión generada por las operaciones del turno del " + closure.closed_date + ", filial " + closure.branch_name + " · cierre #" + parsedParams.data.closureId,
-        monto_Valor_Unitario: amount,
-        monto_Base_Igv: amount,
-        porcentaje_Igv: 0,
-        igv: 0,
-        tip_Afe_Igv: "20",
-        total_Impuestos: 0,
-        monto_Precio_Unitario: amount,
-        monto_Valor_Venta: amount,
-        factor_Icbper: 0
-      }],
-      forma_pago: [{ tipo: "Contado", monto: amount, cuota: 0, fecha_Pago: now }],
-      legend: [{ legend_Code: "1000", legend_Value: `SON ${amount.toFixed(2)} SOLES` }]
-    };
-
-    try {
-      const response = await fetch(`${baseUrl}/invoice/send`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify(invoicePayload),
-        signal: AbortSignal.timeout(30000)
-      });
-      const result: any = await response.json().catch(() => ({}));
-      const cdr = result?.data?.sunatResponse?.cdrResponse ?? {};
-      const accepted = response.ok && result?.success === true && String(cdr.code) === "0";
-      const status = accepted ? "ACCEPTED" : "REJECTED";
-      const providerMessage = String(cdr.description ?? result?.message ?? "Factiliza no aceptó la boleta.").slice(0, 500);
-      await db.execute(
-        `UPDATE factiliza_documents SET status=?, provider_document_id=?, provider_code=?, provider_message=?
-         WHERE id=?`,
-        [status, cdr.id ?? null, cdr.code == null ? null : String(cdr.code), providerMessage, documentId]
-      );
-      if (!accepted) {
-        return reply.code(response.ok ? 422 : 502).send({ error: providerMessage, document: { id: documentId, status, series, correlativo: number } });
-      }
-
-      const paths = electronicDocumentPaths(parsedParams.data.branchId, parsedParams.data.closureId, series, correlativo);
-      let cdrSaved = false;
-      try {
-        await mkdir(paths.folder, { recursive: true });
-        const cdrZip = result?.data?.cdrZip;
-        if (typeof cdrZip === "string" && cdrZip.trim()) {
-          const encoded = cdrZip.replace(/^data:application\/zip;base64,/i, "").trim();
-          const cdrBuffer = Buffer.from(encoded, "base64");
-          if (cdrBuffer.length) {
-            await writeFile(paths.cdr, cdrBuffer);
-            cdrSaved = true;
-          }
-        }
-      } catch {
-        cdrSaved = false;
-      }
-      const [pdfSaved, xmlSaved] = await Promise.all([
-        fetchAndStoreFactilizaArtifact(baseUrl, token, issuerRuc, parsedParams.data.branchId, parsedParams.data.closureId, series, correlativo, "pdf").catch(() => false),
-        fetchAndStoreFactilizaArtifact(baseUrl, token, issuerRuc, parsedParams.data.branchId, parsedParams.data.closureId, series, correlativo, "xml").catch(() => false)
-      ]);
-      const storedFiles = await storedElectronicFiles(parsedParams.data.branchId, parsedParams.data.closureId, series, correlativo);
-      return reply.code(201).send({
-        document: {
-          id: documentId,
-          status,
-          series,
-          correlativo: number,
-          provider_document_id: cdr.id ?? `${series}-${number}`,
-          provider_code: String(cdr.code),
-          provider_message: providerMessage,
-          storedFiles: { ...storedFiles, pdf: pdfSaved || storedFiles.pdf, xml: xmlSaved || storedFiles.xml, cdr: cdrSaved || storedFiles.cdr }
-        }
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "No se recibió respuesta de Factiliza.";
-      await db.execute(
-        "UPDATE factiliza_documents SET status='UNKNOWN', provider_message=? WHERE id=?",
-        [`Estado incierto; no reintentar sin consultar a Factiliza. ${message}`.slice(0, 500), documentId]
-      );
-      return reply.code(502).send({ error: "La respuesta de Factiliza no llegó. El intento quedó bloqueado para evitar una boleta duplicada; consulta su estado antes de actuar." });
-    }
   });
 
   app.get("/api/branches/:branchId/closures/:closureId/electronic-document/:format", async (request, reply) => {
@@ -776,20 +406,7 @@ export async function registerReportRoutes(app: FastifyInstance) {
     let data: Buffer | null = null;
     try { data = await readFile(filePath); } catch { data = null; }
 
-    if (!data) {
-      if (parsed.data.format === "cdr") return reply.code(404).send({ error: "No se encontró el CDR archivado para esta boleta." });
-      const config = await getFactilizaConfig();
-      const token = config.token;
-      if (!token) return reply.code(503).send({ error: "La copia local no está disponible y Factiliza no está configurada en el servidor." });
-      const [settingsRows] = await db.query<any[]>("SELECT ruc FROM system_settings WHERE id=1 LIMIT 1");
-      const issuerRuc = String(settingsRows[0]?.ruc ?? "").replace(/[^0-9]/g, "");
-      const baseUrl = config.baseUrl;
-      const saved = await fetchAndStoreFactilizaArtifact(
-        baseUrl, token, issuerRuc, parsed.data.branchId, parsed.data.closureId, series, correlativo, parsed.data.format
-      ).catch(() => false);
-      if (!saved) return reply.code(502).send({ error: "Factiliza no pudo recuperar el archivo " + parsed.data.format.toUpperCase() + "." });
-      data = await readFile(filePath);
-    }
+    if (!data) return reply.code(404).send({ error: "No se encontró la copia electrónica archivada en el servidor." });
 
     const extension = parsed.data.format === "cdr" ? "cdr.zip" : parsed.data.format;
     const filename = "boleta-" + series + "-" + String(correlativo).padStart(6, "0") + "." + extension;
