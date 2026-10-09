@@ -426,7 +426,7 @@ const nav: Array<{ page: AdminPage; label: string; icon: typeof Home }> = [
   { page: "profile", label: "Mi perfil", icon: UserRound }
 ];
 
-const UI_BUILD = "E4.5-20261008";
+const UI_BUILD = "E4.6-20261008";
 
 function currency(value: number | string | null | undefined) {
   return new Intl.NumberFormat("es-PE", {
