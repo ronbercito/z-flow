@@ -1021,7 +1021,7 @@ function CashAdminPage({ branches, closures }: { branches: Branch[]; closures: C
                       <td><div className="closure-actions">
                         <button className="mini-button" aria-expanded={open} onClick={() => void toggleClosure(item)}><ChevronDown size={12} className={open ? "closure-chevron open" : "closure-chevron"}/>{open ? "Ocultar" : "Detalle"}</button>
                         <button className="mini-button" onClick={() => window.open(`/api/branches/${item.branch_id}/closures/${item.id}/pdf`, "_blank")}><Download size={12}/> PDF</button>
-                        <button className="mini-button closure-invoice-button" title="La emisión se activará al completar la configuración de Factiliza" onClick={() => setInvoiceClosure(item)}><ReceiptText size={12}/> Boleta / factura</button>
+                        <button className="mini-button closure-invoice-button" title="La emisión se activará al completar la configuración de Factiliza" onClick={() => setInvoiceClosure(item)}><ReceiptText size={12}/> Boleta electrónica</button>
                       </div></td>
                     </tr>
                     {open && <tr className="closure-detail-row"><td colSpan={8}>
@@ -1058,16 +1058,94 @@ function CashAdminPage({ branches, closures }: { branches: Branch[]; closures: C
         </section>
       </>}
 
-      {invoiceClosure && <div className="modal-backdrop" role="presentation" onClick={() => setInvoiceClosure(null)}>
-        <section className="modal closure-invoice-modal" role="dialog" aria-modal="true" aria-labelledby="closure-invoice-title" onClick={(event) => event.stopPropagation()}>
-          <div className="modal-head"><div><h2 id="closure-invoice-title">Comprobante del cierre #{invoiceClosure.id}</h2><p>{invoiceClosure.branch_name} · {dateTime(invoiceClosure.closed_at)}</p></div><button className="icon-btn" onClick={() => setInvoiceClosure(null)} aria-label="Cerrar"><X size={18}/></button></div>
-          <div className="invoice-setup-notice"><ReceiptText size={18}/><div><strong>Factiliza todavía no está conectada</strong><span>El botón ya está ubicado junto al PDF. La emisión se habilitará al definir el importe, los datos del cliente y configurar las credenciales seguras de Factiliza.</span></div></div>
-          <div className="invoice-closure-summary"><span>Comisión del cierre<strong>{currency(invoiceClosure.commission_total)}</strong></span><span>Monto operado<strong>{currency((closureDetails[invoiceClosure.id]?.operations ?? []).reduce((total, op) => total + Number(op.amount), 0))}</strong></span></div>
-          <div className="modal-actions"><button className="soft" onClick={() => setInvoiceClosure(null)}>Entendido</button></div>
-        </section>
-      </div>}
+      {invoiceClosure && <ClosureBillingModal closure={invoiceClosure} onClose={() => setInvoiceClosure(null)} />}
+      
     </>
   );
+}
+
+function ClosureBillingModal({ closure, onClose }: { closure: Closure; onClose: () => void }) {
+  const [config, setConfig] = useState<{hasToken:boolean;hasRuc:boolean;hasSeries:boolean;rusActivityConfirmed:boolean;endpointMode:string} | null>(null);
+  const [document, setDocument] = useState<any>(null);
+  const [customerDocumentType, setCustomerDocumentType] = useState<"1"|"6">("1");
+  const [customerDocumentNumber, setCustomerDocumentNumber] = useState("");
+  const [customerName, setCustomerName] = useState("");
+  const [customerAddress, setCustomerAddress] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const [statusResult, documentResult] = await Promise.all([
+          api<{hasToken:boolean;hasRuc:boolean;hasSeries:boolean;rusActivityConfirmed:boolean;endpointMode:string}>("/api/admin/factiliza/status"),
+          api<{document:any}>(`/api/branches/${closure.branch_id}/closures/${closure.id}/electronic-document`)
+        ]);
+        setConfig(statusResult);
+        setDocument(documentResult.document);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "No se pudo revisar la configuración de Factiliza.");
+      }
+    })();
+  }, [closure.id, closure.branch_id]);
+
+  const ready = Boolean(config?.hasToken && config?.hasRuc && config?.hasSeries && config?.rusActivityConfirmed);
+  const expectedDocLength = customerDocumentType === "1" ? 8 : 11;
+
+  async function issue(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setLoading(true);
+    try {
+      const result = await api<{document:any}>(`/api/branches/${closure.branch_id}/closures/${closure.id}/electronic-document`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ customerDocumentType, customerDocumentNumber, customerName, customerAddress })
+      });
+      setDocument(result.document);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo emitir la boleta.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const configItems = [
+    ["Token Factiliza", config?.hasToken],
+    ["RUC emisor", config?.hasRuc],
+    ["Serie boleta", config?.hasSeries],
+    ["Actividad RUS confirmada", config?.rusActivityConfirmed]
+  ] as const;
+
+  return <div className="modal-backdrop" role="presentation" onClick={onClose}>
+    <section className="modal closure-invoice-modal" role="dialog" aria-modal="true" aria-labelledby="closure-invoice-title" onClick={(event) => event.stopPropagation()}>
+      <div className="modal-head"><div><h2 id="closure-invoice-title">Boleta electrónica · cierre #{closure.id}</h2><p>{closure.branch_name} · {dateTime(closure.closed_at)}</p></div><button className="icon-btn" onClick={onClose} aria-label="Cerrar"><X size={18}/></button></div>
+      <div className="invoice-closure-summary"><span>Comisión del cierre<strong>{currency(closure.commission_total)}</strong></span><span>Régimen<strong>Nuevo RUS · solo boleta</strong></span></div>
+      {document?.status === "ACCEPTED" ? <>
+        <div className="invoice-success-notice"><CheckCircle2 size={18}/><div><strong>Boleta aceptada por Factiliza</strong><span>{document.provider_document_id || `${document.series}-${String(document.correlativo).padStart(6,"0")}`} · {document.provider_message}</span></div></div>
+        <div className="invoice-download-actions">
+          <button className="soft" onClick={() => window.open(`/api/branches/${closure.branch_id}/closures/${closure.id}/electronic-document/pdf`, "_blank")}><Download size={14}/> Descargar PDF</button>
+          <button className="soft" onClick={() => window.open(`/api/branches/${closure.branch_id}/closures/${closure.id}/electronic-document/xml`, "_blank")}><Download size={14}/> Descargar XML</button>
+        </div>
+      </> : document ? <div className={`invoice-setup-notice ${document.status === "REJECTED" ? "error" : ""}`}><ReceiptText size={18}/><div><strong>{document.status === "UNKNOWN" ? "Estado por confirmar" : document.status === "REJECTED" ? "Factiliza rechazó la boleta" : "Emisión iniciada"}</strong><span>{document.provider_message || "El intento quedó registrado para evitar una emisión duplicada."}</span></div></div> : <>
+        <div className="invoice-setup-notice"><ShieldCheck size={18}/><div><strong>Revisa el cliente antes de emitir</strong><span>Se enviará a Factiliza/SUNAT una boleta por la comisión total del cierre. Una vez emitida, no se puede borrar desde este panel.</span></div></div>
+        {config && !ready && <div className="billing-config-checklist">
+          <strong>Falta completar la configuración del servidor</strong>
+          {configItems.map(([label, ok]) => <span key={label} className={ok ? "ready" : "missing"}>{ok ? "✓" : "•"} {label}</span>)}
+          <small>El token se guarda como secreto del servidor; no lo ingreses en esta pantalla.</small>
+        </div>}
+        <form className="billing-customer-form" onSubmit={issue}>
+          <label><span>Documento del cliente</span><select value={customerDocumentType} onChange={(event) => { setCustomerDocumentType(event.target.value as "1"|"6"); setCustomerDocumentNumber(""); }}><option value="1">DNI</option><option value="6">RUC</option></select></label>
+          <label><span>Número de documento</span><input required inputMode="numeric" maxLength={expectedDocLength} minLength={expectedDocLength} value={customerDocumentNumber} onChange={(event) => setCustomerDocumentNumber(event.target.value.replace(/\\D/g,"").slice(0,expectedDocLength))}/></label>
+          <label className="full"><span>Nombre o razón social</span><input required maxLength={140} value={customerName} onChange={(event) => setCustomerName(event.target.value)}/></label>
+          <label className="full"><span>Dirección <small>Opcional</small></span><input maxLength={255} value={customerAddress} onChange={(event) => setCustomerAddress(event.target.value)}/></label>
+          {error && <div className="billing-form-error full">{error}</div>}
+          <div className="modal-actions full"><button type="button" className="soft" onClick={onClose}>Cancelar</button><button className="primary" disabled={!ready || loading || Boolean(document)}>{loading ? "Enviando a Factiliza…" : "Emitir boleta"}</button></div>
+        </form>
+      </>}
+      {config?.endpointMode === "PRUEBAS" && <div className="billing-sandbox-label">Entorno Factiliza de pruebas</div>}
+    </section>
+  </div>;
 }
 
 function UsersPage({ users, branches, onDetail }: { users: AdminUser[]; branches: Branch[]; onDetail: (userId: number) => void }) {
