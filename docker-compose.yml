@@ -37,6 +37,10 @@ services:
       ZFLOW_BACKUP_DIR: /backups
       SESSION_HOURS: ${SESSION_HOURS:-12}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      FACTILIZA_API_TOKEN: ${FACTILIZA_API_TOKEN:-}
+      FACTILIZA_API_BASE_URL: ${FACTILIZA_API_BASE_URL:-https://apife-qa.factiliza.com/api/v1}
+      FACTILIZA_BOLETA_SERIES: ${FACTILIZA_BOLETA_SERIES:-}
+      FACTILIZA_RUS_ACTIVITY_CONFIRMED: ${FACTILIZA_RUS_ACTIVITY_CONFIRMED:-false}
     volumes:
       - ./backups:/backups
     depends_on:
