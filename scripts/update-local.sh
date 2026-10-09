@@ -22,6 +22,12 @@ git fetch origin develop
 git checkout develop
 git pull --ff-only origin develop
 
+echo "Retirando credenciales antiguas de Factiliza"
+unset FACTILIZA_API_TOKEN FACTILIZA_API_BASE_URL FACTILIZA_BOLETA_SERIES FACTILIZA_RUS_ACTIVITY_CONFIRMED
+if [ -f .env ]; then
+  sed -i -E '/^[[:space:]]*(export[[:space:]]+)?FACTILIZA_[A-Z0-9_]+[[:space:]]*=/d' .env
+fi
+
 echo "3) Construyendo contenedores"
 docker compose build
 
