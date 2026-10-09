@@ -1,4 +1,4 @@
-import { FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
+import { FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import OwnerApp from "./OwnerApp";
 import {
   BadgeDollarSign,
@@ -28,7 +28,7 @@ import {
   X
 } from "lucide-react";
 
-type Page = "home" | "operations" | "cash" | "close" | "receipts" | "reports" | "profile" | "help";
+type Page = "home" | "operations" | "cash" | "close" | "receipts" | "reports" | "business" | "profile" | "help";
 
 type Operation = {
   id: number;
@@ -107,7 +107,49 @@ type BranchFinancialReport = {
     yapeToCashCount: number;
     cashToYapeCount: number;
   };
+  operations: Array<{
+    id: number;
+    operation_type: "YAPE_TO_CASH" | "CASH_TO_YAPE";
+    reference_code: string | null;
+    customer_name: string | null;
+    amount: number;
+    commission: number;
+    net_amount: number;
+    created_at: string;
+    series?: string | null;
+    sequence_number?: number | null;
+  }>;
 };
+
+type BranchBusiness = {
+  businessName: string;
+  legalName: string | null;
+  ruc: string | null;
+  address: string | null;
+  phone: string | null;
+  logoDataUrl: string | null;
+  ticketFooter: string | null;
+  receiptPrefix: string;
+  updatedAt?: string;
+};
+
+type ClosureHistoryRow = {
+  id: number;
+  branch_id: number;
+  operation_count: number;
+  commission_total: number;
+  expected_cash: number;
+  declared_cash: number;
+  expected_wallet: number;
+  declared_wallet: number;
+  difference_cash: number;
+  difference_wallet: number;
+  notes: string | null;
+  closed_at: string;
+  closed_by: string | null;
+};
+
+type ClosureDetail = { closure: ClosureHistoryRow & { branch_name: string; cash_session_id: number }; operations: Operation[] };
 
 type ClosurePreview = {
   sessionId: number;
@@ -136,6 +178,7 @@ const sidebar: Array<{ page: Page; label: string; icon: typeof Home }> = [
   { page: "close", label: "Cierre diario", icon: ClipboardCheck },
   { page: "receipts", label: "Comprobantes", icon: FileText },
   { page: "reports", label: "Reportes", icon: BarChart3 },
+  { page: "business", label: "Mi Negocio", icon: Building2 },
   { page: "profile", label: "Mi perfil", icon: UserRound },
   { page: "help", label: "Ayuda", icon: CircleHelp }
 ];
@@ -179,6 +222,7 @@ function App() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [businessName, setBusinessName] = useState("Z-FLOW");
+  const branchBrandingRequest = useRef(0);
   const [page, setPage] = useState<Page>("home");
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -256,12 +300,13 @@ function App() {
 
   useEffect(() => {
     void checkAuth();
+    const identityRequestAtStart = branchBrandingRequest.current;
     const loadBranding = async () => {
       try {
         const response = await fetch("/api/branding", { credentials: "same-origin" });
         if (!response.ok) return;
         const result = await response.json();
-        if (typeof result.businessName === "string" && result.businessName.trim()) setBusinessName(result.businessName.trim());
+        if (branchBrandingRequest.current === identityRequestAtStart && typeof result.businessName === "string" && result.businessName.trim()) setBusinessName(result.businessName.trim());
       } catch { /* Keep the default label if branding is temporarily unavailable. */ }
     };
     const refreshBranding = () => { void loadBranding(); };
@@ -274,6 +319,18 @@ function App() {
 
   useEffect(() => {
     if (authUser && authUser.role.code !== "OWNER" && branchId) void load();
+  }, [authUser?.id, authUser?.role.code, branchId]);
+
+  useEffect(() => {
+    if (!authUser || authUser.role.code === "OWNER" || !branchId) return;
+    let active = true;
+    branchBrandingRequest.current += 1;
+    void fetch(`/api/branches/${branchId}/business`, { credentials: "same-origin" })
+      .then(async (response) => {
+        const result = await response.json();
+        if (response.ok && active && typeof result.businessName === "string") setBusinessName(result.businessName);
+      }).catch(() => undefined);
+    return () => { active = false; };
   }, [authUser?.id, authUser?.role.code, branchId]);
 
   const hourlyData = useMemo(() => {
@@ -330,6 +387,7 @@ function App() {
     close: ["Cierre diario", "Compara lo esperado contra lo declarado y cierra el turno"],
     receipts: ["Comprobantes", "Consulta los comprobantes internos de las operaciones"],
     reports: ["Reportes", "Resumen de actividad y comisiones de la filial"],
+    business: ["Mi Negocio", "Identidad y datos visibles en los documentos de esta filial"],
     profile: ["Mi perfil", "Datos del usuario y filial asignada"],
     help: ["Ayuda", "Guía rápida para operar el sistema"]
   };
@@ -484,6 +542,8 @@ function App() {
           {page === "receipts" && <ReceiptsPage branchId={branchId} operations={operations} onReceipt={setReceipt} />}
 
           {page === "reports" && <ReportsPage branchId={branchId} dashboard={dashboard} />}
+
+          {page === "business" && <BranchBusinessPage branchId={branchId} canWrite={canWrite} onSaved={(name) => setBusinessName(name)} />}
 
           {page === "profile" && <ProfilePage dashboard={dashboard} user={authUser} />}
 
@@ -774,7 +834,39 @@ function CashPage({
 
 function ClosePage({ branchId, dashboard, onClose, onOpen }: { branchId: number; dashboard: Dashboard | null; onClose: () => void; onOpen: () => void }) {
   const [preview, setPreview] = useState<ClosurePreview | null>(null);
+  const [closures, setClosures] = useState<ClosureHistoryRow[]>([]);
+  const [selectedDetail, setSelectedDetail] = useState<number | null>(null);
+  const [detail, setDetail] = useState<ClosureDetail | null>(null);
+  const [historyError, setHistoryError] = useState("");
   const [error, setError] = useState("");
+
+  async function loadHistory() {
+    try {
+      setHistoryError("");
+      const response = await fetch(`/api/branches/${branchId}/closures`, { credentials: "same-origin" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "No se pudo consultar el historial");
+      setClosures(result.closures ?? []);
+    } catch (err) {
+      setHistoryError(err instanceof Error ? err.message : "No se pudo consultar el historial");
+    }
+  }
+
+  async function showDetail(closureId: number) {
+    if (selectedDetail === closureId) { setSelectedDetail(null); setDetail(null); return; }
+    setSelectedDetail(closureId);
+    setDetail(null);
+    try {
+      const response = await fetch(`/api/branches/${branchId}/closures/${closureId}/detail`, { credentials: "same-origin" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "No se pudo cargar el cierre");
+      setDetail(result);
+    } catch (err) {
+      setHistoryError(err instanceof Error ? err.message : "No se pudo cargar el cierre");
+    }
+  }
+
+  useEffect(() => { void loadHistory(); }, [branchId, dashboard?.session?.id]);
 
   useEffect(() => {
     if (!dashboard?.session) {
@@ -794,19 +886,9 @@ function ClosePage({ branchId, dashboard, onClose, onOpen }: { branchId: number;
     })();
   }, [branchId, dashboard?.session?.id]);
 
-  if (!dashboard?.session) {
-    return (
-      <section className="card empty-page">
-        <ClipboardCheck size={34} />
-        <h2>No hay un turno abierto</h2>
-        <p>Primero debes abrir caja para poder realizar un cierre diario.</p>
-        <button className="primary" onClick={onOpen}>Abrir caja</button>
-      </section>
-    );
-  }
-
   return (
-    <div className="detail-grid">
+    <div className="branch-close-page">
+      {dashboard?.session ? <div className="detail-grid">
       <section className="card large-panel">
         <div className="panel-title"><ClipboardCheck size={22} /><div><h2>Resumen para cierre</h2><p>Conciliación calculada sobre el turno abierto</p></div></div>
         {error && <div className="modal-error">{error}</div>}
@@ -834,6 +916,41 @@ function ClosePage({ branchId, dashboard, onClose, onOpen }: { branchId: number;
         <h3>Finalizar turno</h3>
         <p>Cuenta el efectivo y confirma el saldo de Yape antes de continuar.</p>
         <button className="soft danger full" onClick={onClose} disabled={!preview}><LockKeyhole size={17} /> Iniciar cierre</button>
+      </section>
+      </div> : <section className="card empty-page branch-no-open-session">
+        <ClipboardCheck size={30} /><h2>No hay un turno abierto</h2>
+        <p>Puedes revisar los cierres anteriores de esta filial o abrir una caja nueva.</p>
+        <button className="primary" onClick={onOpen}>Abrir caja</button>
+      </section>}
+
+      <section className="card page-card branch-closure-history">
+        <div className="card-head"><div><strong>Historial de cierres</strong><span>{closures.length} cierres de {dashboard?.branch.name ?? "esta filial"}</span></div></div>
+        {historyError && <div className="error-banner">{historyError}</div>}
+        <div className="table-wrap"><table className="data-table"><thead><tr>
+          <th>Fecha</th><th>Responsable</th><th>Resultado</th><th>Operaciones</th><th>Comisión</th><th>Diferencias</th><th>Acciones</th>
+        </tr></thead><tbody>
+          {closures.map((row) => {
+            const balanced = Math.abs(Number(row.difference_cash)) < 0.005 && Math.abs(Number(row.difference_wallet)) < 0.005;
+            return <tr key={row.id}>
+              <td>{formatDate(row.closed_at)}</td><td>{row.closed_by ?? "—"}</td>
+              <td><span className={`status-pill ${balanced ? "ok" : "cancelled"}`}>{balanced ? "Cuadra" : "Con diferencia"}</span></td>
+              <td>{row.operation_count}</td><td>{currency(row.commission_total)}</td>
+              <td><span className={Number(row.difference_cash) < 0 ? "negative-text" : "positive-text"}>Efectivo {currency(row.difference_cash)}</span><br/><span className={Number(row.difference_wallet) < 0 ? "negative-text" : "positive-text"}>Yape {currency(row.difference_wallet)}</span></td>
+              <td className="closure-row-actions"><button className="mini-button" onClick={() => void showDetail(row.id)}><ChevronRight size={13}/>{selectedDetail === row.id ? "Ocultar" : "Detalle"}</button><button className="mini-button" onClick={() => window.open(`/api/branches/${branchId}/closures/${row.id}/pdf`, "_blank")}><Download size={12}/> PDF</button></td>
+            </tr>;
+          })}
+          {!closures.length && <tr><td colSpan={7} className="empty-cell">Todavía no hay cierres registrados para esta filial.</td></tr>}
+        </tbody></table></div>
+        {selectedDetail && <div className="closure-detail-panel">
+          {!detail ? <div className="owner-loading">Cargando detalle del cierre…</div> : <>
+            <div className="closure-detail-heading"><div><strong>Detalle del cierre #{detail.closure.id}</strong><span>{formatDate(detail.closure.closed_at)} · {detail.operations.length} operaciones</span></div><strong>Comisión {currency(detail.closure.commission_total)}</strong></div>
+            <div className="table-wrap"><table className="data-table"><thead><tr><th>Fecha / hora</th><th>Operación / referencia</th><th>Cliente</th><th>Entrada</th><th>Entregado</th><th>Comisión</th><th>Estado / comprobante</th></tr></thead><tbody>
+              {detail.operations.map((op) => <tr key={op.id}><td>{formatDate(op.created_at)}</td><td>{op.operation_type === "YAPE_TO_CASH" ? "Yape → Efectivo" : "Efectivo → Yape"}<br/><small>{op.reference_code ?? `Op. ${op.id}`}</small></td><td>{op.customer_name ?? "—"}</td><td>{currency(op.amount)}</td><td>{currency(op.net_amount)}</td><td>{currency(op.commission)}</td><td>{operationStatusLabel(op.status)}{op.receipt_series && op.receipt_number ? <><br/><small>{op.receipt_series}-{String(op.receipt_number).padStart(6,"0")}</small></> : null}</td></tr>)}
+              {!detail.operations.length && <tr><td colSpan={7} className="empty-cell">Este cierre no contiene operaciones.</td></tr>}
+            </tbody></table></div>
+            {detail.closure.notes && <p className="closure-notes"><strong>Observación:</strong> {detail.closure.notes}</p>}
+          </>}
+        </div>}
       </section>
     </div>
   );
@@ -877,6 +994,7 @@ function ReportsPage({ branchId, dashboard }: { branchId: number; dashboard: Das
   const [from, setFrom] = useState(localToday.slice(0,8) + "01");
   const [to, setTo] = useState(localToday);
   const [report, setReport] = useState<BranchFinancialReport | null>(null);
+  const [period, setPeriodSelection] = useState<"day" | "week" | "month" | "custom">("month");
   const [error, setError] = useState("");
 
   function qs() {
@@ -902,13 +1020,25 @@ function ReportsPage({ branchId, dashboard }: { branchId: number; dashboard: Das
 
   const summary = report?.summary;
 
+  function setPeriod(period: "day" | "week" | "month") {
+    setPeriodSelection(period);
+    const end = new Date();
+    const start = new Date(end);
+    if (period === "day") start.setHours(0, 0, 0, 0);
+    if (period === "week") { start.setDate(end.getDate() - ((end.getDay() + 6) % 7)); start.setHours(0, 0, 0, 0); }
+    if (period === "month") start.setDate(1);
+    const dateValue = (value: Date) => new Date(value.getTime() - value.getTimezoneOffset() * 60000).toISOString().slice(0,10);
+    setFrom(dateValue(start)); setTo(dateValue(end));
+  }
+
   return (
     <>
       <section className="card report-toolbar branch-report-toolbar">
         <div className="report-toolbar-title"><BarChart3 size={19}/><div><strong>Reporte de filial</strong><span>Selecciona el periodo y exporta PDF o Excel.</span></div></div>
         <div className="admin-filters admin-filters-wide">
-          <label className="date-filter"><span>Desde</span><input type="date" value={from} onChange={(e)=>setFrom(e.target.value)} /></label>
-          <label className="date-filter"><span>Hasta</span><input type="date" value={to} onChange={(e)=>setTo(e.target.value)} /></label>
+          <div className="report-period-buttons"><button className={period === "day" ? "active" : ""} onClick={()=>setPeriod("day")}>Día</button><button className={period === "week" ? "active" : ""} onClick={()=>setPeriod("week")}>Semana</button><button className={period === "month" ? "active" : ""} onClick={()=>setPeriod("month")}>Mes</button></div>
+          <label className="date-filter"><span>Desde</span><input type="date" value={from} onChange={(e)=>{setFrom(e.target.value);setPeriodSelection("custom");}} /></label>
+          <label className="date-filter"><span>Hasta</span><input type="date" value={to} onChange={(e)=>{setTo(e.target.value);setPeriodSelection("custom");}} /></label>
           <button className="soft export-button" onClick={()=>window.open(`/api/branches/${branchId}/reports/export.pdf?${qs()}`,"_blank")}><Download size={14}/> PDF</button>
           <button className="primary export-button" onClick={()=>window.open(`/api/branches/${branchId}/reports/export.xlsx?${qs()}`,"_blank")}><Download size={14}/> Excel</button>
         </div>
@@ -923,8 +1053,73 @@ function ReportsPage({ branchId, dashboard }: { branchId: number; dashboard: Das
         <Kpi icon={<WalletCards />} tone="blue" label="Caja actual" value={currency(dashboard?.metrics.cashCurrent)} hint="Turno actual" />
       </div>
 
+      <section className="card page-card branch-daily-report">
+        <div className="card-head"><div><strong>Registro de operaciones</strong><span>{dashboard?.branch.name ?? "Esta filial"} · {from} a {to}</span></div><span>{report?.operations.length ?? 0} operaciones</span></div>
+        {error && <div className="error-banner">{error}</div>}
+        <div className="table-wrap"><table className="data-table"><thead><tr><th>Fecha / hora</th><th>N.º operación / referencia</th><th>Concepto / cliente</th><th>Entrada según operación (S/)</th><th>Entrega según operación (S/)</th><th>Comisión / ingreso real (S/)</th><th>N.º comprobante interno</th></tr></thead><tbody>
+          {(report?.operations ?? []).map((op) => <tr key={op.id}>
+            <td>{formatDate(op.created_at)}</td><td>Op. {op.id}<br/><small>Ref. {op.reference_code ?? "—"}</small></td>
+            <td><span className={`operation-type ${op.operation_type === "YAPE_TO_CASH" ? "yape-cash" : "cash-yape"}`}>{op.operation_type === "YAPE_TO_CASH" ? "Yape → Efectivo" : "Efectivo → Yape"}</span><br/><small>{op.customer_name ?? "Sin nombre"}</small></td>
+            <td>{currency(op.amount)}</td><td>{currency(op.net_amount)}</td><td>{currency(op.commission)}</td><td>{op.series && op.sequence_number ? `${op.series}-${String(op.sequence_number).padStart(6,"0")}` : `ZF-${String(op.id).padStart(6,"0")}`}</td>
+          </tr>)}
+          {!report?.operations.length && <tr><td colSpan={7} className="empty-cell">No hay operaciones completadas en este periodo.</td></tr>}
+        </tbody><tfoot><tr><th colSpan={3}>Total del periodo</th><th>{currency(summary?.amountTotal)}</th><th>—</th><th>{currency(summary?.commissionTotal)}</th><th>{summary?.operationCount ?? 0} operaciones</th></tr></tfoot></table></div>
+      </section>
+
     </>
   );
+}
+
+function BranchBusinessPage({ branchId, canWrite, onSaved }: { branchId: number; canWrite: boolean; onSaved: (name: string) => void }) {
+  const blank: BranchBusiness = { businessName: "", legalName: "", ruc: "", address: "", phone: "", logoDataUrl: null, ticketFooter: "", receiptPrefix: "ZF" };
+  const [form, setForm] = useState<BranchBusiness>(blank);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  useEffect(() => {
+    let active = true;
+    void fetch(`/api/branches/${branchId}/business`, { credentials: "same-origin" }).then(async (response) => {
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "No se pudo cargar la identidad de la filial");
+      if (active) setForm({ ...blank, ...result });
+    }).catch((err) => { if (active) setError(err instanceof Error ? err.message : "No se pudo cargar la configuración"); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [branchId]);
+
+  async function save(event: FormEvent) {
+    event.preventDefault(); setSaving(true); setError(""); setMessage("");
+    try {
+      const response = await fetch(`/api/branches/${branchId}/business`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin", body: JSON.stringify(form) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "No se pudo guardar");
+      onSaved(form.businessName); setMessage("Los datos de esta filial se guardaron correctamente.");
+    } catch (err) { setError(err instanceof Error ? err.message : "No se pudo guardar"); }
+    finally { setSaving(false); }
+  }
+
+  async function chooseLogo(file?: File) {
+    if (!file) return;
+    if (!/^image\/(png|jpeg|webp)$/.test(file.type) || file.size > 2_000_000) { setError("El logo debe ser PNG, JPG o WEBP y pesar como máximo 2 MB."); return; }
+    const reader = new FileReader();
+    reader.onload = () => setForm((current) => ({ ...current, logoDataUrl: String(reader.result) }));
+    reader.readAsDataURL(file);
+  }
+
+  if (loading) return <div className="owner-loading">Cargando identidad de filial…</div>;
+  const textField = (key: "businessName" | "legalName" | "ruc" | "phone" | "address" | "receiptPrefix" | "ticketFooter", label: string, placeholder = "") => <label className={key === "address" || key === "ticketFooter" ? "wide" : ""} key={key}>{label}<input value={form[key] ?? ""} placeholder={placeholder} disabled={!canWrite} onChange={(event) => setForm((current) => ({ ...current, [key]: event.target.value }))}/></label>;
+  return <form className="card branch-business-card" onSubmit={(event) => void save(event)}>
+    <div className="card-head"><div><strong>Identidad del negocio</strong><span>Datos que aparecerán en los comprobantes internos de esta filial.</span></div><Building2 size={19}/></div>
+    <div className="branch-business-form">
+      {textField("businessName", "Nombre comercial", "Nombre que verán tus clientes")}{textField("legalName", "Razón social", "Opcional")}
+      {textField("ruc", "RUC", "Opcional")}{textField("phone", "Teléfono", "Opcional")}
+      <label className="wide">Logo del negocio<div className="logo-upload-row"><div className="business-logo-preview">{form.logoDataUrl ? <img src={form.logoDataUrl} alt="Logo del negocio"/> : <Building2 size={22}/>}</div><div><input type="file" accept="image/png,image/jpeg,image/webp" disabled={!canWrite} onChange={(event) => void chooseLogo(event.target.files?.[0])}/>{form.logoDataUrl && canWrite && <button type="button" className="mini-button" onClick={() => setForm((current) => ({ ...current, logoDataUrl: null }))}>Quitar logo</button>}</div></div></label>
+      {textField("address", "Dirección", "Dirección de la filial")}{textField("receiptPrefix", "Prefijo de comprobante", "ZF")}{textField("ticketFooter", "Pie del comprobante", "Mensaje opcional")}
+    </div>
+    {error && <div className="error-banner">{error}</div>}{message && <div className="success-banner">{message}</div>}
+    <div className="branch-business-footer">{form.updatedAt && <span>Última modificación: {formatDate(form.updatedAt)}</span>}{canWrite && <button className="primary" disabled={saving || !form.businessName.trim()}>{saving ? "Guardando…" : "Guardar cambios"}</button>}</div>
+  </form>;
 }
 
 function ProfilePage({ dashboard, user }: { dashboard: Dashboard | null; user: AuthUser }) {

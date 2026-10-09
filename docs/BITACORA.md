@@ -5,6 +5,17 @@
 **Rama activa:** `develop`  
 **Estado:** producción local en Proxmox, pruebas reales en curso.
 
+## 09/10/2026 — Espacio independiente por filial
+
+- Se agregó el modelo de identidad comercial por filial: nombre, razón social, RUC, teléfono, logo, dirección, prefijo y pie del comprobante.
+- Se agregaron las rutas de lectura/edición de identidad con autorización de filial y registro en auditoría. Las filiales existentes se inicializan desde sus datos de sucursal.
+- El panel de encargado incorpora «Mi Negocio», con edición de la identidad de su propia filial.
+- Los reportes de filial permiten elegir día, semana, mes o rango manual y muestran el registro de operaciones del periodo.
+- La pantalla de cierres de filial conserva el resumen del turno abierto y agrega el historial de esa filial, detalle de operaciones y PDF.
+- Las rutas de listado y detalle de cierres continúan comprobando acceso a la filial en la API. El nombre comercial y los datos de documentos internos ahora pueden salir de la identidad de la filial.
+- No se actualizó el panel desplegado. La compilación no pudo ejecutarse en este entorno porque no hay `npm` y las dependencias locales no están instaladas; `git diff --check` no reportó problemas de formato.
+- Próximo paso: validar el build en CI y probar con dos usuarios de filiales distintas que reportes, identidad, historial, detalle y PDF respeten el aislamiento antes de actualizar el LXC.
+
 ---
 
 ## Objetivo del sistema
