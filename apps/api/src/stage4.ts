@@ -1,0 +1,645 @@
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { z } from "zod";
+import { db } from "./db.js";
+import { canWriteBranch, requireAuth } from "./auth.js";
+
+const branchParams = z.object({ branchId: z.coerce.number().int().positive() });
+const operationParams = z.object({
+  branchId: z.coerce.number().int().positive(),
+  operationId: z.coerce.number().int().positive()
+});
+const adminOperationParams = z.object({ operationId: z.coerce.number().int().positive() });
+const sessionParams = z.object({ sessionId: z.coerce.number().int().positive() });
+const userParams = z.object({ userId: z.coerce.number().int().positive() });
+
+const settingsBody = z.object({
+  businessName: z.string().trim().min(2).max(140),
+  legalName: z.string().trim().max(180).nullable().optional(),
+  ruc: z.string().trim().max(20).nullable().optional(),
+  address: z.string().trim().max(255).nullable().optional(),
+  phone: z.string().trim().max(40).nullable().optional(),
+  logoDataUrl: z.string().max(3000000).refine(
+    (value) => /^data:image\/(png|jpeg);base64,/.test(value),
+    "El logo debe ser PNG o JPG"
+  ).nullable().optional(),
+  currencyCode: z.string().trim().min(3).max(8).default("PEN"),
+  timezoneName: z.string().trim().min(3).max(80).default("America/Lima"),
+  ticketFooter: z.string().trim().max(255).nullable().optional(),
+  receiptPrefix: z.string().trim().min(1).max(12).regex(/^[A-Za-z0-9_-]+$/).default("ZF"),
+  defaultMaxOperationAmount: z.coerce.number().positive(),
+  defaultCommissionType: z.enum(["FLAT", "PERCENT"]),
+  defaultCommissionValue: z.coerce.number().positive(),
+  requireCashToYapeReference: z.boolean(),
+  allowCashierCancel: z.boolean()
+});
+
+const reasonBody = z.object({
+  reason: z.string().trim().min(5).max(255)
+});
+
+const rolePermissionBody = z.object({
+  permissions: z.array(z.enum([
+    "GLOBAL_READ","GLOBAL_WRITE","BRANCH_READ","BRANCH_WRITE",
+    "USER_ADMIN","BRANCH_USER_ADMIN","AUDIT_READ","CANCEL_OPERATION"
+  ])).max(8)
+});
+
+const roleCodeParams = z.object({
+  roleCode: z.literal("CASHIER")
+});
+
+async function requireOwner(request: FastifyRequest, reply: FastifyReply) {
+  const auth = await requireAuth(request, reply);
+  if (!auth) return null;
+  if (auth.roleCode !== "OWNER") {
+    reply.code(403).send({ error: "Esta función requiere acceso de propietario" });
+    return null;
+  }
+  return auth;
+}
+
+function money(value: unknown) {
+  const n = Number(value ?? 0);
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+
+async function audit(
+  request: FastifyRequest,
+  branchId: number | null,
+  userId: number | null,
+  action: string,
+  entityType: string,
+  entityId: number | null,
+  details: Record<string, unknown> = {}
+) {
+  await db.execute(
+    `INSERT INTO audit_logs
+      (branch_id, user_id, action, entity_type, entity_id, details, ip_address, user_agent)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      branchId,
+      userId,
+      action,
+      entityType,
+      entityId,
+      JSON.stringify(details),
+      request.ip,
+      String(request.headers["user-agent"] ?? "").slice(0, 255)
+    ]
+  );
+}
+
+export async function ensureStage4Schema() {
+  await db.query(`
+    ALTER TABLE audit_logs
+      ADD COLUMN IF NOT EXISTS ip_address VARCHAR(64) NULL AFTER details,
+      ADD COLUMN IF NOT EXISTS user_agent VARCHAR(255) NULL AFTER ip_address
+  `);
+
+  await db.query(`
+    ALTER TABLE daily_closures
+      ADD COLUMN IF NOT EXISTS closed_by_user_id BIGINT UNSIGNED NULL AFTER cash_session_id
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS system_settings (
+      id TINYINT UNSIGNED NOT NULL DEFAULT 1,
+      business_name VARCHAR(140) NOT NULL DEFAULT 'Z-FLOW',
+      legal_name VARCHAR(180) NULL,
+      ruc VARCHAR(20) NULL,
+      address VARCHAR(255) NULL,
+      phone VARCHAR(40) NULL,
+      currency_code VARCHAR(8) NOT NULL DEFAULT 'PEN',
+      timezone_name VARCHAR(80) NOT NULL DEFAULT 'America/Lima',
+      ticket_footer VARCHAR(255) NULL,
+      receipt_prefix VARCHAR(12) NOT NULL DEFAULT 'ZF',
+      default_max_operation_amount DECIMAL(14,2) NOT NULL DEFAULT 50.00,
+      default_commission_type ENUM('FLAT','PERCENT') NOT NULL DEFAULT 'FLAT',
+      default_commission_value DECIMAL(14,2) NOT NULL DEFAULT 1.00,
+      default_staff_share_pct DECIMAL(5,2) NOT NULL DEFAULT 100.00,
+      default_partner_share_pct DECIMAL(5,2) NOT NULL DEFAULT 0.00,
+      require_cash_to_yape_reference TINYINT(1) NOT NULL DEFAULT 0,
+      allow_cashier_cancel TINYINT(1) NOT NULL DEFAULT 1,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      CONSTRAINT chk_system_settings_singleton CHECK (id = 1)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  await db.query(`
+    ALTER TABLE system_settings
+      ADD COLUMN IF NOT EXISTS logo_data_url LONGTEXT NULL AFTER phone
+  `);
+
+  await db.query(`
+    INSERT INTO system_settings (id, business_name)
+    VALUES (1, 'Z-FLOW')
+    ON DUPLICATE KEY UPDATE id = VALUES(id)
+  `);
+
+  // Current operating model: one Cajero / Encargado per filial and 100% of
+  // the commission belongs to that account. Legacy partner data is kept for
+  // historical integrity but partner access/assignments are disabled.
+  await db.query(`
+    UPDATE system_settings
+    SET default_staff_share_pct=100, default_partner_share_pct=0
+    WHERE id=1
+  `);
+
+  await db.query(`
+    UPDATE branch_settings
+    SET staff_share_pct=100, partner_share_pct=0
+  `);
+
+  await db.query(`
+    UPDATE operations
+    SET staff_share_amount=commission, partner_share_amount=0
+    WHERE staff_share_amount<>commission OR partner_share_amount<>0
+  `);
+
+  await db.query(`
+    UPDATE daily_closures
+    SET staff_share_total=commission_total, partner_share_total=0
+    WHERE staff_share_total<>commission_total OR partner_share_total<>0
+  `);
+
+  await db.query(`
+    UPDATE branch_partner_assignments
+    SET active=0
+    WHERE active=1
+  `).catch(() => undefined);
+
+  const [partnerUsers] = await db.query<any[]>(`
+    SELECT u.id
+    FROM users u
+    JOIN roles r ON r.id=u.role_id
+    WHERE r.code='PARTNER' AND u.active=1
+  `);
+  for (const user of partnerUsers) {
+    await db.execute("UPDATE users SET active=0 WHERE id=?", [user.id]);
+    await db.execute("UPDATE auth_sessions SET revoked_at=NOW() WHERE user_id=? AND revoked_at IS NULL", [user.id]);
+  }
+
+  const [duplicateCashiers] = await db.query<any[]>(`
+    SELECT u.branch_id, MIN(u.id) AS keep_id, COUNT(*) AS total
+    FROM users u
+    JOIN roles r ON r.id=u.role_id
+    WHERE r.code='CASHIER' AND u.active=1 AND u.branch_id IS NOT NULL
+    GROUP BY u.branch_id
+    HAVING COUNT(*)>1
+  `);
+  for (const row of duplicateCashiers) {
+    const [openRows] = await db.query<any[]>(`
+      SELECT cs.user_id
+      FROM cash_sessions cs
+      JOIN users u ON u.id=cs.user_id
+      JOIN roles r ON r.id=u.role_id
+      WHERE cs.branch_id=? AND cs.status='OPEN'
+        AND u.active=1 AND r.code='CASHIER'
+      ORDER BY cs.started_at DESC
+      LIMIT 1
+    `, [row.branch_id]);
+    const keepId = Number(openRows[0]?.user_id ?? row.keep_id);
+
+    const [extraRows] = await db.query<any[]>(`
+      SELECT u.id
+      FROM users u
+      JOIN roles r ON r.id=u.role_id
+      WHERE u.branch_id=? AND r.code='CASHIER' AND u.active=1 AND u.id<>?
+    `, [row.branch_id, keepId]);
+    for (const extra of extraRows) {
+      await db.execute("UPDATE users SET active=0 WHERE id=?", [extra.id]);
+      await db.execute("UPDATE auth_sessions SET revoked_at=NOW() WHERE user_id=? AND revoked_at IS NULL", [extra.id]);
+    }
+  }
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS role_permissions (
+      role_id BIGINT UNSIGNED NOT NULL,
+      permission_code VARCHAR(60) NOT NULL,
+      enabled TINYINT(1) NOT NULL DEFAULT 1,
+      PRIMARY KEY (role_id, permission_code),
+      CONSTRAINT fk_role_permissions_role FOREIGN KEY (role_id) REFERENCES roles(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  const allPermissionCodes = [
+    "GLOBAL_READ","GLOBAL_WRITE","BRANCH_READ","BRANCH_WRITE",
+    "USER_ADMIN","BRANCH_USER_ADMIN","AUDIT_READ","CANCEL_OPERATION"
+  ];
+  const defaultPermissions: Record<string, string[]> = {
+    OWNER: allPermissionCodes,
+    PARTNER: ["GLOBAL_READ","BRANCH_READ"],
+    BRANCH_ADMIN: ["BRANCH_READ","BRANCH_WRITE","BRANCH_USER_ADMIN","CANCEL_OPERATION"],
+    CASHIER: ["BRANCH_READ","BRANCH_WRITE","CANCEL_OPERATION"],
+    AUDITOR: ["GLOBAL_READ","BRANCH_READ","AUDIT_READ"]
+  };
+
+  for (const [roleCode, enabledDefaults] of Object.entries(defaultPermissions)) {
+    const [roleRows] = await db.query<any[]>("SELECT id FROM roles WHERE code=? LIMIT 1", [roleCode]);
+    if (!roleRows.length) continue;
+    for (const permission of allPermissionCodes) {
+      await db.execute(
+        `INSERT INTO role_permissions (role_id,permission_code,enabled)
+         VALUES (?,?,?)
+         ON DUPLICATE KEY UPDATE permission_code=VALUES(permission_code)`,
+        [roleRows[0].id, permission, enabledDefaults.includes(permission) ? 1 : 0]
+      );
+    }
+  }
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS operation_events (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      operation_id BIGINT UNSIGNED NOT NULL,
+      branch_id BIGINT UNSIGNED NOT NULL,
+      user_id BIGINT UNSIGNED NULL,
+      action ENUM('CANCEL','REVERSE') NOT NULL,
+      reason VARCHAR(255) NOT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      KEY idx_operation_events_operation (operation_id),
+      KEY idx_operation_events_branch (branch_id, created_at),
+      CONSTRAINT fk_operation_events_operation FOREIGN KEY (operation_id) REFERENCES operations(id),
+      CONSTRAINT fk_operation_events_branch FOREIGN KEY (branch_id) REFERENCES branches(id),
+      CONSTRAINT fk_operation_events_user FOREIGN KEY (user_id) REFERENCES users(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+
+
+
+
+
+}
+
+export async function registerStage4Routes(app: FastifyInstance) {
+  app.get("/api/admin/system/settings", async (request, reply) => {
+    const auth = await requireOwner(request, reply);
+    if (!auth) return;
+
+    const [rows] = await db.query<any[]>(`
+      SELECT business_name, legal_name, ruc, address, phone, logo_data_url, currency_code,
+             timezone_name, ticket_footer, receipt_prefix,
+             default_max_operation_amount, default_commission_type,
+             default_commission_value, default_staff_share_pct,
+             default_partner_share_pct, require_cash_to_yape_reference,
+             allow_cashier_cancel, updated_at
+      FROM system_settings WHERE id=1
+    `);
+    const row = rows[0];
+    return {
+      businessName: row.business_name,
+      legalName: row.legal_name,
+      ruc: row.ruc,
+      address: row.address,
+      phone: row.phone,
+      logoDataUrl: row.logo_data_url,
+      currencyCode: row.currency_code,
+      timezoneName: row.timezone_name,
+      ticketFooter: row.ticket_footer,
+      receiptPrefix: row.receipt_prefix,
+      defaultMaxOperationAmount: money(row.default_max_operation_amount),
+      defaultCommissionType: row.default_commission_type,
+      defaultCommissionValue: money(row.default_commission_value),
+      requireCashToYapeReference: Boolean(row.require_cash_to_yape_reference),
+      allowCashierCancel: Boolean(row.allow_cashier_cancel),
+      updatedAt: row.updated_at
+    };
+  });
+
+  app.post("/api/admin/system/settings", async (request, reply) => {
+    const auth = await requireOwner(request, reply);
+    if (!auth) return;
+
+    const parsed = settingsBody.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? "Configuración inválida" });
+    }
+    const s = parsed.data;
+
+    await db.execute(`
+      UPDATE system_settings
+      SET business_name=?, legal_name=?, ruc=?, address=?, phone=?, logo_data_url=?,
+          currency_code=?, timezone_name=?, ticket_footer=?, receipt_prefix=?,
+          default_max_operation_amount=?, default_commission_type=?,
+          default_commission_value=?, default_staff_share_pct=100,
+          default_partner_share_pct=0, require_cash_to_yape_reference=?,
+          allow_cashier_cancel=?
+      WHERE id=1
+    `, [
+      s.businessName, s.legalName ?? null, s.ruc ?? null, s.address ?? null, s.phone ?? null,
+      s.logoDataUrl ?? null,
+      s.currencyCode, s.timezoneName, s.ticketFooter ?? null, s.receiptPrefix.toUpperCase(),
+      money(s.defaultMaxOperationAmount), s.defaultCommissionType, money(s.defaultCommissionValue),
+      s.requireCashToYapeReference ? 1 : 0, s.allowCashierCancel ? 1 : 0
+    ]);
+
+    await audit(request, null, auth.userId, "SYSTEM_SETTINGS_UPDATED", "SYSTEM", 1, {
+      businessName: s.businessName,
+      timezone: s.timezoneName
+    });
+
+    return { ok: true };
+  });
+
+  app.post("/api/admin/system/apply-defaults-to-branches", async (request, reply) => {
+    const auth = await requireOwner(request, reply);
+    if (!auth) return;
+
+    const [rows] = await db.query<any[]>("SELECT * FROM system_settings WHERE id=1");
+    const s = rows[0];
+
+    const [result] = await db.execute<any>(`
+      UPDATE branch_settings
+      SET max_operation_amount=?, commission_type=?, commission_value=?,
+          staff_share_pct=100, partner_share_pct=0
+    `, [
+      s.default_max_operation_amount,
+      s.default_commission_type,
+      s.default_commission_value
+    ]);
+
+    await audit(request, null, auth.userId, "DEFAULT_RULES_APPLIED_TO_BRANCHES", "SYSTEM", 1, {
+      affectedBranches: Number(result.affectedRows ?? 0)
+    });
+
+    return { ok: true, affectedBranches: Number(result.affectedRows ?? 0) };
+  });
+
+  app.get("/api/admin/system/status", async (request, reply) => {
+    const auth = await requireOwner(request, reply);
+    if (!auth) return;
+
+    const started = process.uptime();
+    const memory = process.memoryUsage();
+    const [dbRows] = await db.query<any[]>("SELECT VERSION() AS version, NOW() AS db_time");
+    const [counts] = await db.query<any[]>(`
+      SELECT
+        (SELECT COUNT(*) FROM branches WHERE active=1) AS active_branches,
+        (SELECT COUNT(*) FROM users WHERE active=1) AS active_users,
+        (SELECT COUNT(*) FROM auth_sessions WHERE revoked_at IS NULL AND expires_at>NOW()) AS active_sessions,
+        (SELECT COUNT(*) FROM cash_sessions WHERE status='OPEN') AS open_cash_sessions,
+        (SELECT COUNT(*) FROM operations WHERE DATE(created_at)=CURDATE()) AS operations_today
+    `);
+
+    return {
+      ok: true,
+      api: {
+        uptimeSeconds: Math.floor(started),
+        node: process.version,
+        memoryMb: Math.round(memory.rss / 1024 / 1024)
+      },
+      database: {
+        ok: true,
+        version: dbRows[0]?.version,
+        time: dbRows[0]?.db_time
+      },
+      counts: {
+        activeBranches: Number(counts[0]?.active_branches ?? 0),
+        activeUsers: Number(counts[0]?.active_users ?? 0),
+        activeSessions: Number(counts[0]?.active_sessions ?? 0),
+        openCashSessions: Number(counts[0]?.open_cash_sessions ?? 0),
+        operationsToday: Number(counts[0]?.operations_today ?? 0)
+      }
+    };
+  });
+
+  app.get("/api/admin/security/sessions", async (request, reply) => {
+    const auth = await requireOwner(request, reply);
+    if (!auth) return;
+
+    const [rows] = await db.query<any[]>(`
+      SELECT s.id, s.user_id, s.ip_address, s.user_agent,
+             DATE_FORMAT(s.created_at, '%Y-%m-%dT%H:%i:%s') AS created_at,
+             DATE_FORMAT(s.expires_at, '%Y-%m-%dT%H:%i:%s') AS expires_at,
+             DATE_FORMAT(s.revoked_at, '%Y-%m-%dT%H:%i:%s') AS revoked_at,
+             CASE WHEN s.revoked_at IS NULL AND s.expires_at>NOW() THEN 1 ELSE 0 END AS active,
+             u.username, u.full_name, r.name AS role_name,
+             b.name AS branch_name
+      FROM auth_sessions s
+      JOIN users u ON u.id=s.user_id
+      JOIN roles r ON r.id=u.role_id
+      LEFT JOIN branches b ON b.id=u.branch_id
+      ORDER BY active DESC, s.created_at DESC
+      LIMIT 300
+    `);
+
+    return {
+      sessions: rows.map((row) => ({
+        id: Number(row.id),
+        userId: Number(row.user_id),
+        username: row.username,
+        fullName: row.full_name,
+        roleName: row.role_name,
+        branchName: row.branch_name,
+        ipAddress: row.ip_address,
+        userAgent: row.user_agent,
+        createdAt: row.created_at,
+        expiresAt: row.expires_at,
+        revokedAt: row.revoked_at,
+        active: Boolean(row.active),
+        current: Number(row.id) === auth.sessionId
+      }))
+    };
+  });
+
+  app.post("/api/admin/security/sessions/:sessionId/revoke", async (request, reply) => {
+    const auth = await requireOwner(request, reply);
+    if (!auth) return;
+    const parsed = sessionParams.safeParse(request.params);
+    if (!parsed.success) return reply.code(400).send({ error: "Sesión inválida" });
+    if (parsed.data.sessionId === auth.sessionId) {
+      return reply.code(400).send({ error: "Usa Cerrar sesión para finalizar tu sesión actual" });
+    }
+
+    const [result] = await db.execute<any>(
+      "UPDATE auth_sessions SET revoked_at=NOW() WHERE id=? AND revoked_at IS NULL",
+      [parsed.data.sessionId]
+    );
+    await audit(request, null, auth.userId, "SESSION_REVOKED", "AUTH_SESSION", parsed.data.sessionId);
+    return { ok: true, changed: Number(result.affectedRows ?? 0) };
+  });
+
+  app.post("/api/admin/security/users/:userId/revoke-sessions", async (request, reply) => {
+    const auth = await requireOwner(request, reply);
+    if (!auth) return;
+    const parsed = userParams.safeParse(request.params);
+    if (!parsed.success) return reply.code(400).send({ error: "Usuario inválido" });
+
+    const params: number[] = [parsed.data.userId];
+    let sql = "UPDATE auth_sessions SET revoked_at=NOW() WHERE user_id=? AND revoked_at IS NULL";
+    if (parsed.data.userId === auth.userId) {
+      sql += " AND id<>?";
+      params.push(auth.sessionId);
+    }
+    const [result] = await db.execute<any>(sql, params);
+    await audit(request, null, auth.userId, "USER_SESSIONS_REVOKED", "USER", parsed.data.userId);
+    return { ok: true, changed: Number(result.affectedRows ?? 0) };
+  });
+
+  app.get("/api/admin/security/roles", async (request, reply) => {
+    const auth = await requireOwner(request, reply);
+    if (!auth) return;
+
+    const [roles] = await db.query<any[]>(`
+      SELECT id,code,name FROM roles ORDER BY id
+    `);
+    const [permissions] = await db.query<any[]>(`
+      SELECT r.code AS role_code, rp.permission_code
+      FROM role_permissions rp
+      JOIN roles r ON r.id=rp.role_id
+      WHERE rp.enabled=1
+      ORDER BY r.id,rp.permission_code
+    `);
+
+    return {
+      roles: roles.map((role) => ({
+        id: Number(role.id),
+        code: role.code,
+        name: role.name,
+        permissions: permissions
+          .filter((item) => item.role_code === role.code)
+          .map((item) => item.permission_code)
+      })),
+      availablePermissions: [
+        "GLOBAL_READ","GLOBAL_WRITE","BRANCH_READ","BRANCH_WRITE",
+        "USER_ADMIN","BRANCH_USER_ADMIN","AUDIT_READ","CANCEL_OPERATION"
+      ]
+    };
+  });
+
+  app.post("/api/admin/security/roles/:roleCode/permissions", async (request, reply) => {
+    const auth = await requireOwner(request, reply);
+    if (!auth) return;
+
+    const parsedParams = roleCodeParams.safeParse(request.params);
+    const parsedBody = rolePermissionBody.safeParse(request.body);
+    if (!parsedParams.success || !parsedBody.success) {
+      return reply.code(400).send({ error: "Configuración de permisos inválida" });
+    }
+
+    const [roleRows] = await db.query<any[]>("SELECT id FROM roles WHERE code=? LIMIT 1", [parsedParams.data.roleCode]);
+    if (!roleRows.length) return reply.code(404).send({ error: "Rol no encontrado" });
+    const roleId = Number(roleRows[0].id);
+
+    const connection = await db.getConnection();
+    try {
+      await connection.beginTransaction();
+      await connection.execute("UPDATE role_permissions SET enabled=0 WHERE role_id=?", [roleId]);
+      for (const permission of parsedBody.data.permissions) {
+        await connection.execute(
+          `INSERT INTO role_permissions (role_id,permission_code,enabled)
+           VALUES (?,?,1)
+           ON DUPLICATE KEY UPDATE enabled=1`,
+          [roleId, permission]
+        );
+      }
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+
+    await audit(request, null, auth.userId, "ROLE_PERMISSIONS_UPDATED", "ROLE", roleId, {
+      roleCode: parsedParams.data.roleCode,
+      permissions: parsedBody.data.permissions
+    });
+    return { ok: true };
+  });
+
+  app.post("/api/branches/:branchId/operations/:operationId/cancel", async (request, reply) => {
+    const parsedParams = operationParams.safeParse(request.params);
+    const parsedBody = reasonBody.safeParse(request.body);
+    if (!parsedParams.success || !parsedBody.success) {
+      return reply.code(400).send({ error: parsedBody.success ? "Operación inválida" : parsedBody.error.issues[0]?.message ?? "Motivo inválido" });
+    }
+
+    const auth = await requireAuth(request, reply);
+    if (!auth) return;
+    if (!canWriteBranch(auth, parsedParams.data.branchId)) return reply.code(403).send({ error: "Acceso denegado" });
+    if (!auth.permissions.includes("CANCEL_OPERATION")) {
+      return reply.code(403).send({ error: "Tu rol no tiene permiso para anular operaciones" });
+    }
+
+    const [settingRows] = await db.query<any[]>("SELECT allow_cashier_cancel FROM system_settings WHERE id=1");
+    if (auth.roleCode === "CASHIER" && !Boolean(settingRows[0]?.allow_cashier_cancel)) {
+      return reply.code(403).send({ error: "La anulación por cajero está desactivada" });
+    }
+
+    const [rows] = await db.query<any[]>(`
+      SELECT o.id,o.status,o.cash_session_id,cs.status AS session_status
+      FROM operations o
+      LEFT JOIN cash_sessions cs ON cs.id=o.cash_session_id
+      WHERE o.id=? AND o.branch_id=? LIMIT 1
+    `, [parsedParams.data.operationId, parsedParams.data.branchId]);
+    if (!rows.length) return reply.code(404).send({ error: "Operación no encontrada" });
+    const op = rows[0];
+    if (op.status !== "COMPLETED") return reply.code(409).send({ error: "Solo se puede anular una operación completada" });
+    if (op.session_status !== "OPEN") return reply.code(409).send({ error: "El turno ya fue cerrado. La corrección debe hacerla el propietario mediante reverso" });
+
+    const connection = await db.getConnection();
+    try {
+      await connection.beginTransaction();
+      await connection.execute("UPDATE operations SET status='CANCELLED' WHERE id=?", [op.id]);
+      await connection.execute("UPDATE receipts SET status='VOID' WHERE operation_id=?", [op.id]);
+      await connection.execute(`
+        INSERT INTO operation_events (operation_id,branch_id,user_id,action,reason)
+        VALUES (?,?,?,'CANCEL',?)
+      `, [op.id, parsedParams.data.branchId, auth.userId, parsedBody.data.reason]);
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+
+    await audit(request, parsedParams.data.branchId, auth.userId, "OPERATION_CANCELLED", "OPERATION", Number(op.id), {
+      reason: parsedBody.data.reason
+    });
+    return { ok: true, status: "CANCELLED" };
+  });
+
+  app.post("/api/admin/operations/:operationId/reverse", async (request, reply) => {
+    const auth = await requireOwner(request, reply);
+    if (!auth) return;
+    const parsedParams = adminOperationParams.safeParse(request.params);
+    const parsedBody = reasonBody.safeParse(request.body);
+    if (!parsedParams.success || !parsedBody.success) {
+      return reply.code(400).send({ error: parsedBody.success ? "Operación inválida" : parsedBody.error.issues[0]?.message ?? "Motivo inválido" });
+    }
+
+    const [rows] = await db.query<any[]>("SELECT id,branch_id,status FROM operations WHERE id=? LIMIT 1", [parsedParams.data.operationId]);
+    if (!rows.length) return reply.code(404).send({ error: "Operación no encontrada" });
+    const op = rows[0];
+    if (!["COMPLETED","CANCELLED"].includes(op.status)) {
+      return reply.code(409).send({ error: "Esta operación ya fue revertida o no admite reverso" });
+    }
+
+    const connection = await db.getConnection();
+    try {
+      await connection.beginTransaction();
+      await connection.execute("UPDATE operations SET status='REVERSED' WHERE id=?", [op.id]);
+      await connection.execute("UPDATE receipts SET status='VOID' WHERE operation_id=?", [op.id]);
+      await connection.execute(`
+        INSERT INTO operation_events (operation_id,branch_id,user_id,action,reason)
+        VALUES (?,?,?,'REVERSE',?)
+      `, [op.id, op.branch_id, auth.userId, parsedBody.data.reason]);
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+
+    await audit(request, Number(op.branch_id), auth.userId, "OPERATION_REVERSED", "OPERATION", Number(op.id), {
+      reason: parsedBody.data.reason,
+      previousStatus: op.status
+    });
+    return { ok: true, status: "REVERSED" };
+  });
+}
