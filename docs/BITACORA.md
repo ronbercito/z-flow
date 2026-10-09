@@ -1,6 +1,6 @@
 # Z-FLOW — Bitácora de desarrollo
 
-**Última actualización:** 07/10/2026  
+**Última actualización:** 08/10/2026
 **Repositorio:** `ronbercito/z-flow`  
 **Rama activa:** `develop`  
 **Estado:** producción local en Proxmox, pruebas reales en curso.
@@ -215,6 +215,16 @@ Z-FLOW arrancó automáticamente y está sano.
   - `scripts/verify-local-production.sh`
   - `scripts/verify-after-reboot.sh`
 
+## Actualización del 08/10/2026 — integración electrónica
+
+- Se retiró Factiliza como proveedor de emisión desde el panel y la API. La emisión de boletas desde Z-FLOW queda deshabilitada hasta elegir un proveedor autorizado y validar el flujo tributario.
+- Se conserva la consulta de registros y archivos electrónicos históricos asociados a cierres; los comprobantes internos siguen identificados como documentos de control y no como comprobantes SUNAT.
+- El backend elimina las tablas de configuración y correlativos de Factiliza, pero conserva la tabla histórica de documentos para no perder referencias anteriores.
+- `scripts/update-local.sh` limpia variables `FACTILIZA_*` del entorno `.env` durante la actualización.
+- Se sincronizó el checkout local con `origin/develop`; los cambios de caja que estaban pendientes localmente ya estaban incluidos en la rama remota.
+- El último cambio publicado al corte de esta bitácora es `eeabdf1` (`remove: purge retired Factiliza credentials on update`).
+- No se confirma en esta actualización que el LXC de producción ya haya sido actualizado; hacerlo y comprobar el panel es el siguiente paso operativo.
+
 ## Regla de trabajo del proyecto
 
 **Toda solución se implementa primero en el repositorio y después se actualiza el servidor.**
@@ -237,6 +247,7 @@ Corrección en repositorio si hace falta
 
 ## Pendiente actual
 
+- Actualizar el LXC desde `develop` y verificar que Integraciones/Factiliza ya no aparezca y que las boletas históricas sigan consultables.
 - Validar las 5 filiales reales.
 - Cerrar formalmente la fase de pruebas locales cuando esas 5 filiales queden aprobadas.
 - Preparar instalador limpio para otro servidor.
