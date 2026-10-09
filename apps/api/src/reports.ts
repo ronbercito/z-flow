@@ -510,7 +510,9 @@ export async function registerReportRoutes(app: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: "Revisa la URL, la serie y la confirmación del régimen." });
     let url: URL;
     try { url = new URL(parsed.data.baseUrl); } catch { return reply.code(400).send({ error: "La URL base no es válida." }); }
-    if (url.protocol !== "https:") return reply.code(400).send({ error: "La URL de Factiliza debe usar HTTPS." });
+    if (url.protocol !== "https:" || !(url.hostname === "factiliza.com" || url.hostname.endsWith(".factiliza.com"))) {
+      return reply.code(400).send({ error: "Usa una URL HTTPS del dominio oficial de Factiliza." });
+    }
     const token = parsed.data.apiToken.trim();
     const encrypted = token ? encryptFactilizaToken(token) : null;
     await db.execute(
