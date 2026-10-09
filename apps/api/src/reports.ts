@@ -553,9 +553,8 @@ export async function registerReportRoutes(app: FastifyInstance) {
     if (!auth) return;
     if (!canReadBranch(auth, parsedParams.data.branchId)) return reply.code(403).send({ error: "Acceso denegado" });
 
-    const token = process.env.FACTILIZA_API_TOKEN?.trim();
-    const baseUrl = (process.env.FACTILIZA_API_BASE_URL || "https://apife-qa.factiliza.com/api/v1").replace(/\/$/, "");
-    const series = process.env.FACTILIZA_BOLETA_SERIES?.trim().toUpperCase();
+    const config = await getFactilizaConfig();
+    const { token, baseUrl, series } = config;
     const [settingsRows] = await db.query<any[]>(
       "SELECT ruc FROM system_settings WHERE id=1 LIMIT 1"
     );
@@ -563,7 +562,7 @@ export async function registerReportRoutes(app: FastifyInstance) {
     if (!token || !series || issuerRuc.length !== 11) {
       return reply.code(503).send({ error: "Completa el token, la serie de boleta y el RUC emisor en la configuración segura del servidor." });
     }
-    if (process.env.FACTILIZA_RUS_ACTIVITY_CONFIRMED !== "true") {
+    if (!config.rusActivityConfirmed) {
       return reply.code(409).send({ error: "Confirma con tu contador que la actividad registrada del emisor es compatible con el Nuevo RUS antes de emitir." });
     }
 
@@ -777,12 +776,12 @@ export async function registerReportRoutes(app: FastifyInstance) {
 
     if (!data) {
       if (parsed.data.format === "cdr") return reply.code(404).send({ error: "No se encontró el CDR archivado para esta boleta." });
-      const token = process.env.FACTILIZA_API_TOKEN?.trim();
+      const config = await getFactilizaConfig();
+      const token = config.token;
       if (!token) return reply.code(503).send({ error: "La copia local no está disponible y Factiliza no está configurada en el servidor." });
       const [settingsRows] = await db.query<any[]>("SELECT ruc FROM system_settings WHERE id=1 LIMIT 1");
       const issuerRuc = String(settingsRows[0]?.ruc ?? "").replace(/[^0-9]/g, "");
-      let baseUrl = process.env.FACTILIZA_API_BASE_URL || "https://apife-qa.factiliza.com/api/v1";
-      if (baseUrl.endsWith("/")) baseUrl = baseUrl.slice(0, -1);
+      const baseUrl = config.baseUrl;
       const saved = await fetchAndStoreFactilizaArtifact(
         baseUrl, token, issuerRuc, parsed.data.branchId, parsed.data.closureId, series, correlativo, parsed.data.format
       ).catch(() => false);
