@@ -31,7 +31,7 @@ const closureParams = z.object({
 const factilizaConfigBody = z.object({
   apiToken: z.string().trim().max(4096).optional().default(""),
   baseUrl: z.string().trim().url().max(255),
-  series: z.string().trim().toUpperCase().min(4).max(10).regex(/^[A-Z0-9-]+$/),
+  series: z.string().trim().toUpperCase().min(4).max(10).regex(/^[A-Z0-9][A-Z0-9-]{3,9}$/),
   rusActivityConfirmed: z.boolean()
 });
 
