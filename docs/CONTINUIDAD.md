@@ -1,10 +1,17 @@
 # Z-FLOW — Documento de continuidad
 
-**Fecha de corte:** 08/10/2026
+**Fecha de corte:** 09/10/2026
 **Repositorio:** `ronbercito/z-flow`
 **Rama de trabajo:** `develop`
-**Checkpoint al actualizar este documento:** `5bdbe81`
+**Checkpoint publicado:** `main` `16c6c82` (README breve); `develop` `69d5785` antes de esta actualización
 **Estado general:** el repositorio está sincronizado con `origin/develop`. La emisión de comprobantes Factiliza se retiró; no se ha confirmado todavía la actualización del LXC con estos cambios. Las pruebas técnicas locales están aprobadas y falta validar las 5 filiales reales antes de cerrar la etapa.
+
+## Estado del README y ramas al 09/10/2026
+
+- La página principal de GitHub estaba en `main`, que antes solo mostraba el README inicial. La PR #2 se combinó para llevar el proyecto completo a `main`.
+- El README se redujo a una presentación del producto, funciones y tecnología. El manual operativo detallado queda en `docs/LOCAL_PRODUCTION.md`.
+- La PR #3 ya se combinó en `main`; `main` está en `16c6c82` y el README breve es visible en la portada.
+- Las bitácoras de esta sesión se actualizan en `develop`; después deben promocionarse a `main` mediante una PR para conservar el flujo de ramas.
 
 ## Cambio más reciente: retiro de Factiliza
 
