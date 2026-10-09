@@ -2423,3 +2423,25 @@ tr:last-child td { border-bottom:0; }
   .closure-detail-heading { align-items:flex-start; flex-direction:column; }
   .closure-detail-footer { flex-direction:column; }
 }
+
+.billing-config-checklist { display:grid; gap:6px; margin:12px 0; padding:12px; border:1px solid #e4eaf2; border-radius:9px; background:#f8fafc; color:#44546b; font-size:9px; }
+.billing-config-checklist > strong { font-size:10px; margin-bottom:2px; }
+.billing-config-checklist .ready { color:#07805b; }
+.billing-config-checklist .missing { color:#a66a00; }
+.billing-config-checklist small { color:#8090a5; margin-top:3px; }
+.billing-customer-form { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:14px; }
+.billing-customer-form label { display:grid; gap:5px; color:#52647d; font-size:10px; font-weight:700; }
+.billing-customer-form label span small { color:#9aa7b8; font-weight:400; }
+.billing-customer-form input,.billing-customer-form select { min-width:0; height:38px; border:1px solid #d7e1ee; border-radius:7px; padding:0 10px; background:#fff; color:#24344d; font-size:11px; }
+.billing-customer-form .full { grid-column:1/-1; }
+.billing-form-error { color:#b42318; padding:9px 10px; border-radius:7px; background:#fff1f0; font-size:10px; }
+.billing-customer-form .modal-actions { margin-top:2px; }
+.billing-customer-form .modal-actions .primary:disabled { opacity:.55; cursor:not-allowed; }
+.invoice-success-notice { display:flex; gap:10px; margin-top:14px; padding:14px; border:1px solid #b7ebd0; border-radius:9px; background:#effaf4; color:#087a55; }
+.invoice-success-notice > div { display:grid; gap:4px; }
+.invoice-success-notice strong { font-size:11px; }
+.invoice-success-notice span { color:#537868; font-size:9px; line-height:1.45; }
+.invoice-download-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; margin-top:14px; }
+.invoice-setup-notice.error { background:#fff3f1; border-color:#ffd0cc; color:#ad2b20; }
+.billing-sandbox-label { margin-top:12px; color:#8b6b2d; font-size:9px; text-align:right; }
+@media(max-width:580px) { .billing-customer-form { grid-template-columns:1fr; } .billing-customer-form .full { grid-column:auto; } }
