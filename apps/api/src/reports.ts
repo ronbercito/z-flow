@@ -1,4 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import ExcelJS from "exceljs";
 import PDFDocument from "pdfkit";
 import { z } from "zod";
@@ -309,6 +311,88 @@ async function requireOwner(request: FastifyRequest, reply: FastifyReply) {
 
 function contentDisposition(filename: string) {
   return `attachment; filename="${filename}"`;
+}
+
+type ElectronicArtifactFormat = "pdf" | "xml";
+
+function electronicDocumentPaths(branchId: number, closureId: number, series: string, correlativo: number | string) {
+  const safeSeries = series.toUpperCase().replace(/[^A-Z0-9_-]/g, "") || "BOLETA";
+  const number = String(correlativo).padStart(6, "0");
+  const folder = join(
+    process.env.ZFLOW_BACKUP_DIR || "/backups",
+    "boletas-electronicas",
+    `filial-${branchId}`,
+    `cierre-${closureId}`
+  );
+  const stem = `${safeSeries}-${number}`;
+  return {
+    folder,
+    relativeFolder: join("boletas-electronicas", `filial-${branchId}`, `cierre-${closureId}`),
+    pdf: join(folder, `${stem}.pdf`),
+    xml: join(folder, `${stem}.xml`),
+    cdr: join(folder, `${stem}.cdr.zip`)
+  };
+}
+
+function isExpectedArtifact(data: Buffer, format: ElectronicArtifactFormat) {
+  if (format === "pdf") return data.subarray(0, 5).toString("ascii") === "%PDF-";
+  return data.toString("utf8").replace(/^\uFEFF/, "").trimStart().startsWith("<");
+}
+
+function extractBase64Artifact(value: unknown, format: ElectronicArtifactFormat): Buffer | null {
+  const candidates: string[] = [];
+  const visit = (item: unknown, key = "") => {
+    if (typeof item === "string" && /(base64|content|archivo|documento|pdf|xml|data)/i.test(key)) candidates.push(item);
+    else if (item && typeof item === "object") {
+      for (const [childKey, child] of Object.entries(item as Record<string, unknown>)) visit(child, childKey);
+    }
+  };
+  visit(value);
+  for (const candidate of candidates) {
+    const encoded = candidate.replace(/^data:[^;]+;base64,/i, "").trim();
+    if (!encoded || encoded.length % 4 === 1) continue;
+    const decoded = Buffer.from(encoded, "base64");
+    if (isExpectedArtifact(decoded, format)) return decoded;
+  }
+  return null;
+}
+
+async function fetchAndStoreFactilizaArtifact(
+  baseUrl: string,
+  token: string,
+  issuerRuc: string,
+  branchId: number,
+  closureId: number,
+  series: string,
+  correlativo: number | string,
+  format: ElectronicArtifactFormat
+) {
+  const paths = electronicDocumentPaths(branchId, closureId, series, correlativo);
+  await mkdir(paths.folder, { recursive: true });
+  const response = await fetch(`${baseUrl}/invoice/${format}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ empresa_Ruc: issuerRuc, tipo_Doc: "03", serie: series, correlativo: String(correlativo) }),
+    signal: AbortSignal.timeout(30000)
+  });
+  if (!response.ok) return false;
+  const data = Buffer.from(await response.arrayBuffer());
+  let artifact = isExpectedArtifact(data, format) ? data : null;
+  if (!artifact) {
+    try { artifact = extractBase64Artifact(JSON.parse(data.toString("utf8")), format); } catch { artifact = null; }
+  }
+  if (!artifact) return false;
+  await writeFile(paths[format], artifact);
+  return true;
+}
+
+async function storedElectronicFiles(branchId: number, closureId: number, series: string, correlativo: number | string) {
+  const paths = electronicDocumentPaths(branchId, closureId, series, correlativo);
+  const exists = async (filePath: string) => {
+    try { await access(filePath); return true; } catch { return false; }
+  };
+  const [pdf, xml, cdr] = await Promise.all([exists(paths.pdf), exists(paths.xml), exists(paths.cdr)]);
+  return { pdf, xml, cdr, folder: paths.relativeFolder };
 }
 
 export async function registerReportRoutes(app: FastifyInstance) {
