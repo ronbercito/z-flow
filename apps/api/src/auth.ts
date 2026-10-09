@@ -19,7 +19,29 @@ export type AuthContext = {
 };
 
 const COOKIE_NAME = "zflow_session";
-const failedLogins = new Map<string, { count: number; blockedUntil: number }>();
+const failedLogins = new Map<string, {
+  count: number;
+  windowStartedAt: number;
+  blockedUntil: number;
+}>();
+let lastFailedLoginPrune = 0;
+const failedLoginWindowMs = 15 * 60 * 1000;
+const maxFailedLoginKeys = 10_000;
+
+function pruneFailedLogins(now: number) {
+  if (now - lastFailedLoginPrune < 60_000 && failedLogins.size < maxFailedLoginKeys) return;
+  lastFailedLoginPrune = now;
+  for (const [key, attempt] of failedLogins) {
+    if (now - attempt.windowStartedAt > failedLoginWindowMs && attempt.blockedUntil <= now) {
+      failedLogins.delete(key);
+    }
+  }
+  while (failedLogins.size >= maxFailedLoginKeys) {
+    const oldestKey = failedLogins.keys().next().value;
+    if (oldestKey === undefined) break;
+    failedLogins.delete(oldestKey);
+  }
+}
 
 function sessionHours(remember = false) {
   if (remember) return 24 * 7;
@@ -154,10 +176,12 @@ export async function loginUser(
 ) {
   const normalized = username.trim().toLowerCase();
   const key = `${request.ip}:${normalized}`;
+  const now = Date.now();
+  pruneFailedLogins(now);
   const attempt = failedLogins.get(key);
 
-  if (attempt && attempt.blockedUntil > Date.now()) {
-    const seconds = Math.ceil((attempt.blockedUntil - Date.now()) / 1000);
+  if (attempt && attempt.blockedUntil > now) {
+    const seconds = Math.ceil((attempt.blockedUntil - now) / 1000);
     return reply.code(429).send({
       error: `Demasiados intentos. Intenta nuevamente en ${seconds} segundos.`
     });
@@ -193,12 +217,18 @@ export async function loginUser(
       ]
     );
 
-    const current = failedLogins.get(key) ?? { count: 0, blockedUntil: 0 };
+    const prior = failedLogins.get(key);
+    const current = prior && now - prior.windowStartedAt <= failedLoginWindowMs
+      ? prior
+      : { count: 0, windowStartedAt: now, blockedUntil: 0 };
     current.count += 1;
     if (current.count >= 5) {
       current.count = 0;
-      current.blockedUntil = Date.now() + 5 * 60 * 1000;
+      current.windowStartedAt = now;
+      current.blockedUntil = now + 5 * 60 * 1000;
     }
+    // Refresh insertion order so the size cap removes the least recently used key.
+    failedLogins.delete(key);
     failedLogins.set(key, current);
     return reply.code(401).send({ error: "Usuario o contraseña incorrectos" });
   }
@@ -322,7 +352,12 @@ export async function requireAuth(
 
   const row = rows[0];
   if (!row) {
-    reply.clearCookie(COOKIE_NAME, { path: "/" });
+    reply.clearCookie(COOKIE_NAME, {
+      path: "/",
+      httpOnly: true,
+      sameSite: "lax",
+      secure: cookieSecure()
+    });
     reply.code(401).send({ error: "La sesión expiró. Inicia sesión nuevamente." });
     return null;
   }
@@ -359,12 +394,13 @@ export function canReadBranch(auth: AuthContext, branchId: number) {
   if (auth.roleCode === "PARTNER") {
     return auth.permissions.includes("BRANCH_READ") && auth.accessibleBranchIds.includes(branchId);
   }
-  if (auth.permissions.includes("GLOBAL_READ")) return true;
+  if (auth.roleCode !== "CASHIER" && auth.roleCode !== "BRANCH_ADMIN"
+      && auth.permissions.includes("GLOBAL_READ")) return true;
   return auth.permissions.includes("BRANCH_READ") && auth.branchId === branchId;
 }
 
 export function canWriteBranch(auth: AuthContext, branchId: number) {
-  if (auth.permissions.includes("GLOBAL_WRITE")) return true;
+  if (auth.roleCode === "OWNER" && auth.permissions.includes("GLOBAL_WRITE")) return true;
   return auth.permissions.includes("BRANCH_WRITE") && auth.branchId === branchId;
 }
 

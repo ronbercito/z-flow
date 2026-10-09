@@ -6,6 +6,21 @@
 **Checkpoint publicado:** `main` `16c6c82` (README breve); `develop` `69d5785` antes de esta actualización
 **Estado general:** el repositorio está sincronizado con `origin/develop`. La emisión de comprobantes Factiliza se retiró; no se ha confirmado todavía la actualización del LXC con estos cambios. Las pruebas técnicas locales están aprobadas y falta validar las 5 filiales reales antes de cerrar la etapa.
 
+## Revisión general y preparación de instalación (09/10/2026)
+
+Se corrigieron problemas identificados antes de la primera instalación limpia:
+
+- Las instalaciones nuevas ya no cargan movimientos de muestra ni abren una caja automáticamente.
+- Las transacciones de apertura, operación y cierre quedan serializadas para evitar sesiones duplicadas o cierres con totales incompletos.
+- Se rechazan montos infinitos y valores mayores al rango de la base de datos.
+- Se quitó CORS abierto; el panel web y la API operan bajo el mismo origen.
+- Los permisos de cajero se limitan a su filial; no se pueden asignar permisos globales al rol.
+- El rate limit de acceso limpia intentos antiguos y limita la memoria que ocupa.
+- Backups con permisos privados; restauración de consola validada antes de importar, con copia previa y recuperación automática ante error.
+- `scripts/install-local.sh` instala en Debian/Ubuntu desde `main`; genera secretos, configura Docker, backups diarios y rotación.
+
+La instalación desde cero está documentada en `docs/LOCAL_PRODUCTION.md`. La compilación de API/web y la configuración de Docker deben quedar aprobadas en GitHub Actions antes de promover esta revisión a `main`. No instalar todavía desde `main` hasta que se confirme esa promoción.
+
 ## Estado del README y ramas al 09/10/2026
 
 - La página principal de GitHub estaba en `main`, que antes solo mostraba el README inicial. La PR #2 se combinó para llevar el proyecto completo a `main`.

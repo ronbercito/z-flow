@@ -19,16 +19,16 @@ const settingsBody = z.object({
   address: z.string().trim().max(255).nullable().optional(),
   phone: z.string().trim().max(40).nullable().optional(),
   logoDataUrl: z.string().max(3000000).refine(
-    (value) => /^data:image\/(png|jpeg);base64,/.test(value),
-    "El logo debe ser PNG o JPG"
+    (value) => /^data:image\/(png|jpeg|webp);base64,/.test(value),
+    "El logo debe ser PNG, JPG o WEBP"
   ).nullable().optional(),
   currencyCode: z.string().trim().min(3).max(8).default("PEN"),
   timezoneName: z.string().trim().min(3).max(80).default("America/Lima"),
   ticketFooter: z.string().trim().max(255).nullable().optional(),
   receiptPrefix: z.string().trim().min(1).max(12).regex(/^[A-Za-z0-9_-]+$/).default("ZF"),
-  defaultMaxOperationAmount: z.coerce.number().positive(),
+  defaultMaxOperationAmount: z.coerce.number().finite().positive().max(999999999999.99),
   defaultCommissionType: z.enum(["FLAT", "PERCENT"]),
-  defaultCommissionValue: z.coerce.number().positive(),
+  defaultCommissionValue: z.coerce.number().finite().positive().max(999999999999.99),
   requireCashToYapeReference: z.boolean(),
   allowCashierCancel: z.boolean()
 });
@@ -53,9 +53,8 @@ const reasonBody = z.object({
 
 const rolePermissionBody = z.object({
   permissions: z.array(z.enum([
-    "GLOBAL_READ","GLOBAL_WRITE","BRANCH_READ","BRANCH_WRITE",
-    "USER_ADMIN","BRANCH_USER_ADMIN","AUDIT_READ","CANCEL_OPERATION"
-  ])).max(8)
+    "BRANCH_READ","BRANCH_WRITE","CANCEL_OPERATION"
+  ])).max(3)
 });
 
 const roleCodeParams = z.object({
@@ -318,13 +317,27 @@ export async function registerStage4Routes(app: FastifyInstance) {
     const auth = await requireAuth(request, reply);
     if (!auth) return;
     if (!canReadBranch(auth, parsed.data.branchId)) return reply.code(403).send({ error: "Acceso denegado" });
-    await db.execute(`INSERT INTO branch_business_settings (branch_id, business_name, address)
-      SELECT id, name, address FROM branches WHERE id=?
-      ON DUPLICATE KEY UPDATE branch_id=VALUES(branch_id)`, [parsed.data.branchId]);
     const [rows] = await db.query<any[]>(`SELECT business_name, legal_name, ruc, address, phone,
       logo_data_url, ticket_footer, receipt_prefix, updated_at
       FROM branch_business_settings WHERE branch_id=? LIMIT 1`, [parsed.data.branchId]);
-    if (!rows.length) return reply.code(404).send({ error: "Configuración de filial no encontrada" });
+    if (!rows.length) {
+      const [branchRows] = await db.query<any[]>(
+        "SELECT name AS business_name, address FROM branches WHERE id=? AND active=1 LIMIT 1",
+        [parsed.data.branchId]
+      );
+      if (!branchRows.length) return reply.code(404).send({ error: "Filial no encontrada" });
+      return {
+        businessName: branchRows[0].business_name,
+        legalName: null,
+        ruc: null,
+        address: branchRows[0].address,
+        phone: null,
+        logoDataUrl: null,
+        ticketFooter: null,
+        receiptPrefix: "ZF",
+        updatedAt: null
+      };
+    }
     const row = rows[0];
     return {
       businessName: row.business_name, legalName: row.legal_name, ruc: row.ruc,
@@ -585,10 +598,7 @@ export async function registerStage4Routes(app: FastifyInstance) {
           .filter((item) => item.role_code === role.code)
           .map((item) => item.permission_code)
       })),
-      availablePermissions: [
-        "GLOBAL_READ","GLOBAL_WRITE","BRANCH_READ","BRANCH_WRITE",
-        "USER_ADMIN","BRANCH_USER_ADMIN","AUDIT_READ","CANCEL_OPERATION"
-      ]
+      availablePermissions: ["BRANCH_READ","BRANCH_WRITE","CANCEL_OPERATION"]
     };
   });
 

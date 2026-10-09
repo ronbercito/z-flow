@@ -249,6 +249,17 @@ Z-FLOW arrancó automáticamente y está sano.
 - El último cambio publicado al corte de esta bitácora es `eeabdf1` (`remove: purge retired Factiliza credentials on update`).
 - No se confirma en esta actualización que el LXC de producción ya haya sido actualizado; hacerlo y comprobar el panel es el siguiente paso operativo.
 
+## Actualización del 09/10/2026 — revisión general y primera instalación limpia
+
+- La base de una instalación nueva ya no incluye operaciones ficticias ni una caja abierta; empieza lista para configurarse y abrir el primer turno real.
+- Apertura y cierre de caja se serializan con las operaciones para evitar doble apertura y diferencias si un movimiento llega mientras se cierra el turno.
+- Se validan montos finitos dentro del rango decimal de MariaDB; se retira CORS con credenciales abiertas porque el panel usa rutas del mismo origen.
+- Se limita el almacenamiento de intentos de inicio de sesión y solo se permiten permisos de alcance filial para el rol de cajero.
+- Los backups restringen permisos, evitan reemplazarse cuando coinciden en el segundo y la restauración de consola valida el gzip, crea copia previa e intenta recuperarla ante una importación fallida.
+- El instalador limpio obtiene el código desde `main`, genera contraseñas aleatorias, configura Docker, backups diarios y rotación, y deja una copia inicial.
+- `scripts/update-local.sh` actualiza desde `main`; la guía documenta la instalación en Debian/Ubuntu y los requisitos de LXC en Proxmox.
+- No se ejecutaron pruebas locales; la compilación/configuración se comprobará mediante los checks automáticos del repositorio antes de promover a `main`.
+
 ## Regla de trabajo del proyecto
 
 **Toda solución se implementa primero en el repositorio y después se actualiza el servidor.**

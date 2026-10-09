@@ -16,6 +16,7 @@ React · Fastify · TypeScript · MariaDB · Docker Compose
 
 ## Documentación del proyecto
 
+- [Primera instalación limpia](docs/LOCAL_PRODUCTION.md#primera-instalación-en-un-contenedor-limpio)
 - [Continuidad y siguiente objetivo](docs/CONTINUIDAD.md)
 - [Bitácora de cambios](docs/BITACORA.md)
 - [Roadmap](docs/ROADMAP.md)

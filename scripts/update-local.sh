@@ -17,10 +17,14 @@ bash scripts/backup.sh
 BEFORE="$(git rev-parse HEAD)"
 echo "Versión actual: $BEFORE"
 
-echo "2) Actualizando rama develop"
-git fetch origin develop
-git checkout develop
-git pull --ff-only origin develop
+echo "2) Actualizando rama main"
+git fetch origin main
+if git show-ref --verify --quiet refs/heads/main; then
+  git checkout main
+else
+  git checkout -b main --track origin/main
+fi
+git pull --ff-only origin main
 
 echo "Retirando credenciales antiguas de Factiliza"
 unset FACTILIZA_API_TOKEN FACTILIZA_API_BASE_URL FACTILIZA_BOLETA_SERIES FACTILIZA_RUS_ACTIVITY_CONFIRMED
