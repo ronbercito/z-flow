@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { spawn } from "node:child_process";
 import { createReadStream, createWriteStream } from "node:fs";
-import { mkdir, readdir, stat, unlink } from "node:fs/promises";
+import { chmod, mkdir, readdir, stat, unlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -37,6 +37,7 @@ function stamp() {
 
 async function uniqueFilename(prefix: "zflow" | "uploaded") {
   await mkdir(backupDir, { recursive: true, mode: 0o700 });
+  await chmod(backupDir, 0o700);
   const base = `${prefix}_${stamp()}`;
   let filename = `${base}.sql.gz`;
   let suffix = 1;
@@ -76,10 +77,13 @@ function waitForClient(client: ReturnType<typeof spawn>) {
 
 async function createBackup() {
   await mkdir(backupDir, { recursive: true, mode: 0o700 });
+  await chmod(backupDir, 0o700);
   const filename = await uniqueFilename("zflow");
   const output = join(backupDir, filename);
   const client = spawn("mariadb-dump", [
     "--single-transaction",
+    "--routines",
+    "--triggers",
     ...databaseArgs(), process.env.DB_NAME ?? "zflow"
   ], { env: databaseEnv(), stdio: ["ignore", "pipe", "pipe"] });
   const completed = waitForClient(client);
@@ -139,6 +143,7 @@ export async function registerBackupRoutes(app: FastifyInstance) {
   app.get("/api/admin/backups", async (request, reply) => {
     if (!(await requireOwner(request, reply))) return;
     await mkdir(backupDir, { recursive: true, mode: 0o700 });
+    await chmod(backupDir, 0o700);
     const entries = await readdir(backupDir, { withFileTypes: true });
     const backups = await Promise.all(entries
       .filter((entry) => entry.isFile() && validFilename(entry.name))
