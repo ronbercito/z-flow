@@ -1,10 +1,23 @@
 # Z-FLOW — Documento de continuidad
 
-**Fecha de corte:** 07/10/2026  
-**Repositorio:** `ronbercito/z-flow`  
-**Rama de trabajo:** `develop`  
-**Checkpoint al crear este documento:** `9409e11`  
-**Estado general:** Z-FLOW funciona en Proxmox local y ha superado las pruebas técnicas principales. Falta validar las 5 filiales reales antes de cerrar la etapa local.
+**Fecha de corte:** 08/10/2026
+**Repositorio:** `ronbercito/z-flow`
+**Rama de trabajo:** `develop`
+**Checkpoint al actualizar este documento:** `5bdbe81`
+**Estado general:** el repositorio está sincronizado con `origin/develop`. La emisión de comprobantes Factiliza se retiró; no se ha confirmado todavía la actualización del LXC con estos cambios. Las pruebas técnicas locales están aprobadas y falta validar las 5 filiales reales antes de cerrar la etapa.
+
+## Cambio más reciente: retiro de Factiliza
+
+El propietario decidió retirar Factiliza para evitar emitir comprobantes por medio de un proveedor cuya autorización no estaba confirmada.
+
+- No hay emisión nueva de boletas desde el panel ni endpoint de emisión en la API.
+- Se conserva la consulta de registros/archivos electrónicos históricos de cada cierre, si existen.
+- La base conserva la tabla histórica `factiliza_documents`; se eliminan las tablas de configuración y correlativos del proveedor.
+- El actualizador `scripts/update-local.sh` elimina las variables antiguas `FACTILIZA_*` del archivo `.env` al actualizar.
+- Hasta definir y verificar otro proveedor y el tratamiento tributario, los documentos generados por Z-FLOW son comprobantes internos de control, no comprobantes electrónicos SUNAT.
+- Próximo paso de despliegue: ejecutar `bash scripts/update-local.sh` en `/opt/z-flow` y comprobar que Integraciones ya no muestre Factiliza, que el estado del sistema sea saludable y que los registros electrónicos históricos continúen consultables.
+
+Los cambios de caja que figuraban como modificaciones locales antes de sincronizar el checkout ya están incluidos en `origin/develop`; el checkout local se alineó sobre esa versión y el commit de estilo de usuario ya estaba aplicado allí.
 
 ---
 
@@ -302,7 +315,14 @@ En Proxmox mantener activado **Start at boot** para el CT de Z-FLOW.
 
 ## 13. Pendiente inmediato
 
-### Prioridad 1 — 5 filiales reales
+### Prioridad 1 — actualizar y comprobar el LXC
+
+1. Actualizar `/opt/z-flow` usando `bash scripts/update-local.sh`.
+2. Confirmar que Docker, API y Web queden saludables.
+3. Confirmar que la opción Integraciones/Factiliza ya no aparezca.
+4. Revisar un cierre con y sin registro electrónico histórico y verificar que los datos archivados sigan consultables.
+
+### Prioridad 2 — 5 filiales reales
 
 Para cada filial:
 
@@ -320,7 +340,7 @@ Para cada filial:
 
 No marcar Fase 5 como terminada hasta completar las cinco.
 
-### Prioridad 2 — cierre de etapa local
+### Prioridad 3 — cierre de etapa local
 
 Cuando las 5 filiales pasen:
 
@@ -330,7 +350,7 @@ Cuando las 5 filiales pasen:
 - dejar un checkpoint/tag estable si se decide;
 - no migrar todavía a nube sin cerrar este punto.
 
-### Prioridad 3 — instalador
+### Prioridad 4 — instalador
 
 Después del cierre local, preparar un instalador reproducible para un servidor nuevo.
 
