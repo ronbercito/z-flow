@@ -26,6 +26,20 @@ El propietario decidió retirar Factiliza para evitar emitir comprobantes por me
 
 Los cambios de caja que figuraban como modificaciones locales antes de sincronizar el checkout ya están incluidos en `origin/develop`; el checkout local se alineó sobre esa versión y el commit de estilo de usuario ya estaba aplicado allí.
 
+## Cambio en curso: espacios separados por filial (09/10/2026)
+
+En `develop` se implementó una primera versión para que cada filial use su propia identidad comercial, reportes e historial de cierres:
+
+- La API tiene una tabla de identidad independiente por filial y protege lectura/escritura mediante permisos y el ID de filial autenticado.
+- La sección «Mi Negocio» permite mantener nombre comercial, razón social, RUC, dirección, teléfono, logo, prefijo de comprobante y pie de ticket.
+- Los documentos internos y reportes generados por la API toman los datos comerciales de la filial.
+- El reporte de filial incorpora rangos día, semana, mes y personalizado, además del detalle tabular de operaciones.
+- Cierres de filial muestra el historial, PDF y detalle de las operaciones del turno cerrado.
+- El propietario conserva las pantallas consolidadas existentes. No se actualizó el LXC.
+- `git diff --check` quedó limpio. No fue posible compilar localmente: `npm` no está instalado y el intento con el pnpm incluido falló al resolver la ruta del workspace, que no tiene dependencias locales instaladas.
+
+Antes de desplegar, revisar CI/build y probar aislamiento entre al menos dos filiales: usuario de filial A no puede consultar ni editar B; propietario puede consultar ambas. Verificar también que los datos y el logo correctos aparezcan en PDF de cierre y comprobante interno.
+
 ---
 
 ## 1. Regla principal para continuar el desarrollo
@@ -423,4 +437,4 @@ Si se abre un chat nuevo, empezar leyendo:
 
 El siguiente trabajo no es rediseñar usuarios ni volver a socios.
 
-**Siguiente objetivo:** completar la validación operativa de las 5 filiales reales y, después, preparar el instalador reproducible para otro servidor.
+**Siguiente objetivo:** validar y desplegar este cambio de aislamiento por filial en el entorno de pruebas, completar la validación operativa de las 5 filiales reales y, después, preparar el instalador reproducible para otro servidor.

@@ -27,6 +27,11 @@ const closureParams = z.object({
   closureId: z.coerce.number().int().positive()
 });
 
+const closureListQuery = z.object({
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()
+});
+
 
 type ReportFilters = z.infer<typeof reportQuery>;
 
@@ -123,7 +128,10 @@ async function fetchReport(filters: ReportFilters, forcedBranchId?: number) {
     ORDER BY amount_total DESC
   `, comparisonFilter.params);
 
-  const [brandingRows] = await db.query<any[]>("SELECT business_name FROM system_settings WHERE id=1 LIMIT 1");
+  const [brandingRows] = forcedBranchId
+    ? await db.query<any[]>(`SELECT COALESCE(bbs.business_name, ss.business_name) AS business_name
+        FROM system_settings ss LEFT JOIN branch_business_settings bbs ON bbs.branch_id=? WHERE ss.id=1 LIMIT 1`, [forcedBranchId])
+    : await db.query<any[]>("SELECT business_name FROM system_settings WHERE id=1 LIMIT 1");
   const businessName = String(brandingRows[0]?.business_name ?? "Z-FLOW");
   const summary = summaryRows[0] ?? {};
   const commissionTotal = money(summary.commission_total);
@@ -492,6 +500,28 @@ export async function registerReportRoutes(app: FastifyInstance) {
     return reply.send(buffer);
   });
 
+  app.get("/api/branches/:branchId/closures", async (request, reply) => {
+    const parsedParams = branchParams.safeParse(request.params);
+    const parsedQuery = closureListQuery.safeParse(request.query ?? {});
+    if (!parsedParams.success || !parsedQuery.success) return reply.code(400).send({ error: "Filtros de cierres inválidos" });
+    const auth = await requireAuth(request, reply);
+    if (!auth) return;
+    if (!canReadBranch(auth, parsedParams.data.branchId)) return reply.code(403).send({ error: "Acceso denegado" });
+
+    const conditions = ["dc.branch_id=?"];
+    const params: unknown[] = [parsedParams.data.branchId];
+    if (parsedQuery.data.from) { conditions.push("DATE(dc.closed_at)>=?"); params.push(parsedQuery.data.from); }
+    if (parsedQuery.data.to) { conditions.push("DATE(dc.closed_at)<=?"); params.push(parsedQuery.data.to); }
+    const [rows] = await db.query<any[]>(`SELECT dc.id, dc.branch_id, dc.cash_session_id,
+      dc.operation_count, dc.commission_total, dc.expected_cash, dc.declared_cash,
+      dc.expected_wallet, dc.declared_wallet, dc.difference_cash, dc.difference_wallet,
+      dc.notes, dc.closed_at, u.full_name AS closed_by, b.name AS branch_name
+      FROM daily_closures dc JOIN branches b ON b.id=dc.branch_id
+      LEFT JOIN users u ON u.id=dc.closed_by_user_id
+      WHERE ${conditions.join(" AND ")} ORDER BY dc.closed_at DESC LIMIT 250`, params);
+    return { closures: rows };
+  });
+
   app.get("/api/branches/:branchId/closures/:closureId/detail", async (request, reply) => {
     const parsed = closureParams.safeParse(request.params);
     if (!parsed.success) return reply.code(400).send({ error: "Cierre inválido" });
@@ -563,10 +593,13 @@ export async function registerReportRoutes(app: FastifyInstance) {
     if (!rows.length) return reply.code(404).send({ error: "Cierre no encontrado" });
     const row = rows[0];
 
-    const [settingRows] = await db.query<any[]>(`
-      SELECT business_name, legal_name, ruc, address, phone, logo_data_url
-      FROM system_settings WHERE id=1 LIMIT 1
-    `);
+    const [settingRows] = await db.query<any[]>(`SELECT
+      COALESCE(bbs.business_name, ss.business_name) AS business_name,
+      COALESCE(bbs.legal_name, ss.legal_name) AS legal_name, COALESCE(bbs.ruc, ss.ruc) AS ruc,
+      COALESCE(bbs.address, ss.address) AS address, COALESCE(bbs.phone, ss.phone) AS phone,
+      COALESCE(bbs.logo_data_url, ss.logo_data_url) AS logo_data_url
+      FROM system_settings ss LEFT JOIN branch_business_settings bbs ON bbs.branch_id=?
+      WHERE ss.id=1 LIMIT 1`, [parsed.data.branchId]);
     const branding = settingRows[0] ?? {};
 
     const resultLabel =
@@ -596,6 +629,7 @@ export async function registerReportRoutes(app: FastifyInstance) {
       if (branding.legal_name) doc.font("Helvetica").fontSize(8).text(String(branding.legal_name), { align: "right" });
       if (branding.ruc) doc.fontSize(8).text(`RUC: ${branding.ruc}`, { align: "right" });
       if (branding.phone) doc.fontSize(8).text(`Tel: ${branding.phone}`, { align: "right" });
+      if (branding.address) doc.fontSize(8).text(String(branding.address), { align: "right" });
 
       doc.moveDown(1.7);
       doc.font("Helvetica-Bold").fontSize(15).fillColor("#172235").text("REPORTE DE CIERRE DIARIO");
@@ -713,10 +747,14 @@ export async function registerReportRoutes(app: FastifyInstance) {
     const row = rows[0];
     if (!row.series) return reply.code(409).send({ error: "La operación todavía no tiene comprobante interno asignado" });
 
-    const [settingRows] = await db.query<any[]>(`
-      SELECT business_name, legal_name, ruc, address, phone, logo_data_url, ticket_footer
-      FROM system_settings WHERE id=1 LIMIT 1
-    `);
+    const [settingRows] = await db.query<any[]>(`SELECT
+      COALESCE(bbs.business_name, ss.business_name) AS business_name,
+      COALESCE(bbs.legal_name, ss.legal_name) AS legal_name, COALESCE(bbs.ruc, ss.ruc) AS ruc,
+      COALESCE(bbs.address, ss.address) AS address, COALESCE(bbs.phone, ss.phone) AS phone,
+      COALESCE(bbs.logo_data_url, ss.logo_data_url) AS logo_data_url,
+      COALESCE(bbs.ticket_footer, ss.ticket_footer) AS ticket_footer
+      FROM system_settings ss LEFT JOIN branch_business_settings bbs ON bbs.branch_id=?
+      WHERE ss.id=1 LIMIT 1`, [parsed.data.branchId]);
     const branding = settingRows[0] ?? {};
 
     const buffer = await new Promise<Buffer>((resolve, reject) => {
@@ -742,7 +780,7 @@ export async function registerReportRoutes(app: FastifyInstance) {
       if (branding.legal_name) doc.font("Helvetica").fontSize(7).text(String(branding.legal_name), { align: "center" });
       if (branding.ruc) doc.fontSize(7).text(`RUC: ${branding.ruc}`, { align: "center" });
       doc.font("Helvetica-Bold").fontSize(9).text(row.branch_name, { align: "center" });
-      if (row.branch_address || branding.address) doc.font("Helvetica").fontSize(7).text(String(row.branch_address ?? branding.address), { align: "center" });
+      if (branding.address || row.branch_address) doc.font("Helvetica").fontSize(7).text(String(branding.address ?? row.branch_address), { align: "center" });
       if (branding.phone) doc.fontSize(7).text(`Tel: ${branding.phone}`, { align: "center" });
       doc.moveDown(0.5);
       doc.font("Helvetica-Bold").fontSize(8).text("COMPROBANTE INTERNO", { align: "center" });

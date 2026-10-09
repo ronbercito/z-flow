@@ -66,7 +66,10 @@ export async function issueInternalReceipt(
 
   const sequenceNumber = Number(sequenceRows[0]?.next_number ?? 1);
   const [settingRows] = await connection.query<any[]>(
-    "SELECT receipt_prefix FROM system_settings WHERE id=1 LIMIT 1"
+    `SELECT COALESCE(NULLIF(bbs.receipt_prefix,''), ss.receipt_prefix) AS receipt_prefix
+     FROM system_settings ss LEFT JOIN branch_business_settings bbs ON bbs.branch_id=?
+     WHERE ss.id=1 LIMIT 1`,
+    [branchId]
   );
   const series = safeSeries(String(settingRows[0]?.receipt_prefix ?? "ZF"), branchCode);
 
