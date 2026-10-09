@@ -1004,10 +1004,14 @@ export async function registerAdminRoutes(app: FastifyInstance) {
              dc.declared_wallet, dc.difference_cash, dc.difference_wallet,
              dc.notes, DATE_FORMAT(dc.closed_at, '%Y-%m-%dT%H:%i:%s') AS closed_at,
              b.id AS branch_id, b.name AS branch_name,
-             u.full_name AS closed_by
+             u.full_name AS closed_by,
+             fd.series AS electronic_boleta_series,
+             fd.correlativo AS electronic_boleta_number,
+             fd.status AS electronic_boleta_status
       FROM daily_closures dc
       JOIN branches b ON b.id = dc.branch_id
       LEFT JOIN users u ON u.id=dc.closed_by_user_id
+      LEFT JOIN factiliza_documents fd ON fd.closure_id=dc.id AND fd.branch_id=dc.branch_id
       ${where}
       ORDER BY dc.closed_at DESC
       LIMIT 500
