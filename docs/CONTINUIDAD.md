@@ -40,6 +40,10 @@ En `develop` se implementó una primera versión para que cada filial use su pro
 
 Antes de desplegar, revisar CI/build y probar aislamiento entre al menos dos filiales: usuario de filial A no puede consultar ni editar B; propietario puede consultar ambas. Verificar también que los datos y el logo correctos aparezcan en PDF de cierre y comprobante interno.
 
+### Corrección de carga del logo (09/10/2026)
+
+El primer uso de «Mi Negocio» mostró `Unexpected token '<'` al guardar una identidad con logo. El formulario acepta archivos de hasta 2 MB; Nginx y Fastify tenían un límite predeterminado cercano a 1 MB. Se elevaron ambos límites a 4 MB y se mejoró el manejo de respuestas HTML inesperadas. Esta corrección requiere CI y despliegue por `scripts/update-local.sh` antes de reintentar guardar.
+
 ---
 
 ## 1. Regla principal para continuar el desarrollo

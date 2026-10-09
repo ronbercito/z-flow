@@ -1092,8 +1092,8 @@ function BranchBusinessPage({ branchId, canWrite, onSaved }: { branchId: number;
     event.preventDefault(); setSaving(true); setError(""); setMessage("");
     try {
       const response = await fetch(`/api/branches/${branchId}/business`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin", body: JSON.stringify(form) });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error ?? "No se pudo guardar");
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error ?? `No se pudo guardar (HTTP ${response.status})`);
       onSaved(form.businessName); setMessage("Los datos de esta filial se guardaron correctamente.");
     } catch (err) { setError(err instanceof Error ? err.message : "No se pudo guardar"); }
     finally { setSaving(false); }

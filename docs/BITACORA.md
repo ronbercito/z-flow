@@ -5,6 +5,12 @@
 **Rama activa:** `develop`  
 **Estado:** producción local en Proxmox, pruebas reales en curso.
 
+## 09/10/2026 — Límite de carga de logos en Mi Negocio
+
+- El formulario permite logos de hasta 2 MB (base64 hasta 3 MB), por lo que el límite predeterminado de 1 MB en Nginx/Fastify podía responder con una página HTML 413 al guardar.
+- Se aumentó el límite del proxy web y de Fastify a 4 MB y el formulario ahora maneja respuestas no JSON con un mensaje HTTP legible.
+- Pendiente: CI y volver a guardar el logo en el panel actualizado.
+
 ## 09/10/2026 — Espacio independiente por filial
 
 - Se agregó el modelo de identidad comercial por filial: nombre, razón social, RUC, teléfono, logo, dirección, prefijo y pie del comprobante.
