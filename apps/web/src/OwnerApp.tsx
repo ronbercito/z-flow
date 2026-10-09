@@ -1983,7 +1983,7 @@ function IntegrationsPage() {
   return <div className="integration-page">
     <section className="card integration-hero">
       <div className="integration-brand"><div className="integration-icon"><ReceiptText size={20}/></div><div><span>Proveedor de comprobantes electrónicos</span><h2>Factiliza</h2></div></div>
-      <span className={`integration-status ${ready ? "ready" : "pending"}`}><span/> {ready ? "Lista para emitir" : "Configuración pendiente"}</span>
+      <span className={`integration-status ${ready ? "ready" : "pending"}`}><span/> {ready ? "Configuración completa" : "Configuración pendiente"}</span>
       <p>Conecta el API para emitir una boleta por el total de comisión de cada cierre y consultar sus archivos electrónicos.</p>
     </section>
 
@@ -2005,7 +2005,8 @@ function IntegrationsPage() {
         <div className="card-head"><div><strong>Estado de configuración</strong><span>{status ? `Ambiente ${status.endpointMode}` : "Consultando Factiliza…"}</span></div><ShieldCheck size={17}/></div>
         <div className="integration-checks">{checks.map(([label, ok])=><div key={label}><span className={ok ? "ok" : "missing"}>{ok ? "✓" : "!"}</span><span>{label}</span><strong>{loading ? "…" : ok ? "Listo" : "Pendiente"}</strong></div>)}</div>
         <div className="integration-ruc-note"><strong>RUC emisor</strong><span>Se toma de Configuración del negocio. Verifica que coincida con el RUC afiliado a Factiliza.</span></div>
-        {status?.savedInPanel && <div className="integration-note">Las credenciales configuradas aquí se guardan en esta instalación de Z-FLOW.</div>}
+        <div className="integration-note">La lista confirma que los datos estén completos. Factiliza valida el token al emitir la primera boleta; no se genera un comprobante de prueba.</div>
+        {status?.savedInPanel && <div className="integration-note">La configuración se guarda en esta instalación de Z-FLOW.</div>}
       </section>
     </div>
   </div>;
