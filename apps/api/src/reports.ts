@@ -641,7 +641,7 @@ export async function registerReportRoutes(app: FastifyInstance) {
         await mkdir(paths.folder, { recursive: true });
         const cdrZip = result?.data?.cdrZip;
         if (typeof cdrZip === "string" && cdrZip.trim()) {
-          const encoded = cdrZip.replace(/^data:application\\/zip;base64,/i, "").trim();
+          const encoded = cdrZip.replace(/^data:application\/zip;base64,/i, "").trim();
           const cdrBuffer = Buffer.from(encoded, "base64");
           if (cdrBuffer.length) {
             await writeFile(paths.cdr, cdrBuffer);
