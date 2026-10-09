@@ -679,16 +679,12 @@ export async function registerReportRoutes(app: FastifyInstance) {
   });
 
   app.get("/api/branches/:branchId/closures/:closureId/electronic-document/:format", async (request, reply) => {
-    const parsed = closureParams.extend({ format: z.enum(["pdf", "xml"]) }).safeParse(request.params);
+    const parsed = closureParams.extend({ format: z.enum(["pdf", "xml", "cdr"]) }).safeParse(request.params);
     if (!parsed.success) return reply.code(400).send({ error: "Comprobante inválido" });
     const auth = await requireOwner(request, reply);
     if (!auth) return;
     if (!canReadBranch(auth, parsed.data.branchId)) return reply.code(403).send({ error: "Acceso denegado" });
-    const token = process.env.FACTILIZA_API_TOKEN?.trim();
-    if (!token) return reply.code(503).send({ error: "Factiliza no está configurada en el servidor." });
 
-    const [settingsRows] = await db.query<any[]>("SELECT ruc FROM system_settings WHERE id=1 LIMIT 1");
-    const issuerRuc = String(settingsRows[0]?.ruc ?? "").replace(/\D/g, "");
     const [rows] = await db.query<any[]>(
       `SELECT series, correlativo, status FROM factiliza_documents
        WHERE branch_id=? AND closure_id=? LIMIT 1`,
@@ -696,23 +692,33 @@ export async function registerReportRoutes(app: FastifyInstance) {
     );
     if (!rows.length || rows[0].status !== "ACCEPTED") return reply.code(409).send({ error: "No hay una boleta aceptada para descargar." });
 
-    const baseUrl = (process.env.FACTILIZA_API_BASE_URL || "https://apife-qa.factiliza.com/api/v1").replace(/\/$/, "");
-    try {
-      const response = await fetch(`${baseUrl}/invoice/${parsed.data.format}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ empresa_Ruc: issuerRuc, tipo_Doc: "03", serie: rows[0].series, correlativo: String(rows[0].correlativo) }),
-        signal: AbortSignal.timeout(30000)
-      });
-      if (!response.ok) return reply.code(502).send({ error: `Factiliza no pudo generar el archivo ${parsed.data.format.toUpperCase()}.` });
-      const data = Buffer.from(await response.arrayBuffer());
-      const contentType = response.headers.get("content-type") || (parsed.data.format === "pdf" ? "application/pdf" : "application/xml");
-      reply.header("Content-Type", contentType);
-      reply.header("Content-Disposition", `attachment; filename="boleta-${rows[0].series}-${String(rows[0].correlativo).padStart(6,"0")}.${parsed.data.format}"`);
-      return reply.send(data);
-    } catch {
-      return reply.code(502).send({ error: "No se pudo descargar el documento desde Factiliza." });
+    const series = String(rows[0].series);
+    const correlativo = Number(rows[0].correlativo);
+    const paths = electronicDocumentPaths(parsed.data.branchId, parsed.data.closureId, series, correlativo);
+    const filePath = parsed.data.format === "cdr" ? paths.cdr : paths[parsed.data.format];
+    let data: Buffer | null = null;
+    try { data = await readFile(filePath); } catch { data = null; }
+
+    if (!data) {
+      if (parsed.data.format === "cdr") return reply.code(404).send({ error: "No se encontró el CDR archivado para esta boleta." });
+      const token = process.env.FACTILIZA_API_TOKEN?.trim();
+      if (!token) return reply.code(503).send({ error: "La copia local no está disponible y Factiliza no está configurada en el servidor." });
+      const [settingsRows] = await db.query<any[]>("SELECT ruc FROM system_settings WHERE id=1 LIMIT 1");
+      const issuerRuc = String(settingsRows[0]?.ruc ?? "").replace(/[^0-9]/g, "");
+      let baseUrl = process.env.FACTILIZA_API_BASE_URL || "https://apife-qa.factiliza.com/api/v1";
+      if (baseUrl.endsWith("/")) baseUrl = baseUrl.slice(0, -1);
+      const saved = await fetchAndStoreFactilizaArtifact(
+        baseUrl, token, issuerRuc, parsed.data.branchId, parsed.data.closureId, series, correlativo, parsed.data.format
+      ).catch(() => false);
+      if (!saved) return reply.code(502).send({ error: "Factiliza no pudo recuperar el archivo " + parsed.data.format.toUpperCase() + "." });
+      data = await readFile(filePath);
     }
+
+    const extension = parsed.data.format === "cdr" ? "cdr.zip" : parsed.data.format;
+    const filename = "boleta-" + series + "-" + String(correlativo).padStart(6, "0") + "." + extension;
+    reply.header("Content-Type", parsed.data.format === "pdf" ? "application/pdf" : parsed.data.format === "xml" ? "application/xml" : "application/zip");
+    reply.header("Content-Disposition", parsed.data.format === "pdf" ? "inline; filename=\"" + filename + "\"" : contentDisposition(filename));
+    return reply.send(data);
   });
 
 
