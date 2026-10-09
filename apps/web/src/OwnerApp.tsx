@@ -213,6 +213,9 @@ type Closure = {
   closed_by?: string | null;
   branch_id: number;
   branch_name: string;
+  electronic_boleta_series?: string | null;
+  electronic_boleta_number?: number | string | null;
+  electronic_boleta_status?: "PENDING" | "ACCEPTED" | "REJECTED" | "UNKNOWN" | null;
 };
 
 type ClosureOperation = {
@@ -908,6 +911,7 @@ function CashAdminPage({ branches, closures }: { branches: Branch[]; closures: C
   const [detailLoading, setDetailLoading] = useState<number | null>(null);
   const [detailErrors, setDetailErrors] = useState<Record<number, string>>({});
   const [invoiceClosure, setInvoiceClosure] = useState<Closure | null>(null);
+  const [electronicDocuments, setElectronicDocuments] = useState<Record<number, any>>({});
   const selectedBranchName = branch === "ALL"
     ? "Mostrar todos"
     : branches.find((item) => String(item.id) === branch)?.name;
@@ -1010,6 +1014,14 @@ function CashAdminPage({ branches, closures }: { branches: Branch[]; closures: C
                 {filteredClosures.map((item) => {
                   const open = expandedClosure === item.id;
                   const detail = closureDetails[item.id];
+                  const electronicDocument = electronicDocuments[item.id] ?? (
+                    item.electronic_boleta_status
+                      ? { status: item.electronic_boleta_status, series: item.electronic_boleta_series, correlativo: item.electronic_boleta_number }
+                      : null
+                  );
+                  const boletaNumber = electronicDocument?.series
+                    ? String(electronicDocument.series) + "-" + String(electronicDocument.correlativo ?? "").padStart(6, "0")
+                    : "";
                   return <Fragment key={item.id}>
                     <tr>
                       <td>{dateTime(item.closed_at)}</td><td><strong>{item.branch_name}</strong></td>
@@ -1021,7 +1033,7 @@ function CashAdminPage({ branches, closures }: { branches: Branch[]; closures: C
                       <td><div className="closure-actions">
                         <button className="mini-button" aria-expanded={open} onClick={() => void toggleClosure(item)}><ChevronDown size={12} className={open ? "closure-chevron open" : "closure-chevron"}/>{open ? "Ocultar" : "Detalle"}</button>
                         <button className="mini-button" onClick={() => window.open(`/api/branches/${item.branch_id}/closures/${item.id}/pdf`, "_blank")}><Download size={12}/> PDF</button>
-                        <button className="mini-button closure-invoice-button" title="La emisión se activará al completar la configuración de Factiliza" onClick={() => setInvoiceClosure(item)}><ReceiptText size={12}/> Boleta electrónica</button>
+                        <button className="mini-button closure-invoice-button" title={electronicDocument?.status === "ACCEPTED" ? "Ver boleta electrónica enviada a SUNAT" : "Emitir boleta electrónica para este cierre"} onClick={() => setInvoiceClosure(item)}>{electronicDocument?.status === "ACCEPTED" ? <Eye size={12}/> : <ReceiptText size={12}/>} {electronicDocument?.status === "ACCEPTED" ? "Ver " + boletaNumber : "Boleta electrónica"}</button>
                       </div></td>
                     </tr>
                     {open && <tr className="closure-detail-row"><td colSpan={8}>
@@ -1058,13 +1070,17 @@ function CashAdminPage({ branches, closures }: { branches: Branch[]; closures: C
         </section>
       </>}
 
-      {invoiceClosure && <ClosureBillingModal closure={invoiceClosure} onClose={() => setInvoiceClosure(null)} />}
+      {invoiceClosure && <ClosureBillingModal
+        closure={invoiceClosure}
+        onClose={() => setInvoiceClosure(null)}
+        onDocumentChange={(document) => setElectronicDocuments((current) => ({ ...current, [invoiceClosure.id]: document }))}
+      />}
       
     </>
   );
 }
 
-function ClosureBillingModal({ closure, onClose }: { closure: Closure; onClose: () => void }) {
+function ClosureBillingModal({ closure, onClose, onDocumentChange }: { closure: Closure; onClose: () => void; onDocumentChange: (document: any) => void }) {
   const [config, setConfig] = useState<{hasToken:boolean;hasRuc:boolean;hasSeries:boolean;rusActivityConfirmed:boolean;endpointMode:string} | null>(null);
   const [document, setDocument] = useState<any>(null);
   const [customerDocumentType, setCustomerDocumentType] = useState<"1"|"6">("1");
@@ -1103,6 +1119,7 @@ function ClosureBillingModal({ closure, onClose }: { closure: Closure; onClose: 
         body: JSON.stringify({ customerDocumentType, customerDocumentNumber, customerName, customerAddress })
       });
       setDocument(result.document);
+      onDocumentChange(result.document);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo emitir la boleta.");
     } finally {
@@ -1122,10 +1139,16 @@ function ClosureBillingModal({ closure, onClose }: { closure: Closure; onClose: 
       <div className="modal-head"><div><h2 id="closure-invoice-title">Boleta electrónica · cierre #{closure.id}</h2><p>{closure.branch_name} · {dateTime(closure.closed_at)}</p></div><button className="icon-btn" onClick={onClose} aria-label="Cerrar"><X size={18}/></button></div>
       <div className="invoice-closure-summary"><span>Comisión del cierre<strong>{currency(closure.commission_total)}</strong></span><span>Régimen<strong>Nuevo RUS · solo boleta</strong></span></div>
       {document?.status === "ACCEPTED" ? <>
-        <div className="invoice-success-notice"><CheckCircle2 size={18}/><div><strong>Boleta aceptada por Factiliza</strong><span>{document.provider_document_id || `${document.series}-${String(document.correlativo).padStart(6,"0")}`} · {document.provider_message}</span></div></div>
+        <div className="invoice-success-notice"><CheckCircle2 size={18}/><div><strong>Boleta enviada y aceptada por SUNAT</strong><span>{document.provider_document_id || String(document.series) + "-" + String(document.correlativo).padStart(6, "0")} · {document.provider_message}</span></div></div>
+        <div className="invoice-archive-notice">
+          <strong>Copia electrónica archivada en el servidor</strong>
+          <span>{document.storedFiles?.folder || ("boletas-electronicas/filial-" + closure.branch_id + "/cierre-" + closure.id)}</span>
+          <small>PDF {document.storedFiles?.pdf ? "✓" : "pendiente"} · XML {document.storedFiles?.xml ? "✓" : "pendiente"} · CDR {document.storedFiles?.cdr ? "✓" : "pendiente"}</small>
+        </div>
         <div className="invoice-download-actions">
-          <button className="soft" onClick={() => window.open(`/api/branches/${closure.branch_id}/closures/${closure.id}/electronic-document/pdf`, "_blank")}><Download size={14}/> Descargar PDF</button>
+          <button className="soft" onClick={() => window.open(`/api/branches/${closure.branch_id}/closures/${closure.id}/electronic-document/pdf`, "_blank")}><Eye size={14}/> Ver boleta PDF</button>
           <button className="soft" onClick={() => window.open(`/api/branches/${closure.branch_id}/closures/${closure.id}/electronic-document/xml`, "_blank")}><Download size={14}/> Descargar XML</button>
+          <button className="soft" disabled={!document.storedFiles?.cdr} onClick={() => window.open(`/api/branches/${closure.branch_id}/closures/${closure.id}/electronic-document/cdr`, "_blank")}><Download size={14}/> Descargar CDR</button>
         </div>
       </> : document ? <div className={`invoice-setup-notice ${document.status === "REJECTED" ? "error" : ""}`}><ReceiptText size={18}/><div><strong>{document.status === "UNKNOWN" ? "Estado por confirmar" : document.status === "REJECTED" ? "Factiliza rechazó la boleta" : "Emisión iniciada"}</strong><span>{document.provider_message || "El intento quedó registrado para evitar una emisión duplicada."}</span></div></div> : <>
         <div className="invoice-setup-notice"><ShieldCheck size={18}/><div><strong>Revisa el cliente antes de emitir</strong><span>Se enviará a Factiliza/SUNAT una boleta por la comisión total del cierre. Una vez emitida, no se puede borrar desde este panel.</span></div></div>
