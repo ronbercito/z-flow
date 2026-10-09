@@ -25,6 +25,13 @@ const closureParams = z.object({
   closureId: z.coerce.number().int().positive()
 });
 
+const closureBoletaBody = z.object({
+  customerDocumentType: z.enum(["1", "6"]),
+  customerDocumentNumber: z.string().trim().regex(/^\\d{8}$|^\\d{11}$/),
+  customerName: z.string().trim().min(2).max(140),
+  customerAddress: z.string().trim().max(255).optional().default("")
+});
+
 type ReportFilters = z.infer<typeof reportQuery>;
 
 function money(value: unknown) {
@@ -305,6 +312,289 @@ function contentDisposition(filename: string) {
 }
 
 export async function registerReportRoutes(app: FastifyInstance) {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS factiliza_documents (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      branch_id BIGINT UNSIGNED NOT NULL,
+      closure_id BIGINT UNSIGNED NOT NULL,
+      series VARCHAR(20) NOT NULL,
+      correlativo BIGINT UNSIGNED NOT NULL,
+      customer_document_type VARCHAR(2) NOT NULL,
+      customer_document_number VARCHAR(20) NOT NULL,
+      customer_name VARCHAR(140) NOT NULL,
+      customer_address VARCHAR(255) NULL,
+      amount DECIMAL(14,2) NOT NULL,
+      status ENUM('PENDING','ACCEPTED','REJECTED','UNKNOWN') NOT NULL,
+      provider_document_id VARCHAR(80) NULL,
+      provider_code VARCHAR(40) NULL,
+      provider_message VARCHAR(500) NULL,
+      created_by_user_id BIGINT UNSIGNED NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY uq_factiliza_closure (closure_id),
+      UNIQUE KEY uq_factiliza_series_number (series, correlativo),
+      KEY idx_factiliza_branch (branch_id, created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS factiliza_document_sequences (
+      series VARCHAR(20) NOT NULL,
+      next_number BIGINT UNSIGNED NOT NULL DEFAULT 1,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (series)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  app.get("/api/admin/factiliza/status", async (request, reply) => {
+    const auth = await requireOwner(request, reply);
+    if (!auth) return;
+    const [settings] = await db.query<any[]>(
+      "SELECT ruc FROM system_settings WHERE id=1 LIMIT 1"
+    );
+    return {
+      provider: "Factiliza",
+      documentType: "BOLETA",
+      endpointMode: process.env.FACTILIZA_API_BASE_URL?.includes("qa") ? "PRUEBAS" : "CONFIGURADO",
+      hasToken: Boolean(process.env.FACTILIZA_API_TOKEN?.trim()),
+      hasRuc: Boolean(String(settings[0]?.ruc ?? "").trim()),
+      hasSeries: Boolean(process.env.FACTILIZA_BOLETA_SERIES?.trim()),
+      rusActivityConfirmed: process.env.FACTILIZA_RUS_ACTIVITY_CONFIRMED === "true"
+    };
+  });
+
+  app.get("/api/branches/:branchId/closures/:closureId/electronic-document", async (request, reply) => {
+    const parsed = closureParams.safeParse(request.params);
+    if (!parsed.success) return reply.code(400).send({ error: "Cierre inválido" });
+    const auth = await requireOwner(request, reply);
+    if (!auth) return;
+    if (!canReadBranch(auth, parsed.data.branchId)) return reply.code(403).send({ error: "Acceso denegado" });
+
+    const [rows] = await db.query<any[]>(
+      `SELECT id, status, series, correlativo, customer_document_type,
+              customer_document_number, customer_name, amount, provider_document_id,
+              provider_code, provider_message, created_at
+       FROM factiliza_documents WHERE closure_id=? AND branch_id=? LIMIT 1`,
+      [parsed.data.closureId, parsed.data.branchId]
+    );
+    return { document: rows[0] ?? null };
+  });
+
+  app.post("/api/branches/:branchId/closures/:closureId/electronic-document", async (request, reply) => {
+    const parsedParams = closureParams.safeParse(request.params);
+    const parsedBody = closureBoletaBody.safeParse(request.body);
+    if (!parsedParams.success || !parsedBody.success) return reply.code(400).send({ error: "Datos de boleta inválidos" });
+
+    const auth = await requireOwner(request, reply);
+    if (!auth) return;
+    if (!canReadBranch(auth, parsedParams.data.branchId)) return reply.code(403).send({ error: "Acceso denegado" });
+
+    const token = process.env.FACTILIZA_API_TOKEN?.trim();
+    const baseUrl = (process.env.FACTILIZA_API_BASE_URL || "https://apife-qa.factiliza.com/api/v1").replace(/\\/$/, "");
+    const series = process.env.FACTILIZA_BOLETA_SERIES?.trim().toUpperCase();
+    const [settingsRows] = await db.query<any[]>(
+      "SELECT ruc FROM system_settings WHERE id=1 LIMIT 1"
+    );
+    const issuerRuc = String(settingsRows[0]?.ruc ?? "").replace(/\\D/g, "");
+    if (!token || !series || issuerRuc.length !== 11) {
+      return reply.code(503).send({ error: "Completa el token, la serie de boleta y el RUC emisor en la configuración segura del servidor." });
+    }
+    if (process.env.FACTILIZA_RUS_ACTIVITY_CONFIRMED !== "true") {
+      return reply.code(409).send({ error: "Confirma con tu contador que la actividad registrada del emisor es compatible con el Nuevo RUS antes de emitir." });
+    }
+
+    const customer = parsedBody.data;
+    if (
+      (customer.customerDocumentType === "1" && customer.customerDocumentNumber.length !== 8)
+      || (customer.customerDocumentType === "6" && customer.customerDocumentNumber.length !== 11)
+    ) return reply.code(422).send({ error: "El número no coincide con el tipo de documento elegido." });
+
+    const connection = await db.getConnection();
+    let documentId = 0;
+    let correlativo = 0;
+    let amount = 0;
+    try {
+      await connection.beginTransaction();
+      const [closureRows] = await connection.execute<any[]>(
+        `SELECT dc.id, dc.commission_total, dc.branch_id
+         FROM daily_closures dc WHERE dc.id=? AND dc.branch_id=? LIMIT 1 FOR UPDATE`,
+        [parsedParams.data.closureId, parsedParams.data.branchId]
+      );
+      if (!closureRows.length) {
+        await connection.rollback();
+        return reply.code(404).send({ error: "Cierre no encontrado." });
+      }
+      const closure = closureRows[0];
+      amount = money(closure.commission_total);
+      if (amount <= 0) {
+        await connection.rollback();
+        return reply.code(422).send({ error: "Este cierre no tiene comisión para emitir una boleta." });
+      }
+
+      const [existingRows] = await connection.execute<any[]>(
+        "SELECT id, status, provider_document_id FROM factiliza_documents WHERE closure_id=? LIMIT 1 FOR UPDATE",
+        [parsedParams.data.closureId]
+      );
+      if (existingRows.length) {
+        await connection.rollback();
+        return reply.code(409).send({
+          error: "Ya existe un intento de emisión para este cierre. No se volverá a enviar para evitar duplicados.",
+          document: existingRows[0]
+        });
+      }
+
+      await connection.execute(
+        "INSERT IGNORE INTO factiliza_document_sequences (series, next_number) VALUES (?, 1)",
+        [series]
+      );
+      const [sequenceRows] = await connection.execute<any[]>(
+        "SELECT next_number FROM factiliza_document_sequences WHERE series=? FOR UPDATE",
+        [series]
+      );
+      correlativo = Number(sequenceRows[0]?.next_number ?? 1);
+      await connection.execute(
+        "UPDATE factiliza_document_sequences SET next_number=? WHERE series=?",
+        [correlativo + 1, series]
+      );
+
+      const [insertResult] = await connection.execute<any>(
+        `INSERT INTO factiliza_documents
+         (branch_id, closure_id, series, correlativo, customer_document_type,
+          customer_document_number, customer_name, customer_address, amount,
+          status, created_by_user_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)`,
+        [
+          parsedParams.data.branchId, parsedParams.data.closureId, series, correlativo,
+          customer.customerDocumentType, customer.customerDocumentNumber,
+          customer.customerName, customer.customerAddress || null, amount, auth.userId
+        ]
+      );
+      documentId = Number(insertResult.insertId);
+      await connection.commit();
+    } catch (error: any) {
+      await connection.rollback();
+      if (error?.code === "ER_DUP_ENTRY") {
+        return reply.code(409).send({ error: "Este cierre ya tiene un comprobante asociado." });
+      }
+      throw error;
+    } finally {
+      connection.release();
+    }
+
+    const now = new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString().replace("Z", "-05:00");
+    const number = String(correlativo).padStart(6, "0");
+    const invoicePayload = {
+      tipo_Operacion: "0101",
+      tipo_Doc: "03",
+      serie,
+      correlativo: String(correlativo),
+      tipo_Moneda: "PEN",
+      fecha_Emision: now,
+      empresa_Ruc: issuerRuc,
+      cliente_Tipo_Doc: customer.customerDocumentType,
+      cliente_Num_Doc: customer.customerDocumentNumber,
+      cliente_Razon_Social: customer.customerName,
+      cliente_Direccion: customer.customerAddress || "",
+      monto_Igv: 0,
+      total_Impuestos: 0,
+      valor_Venta: amount,
+      monto_Oper_Gravadas: 0,
+      monto_Oper_Exoneradas: amount,
+      sub_Total: amount,
+      monto_Imp_Venta: amount,
+      estado_Documento: "0",
+      manual: false,
+      id_Base_Dato: `zflow-closure-${parsedParams.data.branchId}-${parsedParams.data.closureId}`,
+      detalle: [{
+        unidad: "NIU",
+        cantidad: 1,
+        cod_Producto: "COMISION_CIERRE",
+        descripcion: `Comisión de operaciones · cierre ${parsedParams.data.closureId}`,
+        monto_Valor_Unitario: amount,
+        monto_Base_Igv: amount,
+        porcentaje_Igv: 0,
+        igv: 0,
+        tip_Afe_Igv: "20",
+        total_Impuestos: 0,
+        monto_Precio_Unitario: amount,
+        monto_Valor_Venta: amount,
+        factor_Icbper: 0
+      }],
+      forma_pago: [{ tipo: "Contado", monto: amount, cuota: 0, fecha_Pago: now }],
+      legend: [{ legend_Code: "1000", legend_Value: `SON ${amount.toFixed(2)} SOLES` }]
+    };
+
+    try {
+      const response = await fetch(`${baseUrl}/invoice/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(invoicePayload),
+        signal: AbortSignal.timeout(30000)
+      });
+      const result: any = await response.json().catch(() => ({}));
+      const cdr = result?.data?.sunatResponse?.cdrResponse ?? {};
+      const accepted = response.ok && result?.success === true && String(cdr.code) === "0";
+      const status = accepted ? "ACCEPTED" : "REJECTED";
+      const providerMessage = String(cdr.description ?? result?.message ?? "Factiliza no aceptó la boleta.").slice(0, 500);
+      await db.execute(
+        `UPDATE factiliza_documents SET status=?, provider_document_id=?, provider_code=?, provider_message=?
+         WHERE id=?`,
+        [status, cdr.id ?? null, cdr.code == null ? null : String(cdr.code), providerMessage, documentId]
+      );
+      if (!accepted) {
+        return reply.code(response.ok ? 422 : 502).send({ error: providerMessage, document: { id: documentId, status, series, correlativo: number } });
+      }
+      return reply.code(201).send({
+        document: { id: documentId, status, series, correlativo: number, provider_document_id: cdr.id ?? `${series}-${number}`, provider_code: String(cdr.code), provider_message: providerMessage }
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "No se recibió respuesta de Factiliza.";
+      await db.execute(
+        "UPDATE factiliza_documents SET status='UNKNOWN', provider_message=? WHERE id=?",
+        [`Estado incierto; no reintentar sin consultar a Factiliza. ${message}`.slice(0, 500), documentId]
+      );
+      return reply.code(502).send({ error: "La respuesta de Factiliza no llegó. El intento quedó bloqueado para evitar una boleta duplicada; consulta su estado antes de actuar." });
+    }
+  });
+
+  app.get("/api/branches/:branchId/closures/:closureId/electronic-document/:format", async (request, reply) => {
+    const parsed = closureParams.extend({ format: z.enum(["pdf", "xml"]) }).safeParse(request.params);
+    if (!parsed.success) return reply.code(400).send({ error: "Comprobante inválido" });
+    const auth = await requireOwner(request, reply);
+    if (!auth) return;
+    if (!canReadBranch(auth, parsed.data.branchId)) return reply.code(403).send({ error: "Acceso denegado" });
+    const token = process.env.FACTILIZA_API_TOKEN?.trim();
+    if (!token) return reply.code(503).send({ error: "Factiliza no está configurada en el servidor." });
+
+    const [settingsRows] = await db.query<any[]>("SELECT ruc FROM system_settings WHERE id=1 LIMIT 1");
+    const issuerRuc = String(settingsRows[0]?.ruc ?? "").replace(/\\D/g, "");
+    const [rows] = await db.query<any[]>(
+      `SELECT series, correlativo, status FROM factiliza_documents
+       WHERE branch_id=? AND closure_id=? LIMIT 1`,
+      [parsed.data.branchId, parsed.data.closureId]
+    );
+    if (!rows.length || rows[0].status !== "ACCEPTED") return reply.code(409).send({ error: "No hay una boleta aceptada para descargar." });
+
+    const baseUrl = (process.env.FACTILIZA_API_BASE_URL || "https://apife-qa.factiliza.com/api/v1").replace(/\\/$/, "");
+    try {
+      const response = await fetch(`${baseUrl}/invoice/${parsed.data.format}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ empresa_Ruc: issuerRuc, tipo_Doc: "03", serie: rows[0].series, correlativo: String(rows[0].correlativo) }),
+        signal: AbortSignal.timeout(30000)
+      });
+      if (!response.ok) return reply.code(502).send({ error: `Factiliza no pudo generar el archivo ${parsed.data.format.toUpperCase()}.` });
+      const data = Buffer.from(await response.arrayBuffer());
+      const contentType = response.headers.get("content-type") || (parsed.data.format === "pdf" ? "application/pdf" : "application/xml");
+      reply.header("Content-Type", contentType);
+      reply.header("Content-Disposition", `attachment; filename="boleta-${rows[0].series}-${String(rows[0].correlativo).padStart(6,"0")}.${parsed.data.format}"`);
+      return reply.send(data);
+    } catch {
+      return reply.code(502).send({ error: "No se pudo descargar el documento desde Factiliza." });
+    }
+  });
+
+
   app.get("/api/admin/reports/summary", async (request, reply) => {
     const auth = await requireOwner(request, reply);
     if (!auth) return;
