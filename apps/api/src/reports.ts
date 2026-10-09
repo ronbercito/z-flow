@@ -461,7 +461,11 @@ export async function registerReportRoutes(app: FastifyInstance) {
        FROM factiliza_documents WHERE closure_id=? AND branch_id=? LIMIT 1`,
       [parsed.data.closureId, parsed.data.branchId]
     );
-    return { document: rows[0] ?? null };
+    const document = rows[0] ?? null;
+    const storedFiles = document?.status === "ACCEPTED"
+      ? await storedElectronicFiles(parsed.data.branchId, parsed.data.closureId, document.series, document.correlativo)
+      : null;
+    return { document: document ? { ...document, storedFiles } : null };
   });
 
   app.post("/api/branches/:branchId/closures/:closureId/electronic-document", async (request, reply) => {
@@ -500,8 +504,10 @@ export async function registerReportRoutes(app: FastifyInstance) {
     try {
       await connection.beginTransaction();
       const [closureRows] = await connection.execute<any[]>(
-        `SELECT dc.id, dc.commission_total, dc.branch_id
-         FROM daily_closures dc WHERE dc.id=? AND dc.branch_id=? LIMIT 1 FOR UPDATE`,
+        `SELECT dc.id, dc.commission_total, dc.branch_id,
+                DATE_FORMAT(dc.closed_at, '%d/%m/%Y') AS closed_date, b.name AS branch_name
+         FROM daily_closures dc JOIN branches b ON b.id=dc.branch_id
+         WHERE dc.id=? AND dc.branch_id=? LIMIT 1 FOR UPDATE`,
         [parsedParams.data.closureId, parsedParams.data.branchId]
       );
       if (!closureRows.length) {
@@ -593,7 +599,7 @@ export async function registerReportRoutes(app: FastifyInstance) {
         unidad: "NIU",
         cantidad: 1,
         cod_Producto: "COMISION_CIERRE",
-        descripcion: `Comisión de operaciones · cierre ${parsedParams.data.closureId}`,
+        descripcion: "Comisión generada por las operaciones del turno del " + closure.closed_date + ", filial " + closure.branch_name + " · cierre #" + parsedParams.data.closureId,
         monto_Valor_Unitario: amount,
         monto_Base_Igv: amount,
         porcentaje_Igv: 0,
@@ -628,8 +634,39 @@ export async function registerReportRoutes(app: FastifyInstance) {
       if (!accepted) {
         return reply.code(response.ok ? 422 : 502).send({ error: providerMessage, document: { id: documentId, status, series, correlativo: number } });
       }
+
+      const paths = electronicDocumentPaths(parsedParams.data.branchId, parsedParams.data.closureId, series, correlativo);
+      let cdrSaved = false;
+      try {
+        await mkdir(paths.folder, { recursive: true });
+        const cdrZip = result?.data?.cdrZip;
+        if (typeof cdrZip === "string" && cdrZip.trim()) {
+          const encoded = cdrZip.replace(/^data:application\\/zip;base64,/i, "").trim();
+          const cdrBuffer = Buffer.from(encoded, "base64");
+          if (cdrBuffer.length) {
+            await writeFile(paths.cdr, cdrBuffer);
+            cdrSaved = true;
+          }
+        }
+      } catch {
+        cdrSaved = false;
+      }
+      const [pdfSaved, xmlSaved] = await Promise.all([
+        fetchAndStoreFactilizaArtifact(baseUrl, token, issuerRuc, parsedParams.data.branchId, parsedParams.data.closureId, series, correlativo, "pdf").catch(() => false),
+        fetchAndStoreFactilizaArtifact(baseUrl, token, issuerRuc, parsedParams.data.branchId, parsedParams.data.closureId, series, correlativo, "xml").catch(() => false)
+      ]);
+      const storedFiles = await storedElectronicFiles(parsedParams.data.branchId, parsedParams.data.closureId, series, correlativo);
       return reply.code(201).send({
-        document: { id: documentId, status, series, correlativo: number, provider_document_id: cdr.id ?? `${series}-${number}`, provider_code: String(cdr.code), provider_message: providerMessage }
+        document: {
+          id: documentId,
+          status,
+          series,
+          correlativo: number,
+          provider_document_id: cdr.id ?? `${series}-${number}`,
+          provider_code: String(cdr.code),
+          provider_message: providerMessage,
+          storedFiles: { ...storedFiles, pdf: pdfSaved || storedFiles.pdf, xml: xmlSaved || storedFiles.xml, cdr: cdrSaved || storedFiles.cdr }
+        }
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "No se recibió respuesta de Factiliza.";
