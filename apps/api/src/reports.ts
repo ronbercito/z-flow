@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import ExcelJS from "exceljs";
@@ -25,6 +26,13 @@ const receiptParams = z.object({
 const closureParams = z.object({
   branchId: z.coerce.number().int().positive(),
   closureId: z.coerce.number().int().positive()
+});
+
+const factilizaConfigBody = z.object({
+  apiToken: z.string().trim().max(4096).optional().default(""),
+  baseUrl: z.string().trim().url().max(255),
+  series: z.string().trim().toUpperCase().min(4).max(10).regex(/^[A-Z0-9-]+$/),
+  rusActivityConfirmed: z.boolean()
 });
 
 const closureBoletaBody = z.object({
@@ -315,6 +323,43 @@ function contentDisposition(filename: string) {
 
 type ElectronicArtifactFormat = "pdf" | "xml";
 
+function factilizaEncryptionKey() {
+  const databaseSecret = process.env.DB_PASSWORD?.trim();
+  if (!databaseSecret) throw new Error("Falta DB_PASSWORD para proteger la credencial de Factiliza.");
+  return createHash("sha256").update("zflow:factiliza-token:v1:").update(databaseSecret).digest();
+}
+
+function encryptFactilizaToken(token: string) {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", factilizaEncryptionKey(), iv);
+  const encrypted = Buffer.concat([cipher.update(token, "utf8"), cipher.final()]);
+  return ["v1", iv.toString("base64"), cipher.getAuthTag().toString("base64"), encrypted.toString("base64")].join(":");
+}
+
+function decryptFactilizaToken(value: unknown): string | null {
+  if (typeof value !== "string" || !value.startsWith("v1:")) return null;
+  try {
+    const [, ivEncoded, tagEncoded, encryptedEncoded] = value.split(":");
+    const decipher = createDecipheriv("aes-256-gcm", factilizaEncryptionKey(), Buffer.from(ivEncoded, "base64"));
+    decipher.setAuthTag(Buffer.from(tagEncoded, "base64"));
+    return Buffer.concat([decipher.update(Buffer.from(encryptedEncoded, "base64")), decipher.final()]).toString("utf8");
+  } catch {
+    return null;
+  }
+}
+
+async function getFactilizaConfig() {
+  const [rows] = await db.query<any[]>("SELECT token_encrypted, base_url, series, rus_activity_confirmed FROM factiliza_integration_settings WHERE id=1 LIMIT 1");
+  const row = rows[0];
+  return {
+    token: decryptFactilizaToken(row?.token_encrypted) || process.env.FACTILIZA_API_TOKEN?.trim() || "",
+    baseUrl: String(row?.base_url || process.env.FACTILIZA_API_BASE_URL || "https://apife-qa.factiliza.com/api/v1").replace(/\/$/, ""),
+    series: String(row?.series || process.env.FACTILIZA_BOLETA_SERIES || "").trim().toUpperCase(),
+    rusActivityConfirmed: row ? Boolean(Number(row.rus_activity_confirmed)) : process.env.FACTILIZA_RUS_ACTIVITY_CONFIRMED === "true",
+    savedInPanel: Boolean(row)
+  };
+}
+
 function electronicDocumentPaths(branchId: number, closureId: number, series: string, correlativo: number | string) {
   const safeSeries = series.toUpperCase().replace(/[^A-Z0-9_-]/g, "") || "BOLETA";
   const number = String(correlativo).padStart(6, "0");
@@ -430,21 +475,52 @@ export async function registerReportRoutes(app: FastifyInstance) {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS factiliza_integration_settings (
+      id TINYINT UNSIGNED NOT NULL DEFAULT 1,
+      token_encrypted TEXT NULL,
+      base_url VARCHAR(255) NOT NULL,
+      series VARCHAR(20) NOT NULL,
+      rus_activity_confirmed TINYINT(1) NOT NULL DEFAULT 0,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
   app.get("/api/admin/factiliza/status", async (request, reply) => {
     const auth = await requireOwner(request, reply);
     if (!auth) return;
-    const [settings] = await db.query<any[]>(
-      "SELECT ruc FROM system_settings WHERE id=1 LIMIT 1"
-    );
+    const [settings] = await db.query<any[]>("SELECT ruc FROM system_settings WHERE id=1 LIMIT 1");
+    const config = await getFactilizaConfig();
+    const endpointMode = /qa|prueba|sandbox/i.test(config.baseUrl) ? "PRUEBAS" : "PRODUCCIÓN";
     return {
-      provider: "Factiliza",
-      documentType: "BOLETA",
-      endpointMode: process.env.FACTILIZA_API_BASE_URL?.includes("qa") ? "PRUEBAS" : "CONFIGURADO",
-      hasToken: Boolean(process.env.FACTILIZA_API_TOKEN?.trim()),
+      provider: "Factiliza", documentType: "BOLETA", endpointMode,
+      baseUrl: config.baseUrl, series: config.series,
+      hasToken: Boolean(config.token),
       hasRuc: Boolean(String(settings[0]?.ruc ?? "").trim()),
-      hasSeries: Boolean(process.env.FACTILIZA_BOLETA_SERIES?.trim()),
-      rusActivityConfirmed: process.env.FACTILIZA_RUS_ACTIVITY_CONFIRMED === "true"
+      hasSeries: Boolean(config.series),
+      rusActivityConfirmed: config.rusActivityConfirmed, savedInPanel: config.savedInPanel
     };
+  });
+
+  app.put("/api/admin/factiliza/config", async (request, reply) => {
+    const auth = await requireOwner(request, reply);
+    if (!auth) return;
+    const parsed = factilizaConfigBody.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: "Revisa la URL, la serie y la confirmación del régimen." });
+    let url: URL;
+    try { url = new URL(parsed.data.baseUrl); } catch { return reply.code(400).send({ error: "La URL base no es válida." }); }
+    if (url.protocol !== "https:") return reply.code(400).send({ error: "La URL de Factiliza debe usar HTTPS." });
+    const token = parsed.data.apiToken.trim();
+    const encrypted = token ? encryptFactilizaToken(token) : null;
+    await db.execute(
+      `INSERT INTO factiliza_integration_settings (id, token_encrypted, base_url, series, rus_activity_confirmed)
+       VALUES (1, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE token_encrypted=IF(VALUES(token_encrypted) IS NULL, token_encrypted, VALUES(token_encrypted)),
+         base_url=VALUES(base_url), series=VALUES(series), rus_activity_confirmed=VALUES(rus_activity_confirmed)`,
+      [encrypted, url.toString().replace(/\/$/, ""), parsed.data.series, parsed.data.rusActivityConfirmed ? 1 : 0]
+    );
+    return { ok: true };
   });
 
   app.get("/api/branches/:branchId/closures/:closureId/electronic-document", async (request, reply) => {
