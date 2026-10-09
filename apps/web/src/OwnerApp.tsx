@@ -62,7 +62,6 @@ type AdminPage =
   | "reports"
   | "audit"
   | "backup"
-  | "integrations"
   | "settings"
   | "security"
   | "profile";
@@ -422,7 +421,6 @@ const nav: Array<{ page: AdminPage; label: string; icon: typeof Home }> = [
   { page: "reports", label: "Reportes", icon: BarChart3 },
   { page: "audit", label: "Auditoría", icon: FileSearch },
   { page: "backup", label: "Backup", icon: Database },
-  { page: "integrations", label: "Integraciones", icon: KeyRound },
   { page: "settings", label: "Configuración", icon: Settings2 },
   { page: "security", label: "Seguridad", icon: ShieldCheck },
   { page: "profile", label: "Mi perfil", icon: UserRound }
@@ -550,7 +548,6 @@ export default function OwnerApp({ user, onLogout, businessName }: { user: AuthU
     reports: ["Reportes", "Consolidado operativo y financiero"],
     audit: ["Auditoría", "Historial de acciones sensibles del sistema"],
     backup: ["Backup", "Crea, descarga y restaura copias de la base de datos"],
-    integrations: ["Integraciones", "Conecta servicios externos como Factiliza"],
     settings: ["Configuración general", "Datos del negocio y reglas centrales del sistema local"],
     security: ["Seguridad y sesiones", "Control de sesiones activas y estado del entorno local"],
     profile: ["Mi perfil", "Cuenta propietaria y seguridad"]
@@ -631,7 +628,6 @@ export default function OwnerApp({ user, onLogout, businessName }: { user: AuthU
           {page === "reports" && overview && <AdminReports overview={overview} operations={operations} closures={closures} />}
           {page === "audit" && <AuditPage rows={auditRows} />}
           {page === "backup" && <BackupPage />}
-          {page === "integrations" && <IntegrationsPage />}
           {page === "settings" && <SystemSettingsPage />}
           {page === "security" && <SecurityPage currentUserId={user.id} />}
           {page === "profile" && <OwnerProfile user={user} />}
@@ -1037,7 +1033,7 @@ function CashAdminPage({ branches, closures }: { branches: Branch[]; closures: C
                       <td><div className="closure-actions">
                         <button className="mini-button" aria-expanded={open} onClick={() => void toggleClosure(item)}><ChevronDown size={12} className={open ? "closure-chevron open" : "closure-chevron"}/>{open ? "Ocultar" : "Detalle"}</button>
                         <button className="mini-button" onClick={() => window.open(`/api/branches/${item.branch_id}/closures/${item.id}/pdf`, "_blank")}><Download size={12}/> PDF</button>
-                        <button className="mini-button closure-invoice-button" title={electronicDocument?.status === "ACCEPTED" ? "Ver boleta electrónica enviada a SUNAT" : "Emitir boleta electrónica para este cierre"} onClick={() => setInvoiceClosure(item)}>{electronicDocument?.status === "ACCEPTED" ? <Eye size={12}/> : <ReceiptText size={12}/>} {electronicDocument?.status === "ACCEPTED" ? "Ver " + boletaNumber : "Boleta electrónica"}</button>
+                        {electronicDocument ? <button className="mini-button closure-invoice-button" title="Consultar la boleta archivada" onClick={() => setInvoiceClosure(item)}><Eye size={12}/> {electronicDocument.status === "ACCEPTED" ? "Ver " + boletaNumber : "Ver registro"}</button> : <span className="closure-no-invoice">Sin boleta</span>}
                       </div></td>
                     </tr>
                     {open && <tr className="closure-detail-row"><td colSpan={8}>
@@ -1074,7 +1070,7 @@ function CashAdminPage({ branches, closures }: { branches: Branch[]; closures: C
         </section>
       </>}
 
-      {invoiceClosure && <ClosureBillingModal
+      {invoiceClosure && <ClosureElectronicDocumentModal
         closure={invoiceClosure}
         onClose={() => setInvoiceClosure(null)}
         onDocumentChange={(document) => setElectronicDocuments((current) => ({ ...current, [invoiceClosure.id]: document }))}
@@ -1084,97 +1080,48 @@ function CashAdminPage({ branches, closures }: { branches: Branch[]; closures: C
   );
 }
 
-function ClosureBillingModal({ closure, onClose, onDocumentChange }: { closure: Closure; onClose: () => void; onDocumentChange: (document: any) => void }) {
-  const [config, setConfig] = useState<{hasToken:boolean;hasRuc:boolean;hasSeries:boolean;rusActivityConfirmed:boolean;endpointMode:string} | null>(null);
+function ClosureElectronicDocumentModal({ closure, onClose, onDocumentChange }: { closure: Closure; onClose: () => void; onDocumentChange: (document: any) => void }) {
   const [document, setDocument] = useState<any>(null);
-  const [customerDocumentType, setCustomerDocumentType] = useState<"1"|"6">("1");
-  const [customerDocumentNumber, setCustomerDocumentNumber] = useState("");
-  const [customerName, setCustomerName] = useState("");
-  const [customerAddress, setCustomerAddress] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
     void (async () => {
       try {
-        const [statusResult, documentResult] = await Promise.all([
-          api<{hasToken:boolean;hasRuc:boolean;hasSeries:boolean;rusActivityConfirmed:boolean;endpointMode:string}>("/api/admin/factiliza/status"),
-          api<{document:any}>(`/api/branches/${closure.branch_id}/closures/${closure.id}/electronic-document`)
-        ]);
-        setConfig(statusResult);
-        setDocument(documentResult.document);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "No se pudo revisar la configuración de Factiliza.");
-      }
+        const result = await api<{document:any}>(`/api/branches/${closure.branch_id}/closures/${closure.id}/electronic-document`);
+        setDocument(result.document);
+        if (result.document) onDocumentChange(result.document);
+      } catch (err) { setError(err instanceof Error ? err.message : "No se pudo consultar la boleta archivada."); }
+      finally { setLoading(false); }
     })();
   }, [closure.id, closure.branch_id]);
 
-  const ready = Boolean(config?.hasToken && config?.hasRuc && config?.hasSeries && config?.rusActivityConfirmed);
-  const expectedDocLength = customerDocumentType === "1" ? 8 : 11;
-
-  async function issue(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError("");
-    setLoading(true);
-    try {
-      const result = await api<{document:any}>(`/api/branches/${closure.branch_id}/closures/${closure.id}/electronic-document`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ customerDocumentType, customerDocumentNumber, customerName, customerAddress })
-      });
-      setDocument(result.document);
-      onDocumentChange(result.document);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo emitir la boleta.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  const configItems = [
-    ["Token Factiliza", config?.hasToken],
-    ["RUC emisor", config?.hasRuc],
-    ["Serie boleta", config?.hasSeries],
-    ["Actividad RUS confirmada", config?.rusActivityConfirmed]
-  ] as const;
+  const number = document?.series ? `${document.series}-${String(document.correlativo ?? "").padStart(6, "0")}` : document?.provider_document_id;
 
   return <div className="modal-backdrop" role="presentation" onClick={onClose}>
     <section className="modal closure-invoice-modal" role="dialog" aria-modal="true" aria-labelledby="closure-invoice-title" onClick={(event) => event.stopPropagation()}>
       <div className="modal-head"><div><h2 id="closure-invoice-title">Boleta electrónica · cierre #{closure.id}</h2><p>{closure.branch_name} · {dateTime(closure.closed_at)}</p></div><button className="icon-btn" onClick={onClose} aria-label="Cerrar"><X size={18}/></button></div>
-      <div className="invoice-closure-summary"><span>Comisión del cierre<strong>{currency(closure.commission_total)}</strong></span><span>Régimen<strong>Nuevo RUS · solo boleta</strong></span></div>
-      {document?.status === "ACCEPTED" ? <>
-        <div className="invoice-success-notice"><CheckCircle2 size={18}/><div><strong>Boleta enviada y aceptada por SUNAT</strong><span>{document.provider_document_id || String(document.series) + "-" + String(document.correlativo).padStart(6, "0")} · {document.provider_message}</span></div></div>
+      <div className="invoice-closure-summary"><span>Comisión del cierre<strong>{currency(closure.commission_total)}</strong></span><span>Número de boleta<strong>{number || "—"}</strong></span></div>
+      {loading && <div className="closure-detail-message">Consultando el registro guardado…</div>}
+      {error && <div className="closure-detail-error">{error}</div>}
+      {!loading && document?.status === "ACCEPTED" && <>
+        <div className="invoice-success-notice"><CheckCircle2 size={18}/><div><strong>Boleta aceptada por SUNAT</strong><span>{document.provider_message || "Comprobante registrado."}</span></div></div>
         <div className="invoice-archive-notice">
           <strong>Copia electrónica archivada en el servidor</strong>
           <span>{document.storedFiles?.folder || ("boletas-electronicas/filial-" + closure.branch_id + "/cierre-" + closure.id)}</span>
-          <small>PDF {document.storedFiles?.pdf ? "✓" : "pendiente"} · XML {document.storedFiles?.xml ? "✓" : "pendiente"} · CDR {document.storedFiles?.cdr ? "✓" : "pendiente"}</small>
+          <small>PDF {document.storedFiles?.pdf ? "✓" : "no disponible"} · XML {document.storedFiles?.xml ? "✓" : "no disponible"} · CDR {document.storedFiles?.cdr ? "✓" : "no disponible"}</small>
         </div>
         <div className="invoice-download-actions">
-          <button className="soft" onClick={() => window.open(`/api/branches/${closure.branch_id}/closures/${closure.id}/electronic-document/pdf`, "_blank")}><Eye size={14}/> Ver boleta PDF</button>
-          <button className="soft" onClick={() => window.open(`/api/branches/${closure.branch_id}/closures/${closure.id}/electronic-document/xml`, "_blank")}><Download size={14}/> Descargar XML</button>
+          <button className="soft" disabled={!document.storedFiles?.pdf} onClick={() => window.open(`/api/branches/${closure.branch_id}/closures/${closure.id}/electronic-document/pdf`, "_blank")}><Eye size={14}/> Ver boleta PDF</button>
+          <button className="soft" disabled={!document.storedFiles?.xml} onClick={() => window.open(`/api/branches/${closure.branch_id}/closures/${closure.id}/electronic-document/xml`, "_blank")}><Download size={14}/> Descargar XML</button>
           <button className="soft" disabled={!document.storedFiles?.cdr} onClick={() => window.open(`/api/branches/${closure.branch_id}/closures/${closure.id}/electronic-document/cdr`, "_blank")}><Download size={14}/> Descargar CDR</button>
         </div>
-      </> : document ? <div className={`invoice-setup-notice ${document.status === "REJECTED" ? "error" : ""}`}><ReceiptText size={18}/><div><strong>{document.status === "UNKNOWN" ? "Estado por confirmar" : document.status === "REJECTED" ? "Factiliza rechazó la boleta" : "Emisión iniciada"}</strong><span>{document.provider_message || "El intento quedó registrado para evitar una emisión duplicada."}</span></div></div> : <>
-        <div className="invoice-setup-notice"><ShieldCheck size={18}/><div><strong>Revisa el cliente antes de emitir</strong><span>Se enviará a Factiliza/SUNAT una boleta por la comisión total del cierre. Una vez emitida, no se puede borrar desde este panel.</span></div></div>
-        {config && !ready && <div className="billing-config-checklist">
-          <strong>Falta completar la configuración del servidor</strong>
-          {configItems.map(([label, ok]) => <span key={label} className={ok ? "ready" : "missing"}>{ok ? "✓" : "•"} {label}</span>)}
-          <small>El token se guarda como secreto del servidor; no lo ingreses en esta pantalla.</small>
-        </div>}
-        <form className="billing-customer-form" onSubmit={issue}>
-          <label><span>Documento del cliente</span><select value={customerDocumentType} onChange={(event) => { setCustomerDocumentType(event.target.value as "1"|"6"); setCustomerDocumentNumber(""); }}><option value="1">DNI</option><option value="6">RUC</option></select></label>
-          <label><span>Número de documento</span><input required inputMode="numeric" maxLength={expectedDocLength} minLength={expectedDocLength} value={customerDocumentNumber} onChange={(event) => setCustomerDocumentNumber(event.target.value.replace(/\D/g,"").slice(0,expectedDocLength))}/></label>
-          <label className="full"><span>Nombre o razón social</span><input required maxLength={140} value={customerName} onChange={(event) => setCustomerName(event.target.value)}/></label>
-          <label className="full"><span>Dirección <small>Opcional</small></span><input maxLength={255} value={customerAddress} onChange={(event) => setCustomerAddress(event.target.value)}/></label>
-          {error && <div className="billing-form-error full">{error}</div>}
-          <div className="modal-actions full"><button type="button" className="soft" onClick={onClose}>Cancelar</button><button className="primary" disabled={!ready || loading || Boolean(document)}>{loading ? "Enviando a Factiliza…" : "Emitir boleta"}</button></div>
-        </form>
       </>}
-      {config?.endpointMode === "PRUEBAS" && <div className="billing-sandbox-label">Entorno Factiliza de pruebas</div>}
+      {!loading && document && document.status !== "ACCEPTED" && <div className="invoice-setup-notice"><ReceiptText size={18}/><div><strong>Registro de emisión anterior</strong><span>{document.provider_message || "No se confirmó una boleta aceptada. No se puede emitir desde este panel."}</span></div></div>}
+      {!loading && !document && !error && <div className="invoice-setup-notice"><ShieldCheck size={18}/><div><strong>No hay una boleta registrada para este cierre</strong><span>La emisión electrónica está deshabilitada en esta instalación.</span></div></div>}
     </section>
   </div>;
 }
-
 function UsersPage({ users, branches, onDetail }: { users: AdminUser[]; branches: Branch[]; onDetail: (userId: number) => void }) {
   const staff = users.filter((item) => item.role_code === "CASHIER" && Boolean(item.active));
   return (
@@ -1918,99 +1865,6 @@ function SecurityPage({ currentUserId }: { currentUserId: number }) {
   );
 }
 
-
-type FactilizaIntegrationStatus = {
-  provider: string;
-  endpointMode: string;
-  baseUrl: string;
-  series: string;
-  hasToken: boolean;
-  hasRuc: boolean;
-  hasSeries: boolean;
-  rusActivityConfirmed: boolean;
-  savedInPanel: boolean;
-};
-
-function IntegrationsPage() {
-  const [status, setStatus] = useState<FactilizaIntegrationStatus | null>(null);
-  const [apiToken, setApiToken] = useState("");
-  const [baseUrl, setBaseUrl] = useState("https://apife-qa.factiliza.com/api/v1");
-  const [series, setSeries] = useState("");
-  const [rusActivityConfirmed, setRusActivityConfirmed] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
-
-  async function load() {
-    setLoading(true);
-    setError("");
-    try {
-      const result = await api<FactilizaIntegrationStatus>("/api/admin/factiliza/status");
-      setStatus(result);
-      setBaseUrl(result.baseUrl || "https://apife-qa.factiliza.com/api/v1");
-      setSeries(result.series || "");
-      setRusActivityConfirmed(result.rusActivityConfirmed);
-    } catch (err) { setError(err instanceof Error ? err.message : "No se pudo cargar la configuración."); }
-    finally { setLoading(false); }
-  }
-
-  useEffect(() => { void load(); }, []);
-
-  async function save(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSaving(true); setError(""); setMessage("");
-    try {
-      await api<{ok:boolean}>("/api/admin/factiliza/config", {
-        method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiToken, baseUrl, series, rusActivityConfirmed })
-      });
-      setApiToken("");
-      await load();
-      setMessage("Configuración de Factiliza guardada.");
-    } catch (err) { setError(err instanceof Error ? err.message : "No se pudo guardar la configuración."); }
-    finally { setSaving(false); }
-  }
-
-  const checks = [
-    ["Token API", status?.hasToken ?? false],
-    ["RUC del emisor", status?.hasRuc ?? false],
-    ["Serie de boleta", status?.hasSeries ?? false],
-    ["Actividad compatible con Nuevo RUS confirmada", status?.rusActivityConfirmed ?? false]
-  ] as const;
-  const ready = checks.every(([, ok]) => ok);
-
-  return <div className="integration-page">
-    <section className="card integration-hero">
-      <div className="integration-brand"><div className="integration-icon"><ReceiptText size={20}/></div><div><span>Proveedor de comprobantes electrónicos</span><h2>Factiliza</h2></div></div>
-      <span className={`integration-status ${ready ? "ready" : "pending"}`}><span/> {ready ? "Configuración completa" : "Configuración pendiente"}</span>
-      <p>Conecta el API para emitir una boleta por el total de comisión de cada cierre y consultar sus archivos electrónicos.</p>
-    </section>
-
-    <div className="integration-grid">
-      <section className="card integration-config-card">
-        <div className="card-head"><div><strong>Conexión API</strong><span>La credencial se cifra en el servidor y nunca se muestra después de guardarla.</span></div><KeyRound size={17}/></div>
-        <form className="integration-form" onSubmit={save}>
-          <label className="integration-full"><span>Token API de Factiliza</span><input type="password" autoComplete="new-password" value={apiToken} onChange={(event)=>setApiToken(event.target.value)} placeholder={status?.hasToken ? "Token guardado; déjalo vacío para conservarlo" : "Pega aquí tu token de Factiliza"} /></label>
-          <label><span>URL base del API</span><input required type="url" value={baseUrl} onChange={(event)=>setBaseUrl(event.target.value)} placeholder="https://…" /></label>
-          <label><span>Serie de boleta asignada</span><input required maxLength={10} value={series} onChange={(event)=>setSeries(event.target.value.toUpperCase().replace(/[^A-Z0-9-]/g,""))} placeholder="Ej.: B001" /></label>
-          <label className="integration-confirm integration-full"><input type="checkbox" checked={rusActivityConfirmed} onChange={(event)=>setRusActivityConfirmed(event.target.checked)}/><span>Confirmé con mi contador que el emisor y su actividad declarada pueden emitir este comprobante bajo el Nuevo RUS.</span></label>
-          {error && <div className="billing-form-error integration-full">{error}</div>}
-          {message && <div className="integration-saved integration-full"><CheckCircle2 size={15}/>{message}</div>}
-          <div className="integration-actions integration-full"><button type="button" className="soft" onClick={()=>void load()} disabled={loading || saving}><RefreshCw size={14}/> Actualizar estado</button><button className="primary" disabled={loading || saving}>{saving ? "Guardando…" : "Guardar conexión"}</button></div>
-        </form>
-      </section>
-
-      <section className="card integration-check-card">
-        <div className="card-head"><div><strong>Estado de configuración</strong><span>{status ? `Ambiente ${status.endpointMode}` : "Consultando Factiliza…"}</span></div><ShieldCheck size={17}/></div>
-        <div className="integration-checks">{checks.map(([label, ok])=><div key={label}><span className={ok ? "ok" : "missing"}>{ok ? "✓" : "!"}</span><span>{label}</span><strong>{loading ? "…" : ok ? "Listo" : "Pendiente"}</strong></div>)}</div>
-        <div className="integration-ruc-note"><strong>RUC emisor</strong><span>Se toma de Configuración del negocio. Verifica que coincida con el RUC afiliado a Factiliza.</span></div>
-        <div className="integration-note">La lista confirma que los datos estén completos. Factiliza valida el token al emitir la primera boleta; no se genera un comprobante de prueba.</div>
-        {status?.savedInPanel && <div className="integration-note">La configuración se guarda en esta instalación de Z-FLOW.</div>}
-      </section>
-    </div>
-  </div>;
-}
 
 function OwnerProfile({ user }: { user: AuthUser }) {
   const [currentPassword, setCurrentPassword] = useState("");
