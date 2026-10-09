@@ -62,6 +62,7 @@ type AdminPage =
   | "reports"
   | "audit"
   | "backup"
+  | "integrations"
   | "settings"
   | "security"
   | "profile";
@@ -421,12 +422,13 @@ const nav: Array<{ page: AdminPage; label: string; icon: typeof Home }> = [
   { page: "reports", label: "Reportes", icon: BarChart3 },
   { page: "audit", label: "Auditoría", icon: FileSearch },
   { page: "backup", label: "Backup", icon: Database },
+  { page: "integrations", label: "Integraciones", icon: KeyRound },
   { page: "settings", label: "Configuración", icon: Settings2 },
   { page: "security", label: "Seguridad", icon: ShieldCheck },
   { page: "profile", label: "Mi perfil", icon: UserRound }
 ];
 
-const UI_BUILD = "E4.4-20261008";
+const UI_BUILD = "E4.5-20261008";
 
 function currency(value: number | string | null | undefined) {
   return new Intl.NumberFormat("es-PE", {
@@ -548,6 +550,7 @@ export default function OwnerApp({ user, onLogout, businessName }: { user: AuthU
     reports: ["Reportes", "Consolidado operativo y financiero"],
     audit: ["Auditoría", "Historial de acciones sensibles del sistema"],
     backup: ["Backup", "Crea, descarga y restaura copias de la base de datos"],
+    integrations: ["Integraciones", "Conecta servicios externos como Factiliza"],
     settings: ["Configuración general", "Datos del negocio y reglas centrales del sistema local"],
     security: ["Seguridad y sesiones", "Control de sesiones activas y estado del entorno local"],
     profile: ["Mi perfil", "Cuenta propietaria y seguridad"]
@@ -628,6 +631,7 @@ export default function OwnerApp({ user, onLogout, businessName }: { user: AuthU
           {page === "reports" && overview && <AdminReports overview={overview} operations={operations} closures={closures} />}
           {page === "audit" && <AuditPage rows={auditRows} />}
           {page === "backup" && <BackupPage />}
+          {page === "integrations" && <IntegrationsPage />}
           {page === "settings" && <SystemSettingsPage />}
           {page === "security" && <SecurityPage currentUserId={user.id} />}
           {page === "profile" && <OwnerProfile user={user} />}
@@ -1914,6 +1918,98 @@ function SecurityPage({ currentUserId }: { currentUserId: number }) {
   );
 }
 
+
+type FactilizaIntegrationStatus = {
+  provider: string;
+  endpointMode: string;
+  baseUrl: string;
+  series: string;
+  hasToken: boolean;
+  hasRuc: boolean;
+  hasSeries: boolean;
+  rusActivityConfirmed: boolean;
+  savedInPanel: boolean;
+};
+
+function IntegrationsPage() {
+  const [status, setStatus] = useState<FactilizaIntegrationStatus | null>(null);
+  const [apiToken, setApiToken] = useState("");
+  const [baseUrl, setBaseUrl] = useState("https://apife-qa.factiliza.com/api/v1");
+  const [series, setSeries] = useState("");
+  const [rusActivityConfirmed, setRusActivityConfirmed] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+
+  async function load() {
+    setLoading(true);
+    setError("");
+    try {
+      const result = await api<FactilizaIntegrationStatus>("/api/admin/factiliza/status");
+      setStatus(result);
+      setBaseUrl(result.baseUrl || "https://apife-qa.factiliza.com/api/v1");
+      setSeries(result.series || "");
+      setRusActivityConfirmed(result.rusActivityConfirmed);
+    } catch (err) { setError(err instanceof Error ? err.message : "No se pudo cargar la configuración."); }
+    finally { setLoading(false); }
+  }
+
+  useEffect(() => { void load(); }, []);
+
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true); setError(""); setMessage("");
+    try {
+      await api<{ok:boolean}>("/api/admin/factiliza/config", {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiToken, baseUrl, series, rusActivityConfirmed })
+      });
+      setApiToken("");
+      await load();
+      setMessage("Configuración de Factiliza guardada.");
+    } catch (err) { setError(err instanceof Error ? err.message : "No se pudo guardar la configuración."); }
+    finally { setSaving(false); }
+  }
+
+  const checks = [
+    ["Token API", status?.hasToken ?? false],
+    ["RUC del emisor", status?.hasRuc ?? false],
+    ["Serie de boleta", status?.hasSeries ?? false],
+    ["Actividad compatible con Nuevo RUS confirmada", status?.rusActivityConfirmed ?? false]
+  ] as const;
+  const ready = checks.every(([, ok]) => ok);
+
+  return <div className="integration-page">
+    <section className="card integration-hero">
+      <div className="integration-brand"><div className="integration-icon"><ReceiptText size={20}/></div><div><span>Proveedor de comprobantes electrónicos</span><h2>Factiliza</h2></div></div>
+      <span className={`integration-status ${ready ? "ready" : "pending"}`}><span/> {ready ? "Lista para emitir" : "Configuración pendiente"}</span>
+      <p>Conecta el API para emitir una boleta por el total de comisión de cada cierre y consultar sus archivos electrónicos.</p>
+    </section>
+
+    <div className="integration-grid">
+      <section className="card integration-config-card">
+        <div className="card-head"><div><strong>Conexión API</strong><span>La credencial se cifra en el servidor y nunca se muestra después de guardarla.</span></div><KeyRound size={17}/></div>
+        <form className="integration-form" onSubmit={save}>
+          <label className="integration-full"><span>Token API de Factiliza</span><input type="password" autoComplete="new-password" value={apiToken} onChange={(event)=>setApiToken(event.target.value)} placeholder={status?.hasToken ? "Token guardado; déjalo vacío para conservarlo" : "Pega aquí tu token de Factiliza"} /></label>
+          <label><span>URL base del API</span><input required type="url" value={baseUrl} onChange={(event)=>setBaseUrl(event.target.value)} placeholder="https://…" /></label>
+          <label><span>Serie de boleta asignada</span><input required maxLength={10} value={series} onChange={(event)=>setSeries(event.target.value.toUpperCase().replace(/[^A-Z0-9-]/g,""))} placeholder="Ej.: B001" /></label>
+          <label className="integration-confirm integration-full"><input type="checkbox" checked={rusActivityConfirmed} onChange={(event)=>setRusActivityConfirmed(event.target.checked)}/><span>Confirmé con mi contador que el emisor y su actividad declarada pueden emitir este comprobante bajo el Nuevo RUS.</span></label>
+          {error && <div className="billing-form-error integration-full">{error}</div>}
+          {message && <div className="integration-saved integration-full"><CheckCircle2 size={15}/>{message}</div>}
+          <div className="integration-actions integration-full"><button type="button" className="soft" onClick={()=>void load()} disabled={loading || saving}><RefreshCw size={14}/> Actualizar estado</button><button className="primary" disabled={loading || saving}>{saving ? "Guardando…" : "Guardar conexión"}</button></div>
+        </form>
+      </section>
+
+      <section className="card integration-check-card">
+        <div className="card-head"><div><strong>Estado de configuración</strong><span>{status ? `Ambiente ${status.endpointMode}` : "Consultando Factiliza…"}</span></div><ShieldCheck size={17}/></div>
+        <div className="integration-checks">{checks.map(([label, ok])=><div key={label}><span className={ok ? "ok" : "missing"}>{ok ? "✓" : "!"}</span><span>{label}</span><strong>{loading ? "…" : ok ? "Listo" : "Pendiente"}</strong></div>)}</div>
+        <div className="integration-ruc-note"><strong>RUC emisor</strong><span>Se toma de Configuración del negocio. Verifica que coincida con el RUC afiliado a Factiliza.</span></div>
+        {status?.savedInPanel && <div className="integration-note">Las credenciales configuradas aquí se guardan en esta instalación de Z-FLOW.</div>}
+      </section>
+    </div>
+  </div>;
+}
 
 function OwnerProfile({ user }: { user: AuthUser }) {
   const [currentPassword, setCurrentPassword] = useState("");
