@@ -27,7 +27,7 @@ const closureParams = z.object({
 
 const closureBoletaBody = z.object({
   customerDocumentType: z.enum(["1", "6"]),
-  customerDocumentNumber: z.string().trim().regex(/^\\d{8}$|^\\d{11}$/),
+  customerDocumentNumber: z.string().trim().regex(/^\d{8}$|^\d{11}$/),
   customerName: z.string().trim().min(2).max(140),
   customerAddress: z.string().trim().max(255).optional().default("")
 });
@@ -390,12 +390,12 @@ export async function registerReportRoutes(app: FastifyInstance) {
     if (!canReadBranch(auth, parsedParams.data.branchId)) return reply.code(403).send({ error: "Acceso denegado" });
 
     const token = process.env.FACTILIZA_API_TOKEN?.trim();
-    const baseUrl = (process.env.FACTILIZA_API_BASE_URL || "https://apife-qa.factiliza.com/api/v1").replace(/\\/$/, "");
+    const baseUrl = (process.env.FACTILIZA_API_BASE_URL || "https://apife-qa.factiliza.com/api/v1").replace(/\/$/, "");
     const series = process.env.FACTILIZA_BOLETA_SERIES?.trim().toUpperCase();
     const [settingsRows] = await db.query<any[]>(
       "SELECT ruc FROM system_settings WHERE id=1 LIMIT 1"
     );
-    const issuerRuc = String(settingsRows[0]?.ruc ?? "").replace(/\\D/g, "");
+    const issuerRuc = String(settingsRows[0]?.ruc ?? "").replace(/\D/g, "");
     if (!token || !series || issuerRuc.length !== 11) {
       return reply.code(503).send({ error: "Completa el token, la serie de boleta y el RUC emisor en la configuración segura del servidor." });
     }
@@ -567,7 +567,7 @@ export async function registerReportRoutes(app: FastifyInstance) {
     if (!token) return reply.code(503).send({ error: "Factiliza no está configurada en el servidor." });
 
     const [settingsRows] = await db.query<any[]>("SELECT ruc FROM system_settings WHERE id=1 LIMIT 1");
-    const issuerRuc = String(settingsRows[0]?.ruc ?? "").replace(/\\D/g, "");
+    const issuerRuc = String(settingsRows[0]?.ruc ?? "").replace(/\D/g, "");
     const [rows] = await db.query<any[]>(
       `SELECT series, correlativo, status FROM factiliza_documents
        WHERE branch_id=? AND closure_id=? LIMIT 1`,
@@ -575,7 +575,7 @@ export async function registerReportRoutes(app: FastifyInstance) {
     );
     if (!rows.length || rows[0].status !== "ACCEPTED") return reply.code(409).send({ error: "No hay una boleta aceptada para descargar." });
 
-    const baseUrl = (process.env.FACTILIZA_API_BASE_URL || "https://apife-qa.factiliza.com/api/v1").replace(/\\/$/, "");
+    const baseUrl = (process.env.FACTILIZA_API_BASE_URL || "https://apife-qa.factiliza.com/api/v1").replace(/\/$/, "");
     try {
       const response = await fetch(`${baseUrl}/invoice/${parsed.data.format}`, {
         method: "POST",
