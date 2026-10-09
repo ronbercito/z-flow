@@ -1,6 +1,6 @@
 # Z-FLOW — Bitácora de desarrollo
 
-**Última actualización:** 08/10/2026
+**Última actualización:** 09/10/2026
 **Repositorio:** `ronbercito/z-flow`  
 **Rama activa:** `develop`  
 **Estado:** producción local en Proxmox, pruebas reales en curso.
@@ -214,6 +214,13 @@ Z-FLOW arrancó automáticamente y está sano.
 - Se añadieron:
   - `scripts/verify-local-production.sh`
   - `scripts/verify-after-reboot.sh`
+
+## Actualización del 09/10/2026 — README y ramas
+
+- Se simplificó `README.md`: ahora presenta el sistema, sus funciones y tecnología, con enlaces a la documentación; el manual detallado ya no se muestra en la portada.
+- La PR #3 se combinó en `main` el 09/10/2026. `main` contiene el proyecto completo; la portada breve ya está publicada allí.
+- Estado de referencia: `main` en `16c6c82`; `develop` en `69d5785` al momento de esta actualización.
+- No se actualizó el LXC en este cambio. Sigue pendiente desplegar desde el repositorio y comprobar el retiro de Factiliza en el panel.
 
 ## Actualización del 08/10/2026 — integración electrónica
 
