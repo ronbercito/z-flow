@@ -1136,7 +1136,7 @@ function ClosureBillingModal({ closure, onClose }: { closure: Closure; onClose: 
         </div>}
         <form className="billing-customer-form" onSubmit={issue}>
           <label><span>Documento del cliente</span><select value={customerDocumentType} onChange={(event) => { setCustomerDocumentType(event.target.value as "1"|"6"); setCustomerDocumentNumber(""); }}><option value="1">DNI</option><option value="6">RUC</option></select></label>
-          <label><span>Número de documento</span><input required inputMode="numeric" maxLength={expectedDocLength} minLength={expectedDocLength} value={customerDocumentNumber} onChange={(event) => setCustomerDocumentNumber(event.target.value.replace(/\\D/g,"").slice(0,expectedDocLength))}/></label>
+          <label><span>Número de documento</span><input required inputMode="numeric" maxLength={expectedDocLength} minLength={expectedDocLength} value={customerDocumentNumber} onChange={(event) => setCustomerDocumentNumber(event.target.value.replace(/\D/g,"").slice(0,expectedDocLength))}/></label>
           <label className="full"><span>Nombre o razón social</span><input required maxLength={140} value={customerName} onChange={(event) => setCustomerName(event.target.value)}/></label>
           <label className="full"><span>Dirección <small>Opcional</small></span><input maxLength={255} value={customerAddress} onChange={(event) => setCustomerAddress(event.target.value)}/></label>
           {error && <div className="billing-form-error full">{error}</div>}
