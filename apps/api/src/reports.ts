@@ -486,7 +486,7 @@ export async function registerReportRoutes(app: FastifyInstance) {
     const invoicePayload = {
       tipo_Operacion: "0101",
       tipo_Doc: "03",
-      serie,
+      serie: series,
       correlativo: String(correlativo),
       tipo_Moneda: "PEN",
       fecha_Emision: now,
