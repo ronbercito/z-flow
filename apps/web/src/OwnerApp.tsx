@@ -2364,9 +2364,13 @@ function BranchDetailModal({
     processingElectronicSourcesRef.current.add(requestKey);
     setProcessingElectronicSources(new Set(processingElectronicSourcesRef.current));
     setError("");
+    setMessage("");
     try {
-      await api(`/api/admin/branches/${branchId}/electronic-documents/${sourceType}/${sourceId}/process-pending`, { method: "POST" });
+      const result = await api<{ remaining: number; results: Array<{ status: string; message?: string }> }>(`/api/admin/branches/${branchId}/electronic-documents/${sourceType}/${sourceId}/process-pending`, { method: "POST" });
+      const failed = result.results.find((item) => item.status === "ERROR");
+      if (!failed) setMessage("Reintento enviado. La boleta está en validación; el estado se actualizará en esta tabla.");
       await loadDetail();
+      if (failed) setError(failed.message || "No se pudo enviar la boleta. Revisa los datos de ApiSunat.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudieron emitir las boletas pendientes.");
     } finally {
@@ -2423,6 +2427,7 @@ function BranchDetailModal({
 
       {loading && <div className="branch-detail-loading">Cargando filial…</div>}
       {error && <div className="modal-error branch-detail-error">{error}</div>}
+      {message && tab === "electronic" && <div className="success-banner branch-detail-success">{message}</div>}
 
       {!loading && detail && tab==="overview" && <div className="branch-detail-body">
         <div className="branch-detail-kpis">
