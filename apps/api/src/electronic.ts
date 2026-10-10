@@ -63,12 +63,14 @@ function documentBody(input: {
   const customerNumber = input.customerDocumentNumber?.trim() ?? "";
   const customerName = input.customerName?.trim() || "CLIENTES VARIOS";
   const party: Record<string, unknown> = {
+    // ApiSunat expects this UBL node even when SUNAT does not require buyer identification.
+    // Keep cbc:ID empty for consumidor final; do not invent a DNI or document type.
+    "cac:PartyIdentification": { "cbc:ID": customerNumber ? {
+      "_attributes": { schemeID: input.customerDocumentType === "RUC" ? "6" : input.customerDocumentType === "CE" ? "4" : input.customerDocumentType === "PASSPORT" ? "7" : "1" },
+      "_text": customerNumber
+    } : { "_text": "" } },
     "cac:PartyLegalEntity": { "cbc:RegistrationName": { "_text": customerName } }
   };
-  if (customerNumber) {
-    const scheme = input.customerDocumentType === "RUC" ? "6" : input.customerDocumentType === "CE" ? "4" : input.customerDocumentType === "PASSPORT" ? "7" : "1";
-    party["cac:PartyIdentification"] = { "cbc:ID": { "_attributes": { schemeID: scheme }, "_text": customerNumber } };
-  }
   const amount = money(input.amount);
   return {
     "cbc:UBLVersionID": { "_text": "2.1" },
