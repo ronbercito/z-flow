@@ -68,7 +68,7 @@ function documentBody(input: {
     "cac:PartyIdentification": { "cbc:ID": customerNumber ? {
       "_attributes": { schemeID: input.customerDocumentType === "RUC" ? "6" : input.customerDocumentType === "CE" ? "4" : input.customerDocumentType === "PASSPORT" ? "7" : "1" },
       "_text": customerNumber
-    } : { "_text": "" } },
+    } : { "_attributes": {}, "_text": "" } },
     "cac:PartyLegalEntity": { "cbc:RegistrationName": { "_text": customerName } }
   };
   const amount = money(input.amount);
