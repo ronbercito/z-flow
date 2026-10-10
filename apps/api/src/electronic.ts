@@ -84,7 +84,9 @@ function documentBody(input: {
     "cac:AccountingSupplierParty": { "cac:Party": {
       "cac:PartyIdentification": { "cbc:ID": { "_attributes": { schemeID: "6" }, "_text": input.ruc } },
       "cac:PartyLegalEntity": { "cbc:RegistrationName": { "_text": input.issuer }, "cac:RegistrationAddress": {
-        "cbc:AddressTypeCode": { "_text": "0000" }, ...(input.address ? { "cbc:Line": { "_text": input.address } } : {})
+        // SUNAT's UBL 2.1 profile only allows AddressTypeCode here. A bare cbc:Line
+        // is invalid under RegistrationAddress and makes the whole bill fail XML validation.
+        "cbc:AddressTypeCode": { "_text": "0000" }
       } }
     } },
     "cac:AccountingCustomerParty": { "cac:Party": party },
@@ -255,7 +257,7 @@ async function issueDocument(input: {
     const partNumber = input.partNumber ?? 1;
     const partCount = input.partCount ?? 1;
     const [existing] = await db.query<any[]>(`SELECT id,series,correlativo,status,provider_document_id,provider_message,amount,part_number,part_count FROM electronic_documents WHERE ${duplicateField}=? AND part_number=? LIMIT 1`, [input.sourceId, partNumber]);
-    const retryRecordId = existing[0]?.status === "QUEUED" || (existing[0]?.status === "ERROR" && !existing[0]?.provider_document_id) ? Number(existing[0].id) : null;
+    const retryRecordId = existing[0]?.status === "QUEUED" || (existing[0]?.status === "ERROR" && !existing[0]?.provider_document_id) || existing[0]?.status === "EXCEPTION" ? Number(existing[0].id) : null;
     if (existing.length && !retryRecordId) return { status: existing[0].status, series: existing[0].series, correlativo: existing[0].correlativo == null ? undefined : Number(existing[0].correlativo), documentId: existing[0].provider_document_id ?? undefined, message: existing[0].provider_message ?? undefined, amount: Number(existing[0].amount), partNumber, partCount: Number(existing[0].part_count) };
 
     let last: any;
@@ -395,7 +397,7 @@ function currencyText(amount: number) { return `S/ ${money(amount).toFixed(2)}`;
 
 async function processQueuedDocuments(branchId: number, sourceType: "CLOSURE" | "OPERATION", sourceId: number, createdBy: number) {
   const sourceField = sourceType === "CLOSURE" ? "closure_id" : "operation_id";
-  const [queued] = await db.query<any[]>(`SELECT id,part_number,part_count,amount,customer_document_type,customer_document_number,customer_name,description FROM electronic_documents WHERE branch_id=? AND ${sourceField}=? AND (status='QUEUED' OR (status='ERROR' AND provider_document_id IS NULL)) ORDER BY part_number`, [branchId, sourceId]);
+  const [queued] = await db.query<any[]>(`SELECT id,part_number,part_count,amount,customer_document_type,customer_document_number,customer_name,description FROM electronic_documents WHERE branch_id=? AND ${sourceField}=? AND (status='QUEUED' OR (status='ERROR' AND provider_document_id IS NULL) OR status='EXCEPTION') ORDER BY part_number`, [branchId, sourceId]);
   const results: EmissionResult[] = [];
   for (const item of queued) {
     const result = await issueDocument({ branchId, sourceType, sourceId, amount: Number(item.amount), description: String(item.description), createdBy,
@@ -469,7 +471,7 @@ export async function registerElectronicRoutes(app: FastifyInstance) {
     if (!auth) return;
     const sourceType = parsed.data.sourceType === "closure" ? "CLOSURE" : "OPERATION";
     const results = await processQueuedDocuments(parsed.data.branchId, sourceType, parsed.data.sourceId, auth.userId);
-    const [remaining] = await db.query<any[]>(`SELECT COUNT(*) AS count FROM electronic_documents WHERE branch_id=? AND ${sourceType === "CLOSURE" ? "closure_id" : "operation_id"}=? AND (status='QUEUED' OR (status='ERROR' AND provider_document_id IS NULL))`, [parsed.data.branchId, parsed.data.sourceId]);
+    const [remaining] = await db.query<any[]>(`SELECT COUNT(*) AS count FROM electronic_documents WHERE branch_id=? AND ${sourceType === "CLOSURE" ? "closure_id" : "operation_id"}=? AND (status='QUEUED' OR (status='ERROR' AND provider_document_id IS NULL) OR status='EXCEPTION')`, [parsed.data.branchId, parsed.data.sourceId]);
     return { results, remaining: Number(remaining[0]?.count ?? 0) };
   });
 
@@ -488,7 +490,7 @@ export async function registerElectronicRoutes(app: FastifyInstance) {
       const folder = join(process.env.ZFLOW_BACKUP_DIR || "/backups", "boletas-electronicas", `filial-${parsed.data.branchId}`, sourceFolder);
       const number = row.correlativo == null ? "" : `${row.series}-${String(row.correlativo).padStart(row.legacy ? 6 : 8, "0")}`;
       const exists = async (ext: string) => { try { await access(join(folder, `${number}.${ext}`)); return true; } catch { return false; } };
-      return { ...row, canRetry: !row.legacy && (row.status === "QUEUED" || (row.status === "ERROR" && row.provider_document_id == null)), storedFiles: row.status === "ACCEPTED" && row.correlativo != null
+      return { ...row, canRetry: !row.legacy && (row.status === "QUEUED" || (row.status === "ERROR" && row.provider_document_id == null) || row.status === "EXCEPTION"), storedFiles: row.status === "ACCEPTED" && row.correlativo != null
         ? { pdf: await exists("pdf"), xml: await exists("xml"), cdr: await exists("cdr.zip"), folder: `boletas-electronicas/filial-${parsed.data.branchId}/${sourceFolder}` }
         : { pdf: false, xml: false, cdr: false, folder: `boletas-electronicas/filial-${parsed.data.branchId}/${sourceFolder}` } };
     }));

@@ -457,6 +457,35 @@ function currency(value: number | string | null | undefined) {
   }).format(Number(value ?? 0));
 }
 
+function electronicStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    QUEUED: "Pendiente de emisión",
+    PENDING: "En validación",
+    ACCEPTED: "Aceptada",
+    REJECTED: "Rechazada",
+    EXCEPTION: "Requiere corrección",
+    ERROR: "Error de envío",
+    UNKNOWN: "Estado por confirmar"
+  };
+  return labels[status] ?? "Estado por confirmar";
+}
+
+function electronicStatusClass(status: string) {
+  if (status === "ACCEPTED") return "accepted";
+  if (status === "PENDING") return "validating";
+  if (status === "QUEUED") return "queued";
+  if (["REJECTED", "EXCEPTION", "ERROR"].includes(status)) return "failed";
+  return "unknown";
+}
+
+function electronicStatusMessage(status: string, message: string | null | undefined) {
+  if (!message) return "";
+  if (status === "EXCEPTION" && message.includes("RegistrationAddress") && message.includes("cbc:Line")) {
+    return "La dirección del emisor no cumplía el formato XML requerido. Ya puedes volver a intentar la emisión.";
+  }
+  return message;
+}
+
 function dateTime(value: string | null | undefined) {
   if (!value) return "—";
   const date = new Date(value);
@@ -1121,7 +1150,7 @@ function ClosureElectronicDocumentModal({ closure, onClose, onDocumentChange }: 
     finally { setLoading(false); }
   }
   useEffect(() => { void loadDocuments(); }, [closure.id, closure.branch_id]);
-  const queuedCount = documents.filter((item) => item.status === "QUEUED").length;
+  const queuedCount = documents.filter((item) => item.status === "QUEUED" || item.canRetry).length;
   async function processPending() {
     setProcessing(true); setError(""); setMessage("");
     try {
@@ -1139,13 +1168,13 @@ function ClosureElectronicDocumentModal({ closure, onClose, onDocumentChange }: 
       {error && <div className="closure-detail-error">{error}</div>}
       {!loading && documents.length > 0 && <div className="table-wrap"><table className="admin-table"><thead><tr><th>Boleta</th><th>Parte</th><th>Importe</th><th>Estado</th><th>Archivos locales</th><th>Descargas</th></tr></thead><tbody>{documents.map((document:any)=><tr key={document.id}>
         <td><strong>{document.series}{document.correlativo ? `-${String(document.correlativo).padStart(document.legacy ? 6 : 8,"0")}` : " · por asignar"}</strong></td><td>{document.part_number}/{document.part_count}</td><td>{currency(document.amount)}</td>
-        <td>{document.status === "QUEUED" ? "Pendiente de emisión" : document.status === "ACCEPTED" ? "Aceptada" : document.status}<small className="closure-event-reason">{document.provider_message}</small></td>
+        <td><span className={`electronic-status ${electronicStatusClass(document.status)}`}>{electronicStatusLabel(document.status)}</span><small className="closure-event-reason">{electronicStatusMessage(document.status, document.provider_message)}</small></td>
         <td>PDF {document.storedFiles?.pdf ? "✓" : "—"} · XML {document.storedFiles?.xml ? "✓" : "—"}</td>
         <td className="closure-actions">{(["pdf","xml"] as const).map((format)=><button key={format} className="mini-button" disabled={!document.storedFiles?.[format]} onClick={()=>window.open(document.legacy ? `/api/branches/${closure.branch_id}/closures/${closure.id}/electronic-document/${format}` : `/api/branches/${closure.branch_id}/electronic-documents/${document.id}/${format}`,"_blank")}>{format === "pdf" ? <Eye size={12}/> : <Download size={12}/>} {format.toUpperCase()}</button>)}</td>
       </tr>)}</tbody></table></div>}
       {!loading && documents.length === 0 && !error && <div className="invoice-setup-notice"><ShieldCheck size={18}/><div><strong>No hay boletas registradas para este cierre</strong><span>La emisión electrónica está deshabilitada en esta instalación.</span></div></div>}
       {message && <div className="success-message">{message}</div>}
-      {queuedCount > 0 && <div className="modal-actions"><span>{queuedCount} boleta(s) restante(s) pendiente(s).</span><button className="primary" disabled={processing} onClick={()=>void processPending()}>{processing ? "Procesando…" : "Emitir pendientes"}</button></div>}
+      {queuedCount > 0 && <div className="modal-actions"><span>{queuedCount} boleta(s) pendiente(s) o por reintentar.</span><button className="primary" disabled={processing} onClick={()=>void processPending()}>{processing ? "Procesando…" : "Emitir / reintentar"}</button></div>}
     </section>
   </div>;
 }
@@ -2444,7 +2473,7 @@ function BranchDetailModal({
       </tbody></table></div></div>}
 
       {!loading && detail && tab==="electronic" && <div className="branch-detail-table"><div className="table-wrap"><table className="admin-table"><thead><tr><th>Fecha</th><th>Origen</th><th>Boleta</th><th>Parte</th><th>Importe</th><th>Estado</th><th>Archivos</th></tr></thead><tbody>
-        {(detail.electronicDocuments ?? []).map((document)=>{const sourceType=document.closure_id != null ? "closure" : "operation";const sourceId=document.closure_id ?? document.operation_id;const requestKey=`${branchId}:${sourceType}:${sourceId}`;const processing=processingElectronicSources.has(requestKey);return <tr key={`${document.legacy ? "legacy" : "current"}-${document.id}`}><td>{dateTime(document.created_at)}</td><td>{document.closure_id ? `Cierre #${document.closure_id}` : `Operación #${document.operation_id}`}</td><td><strong>{document.series}{document.correlativo ? `-${String(document.correlativo).padStart(document.legacy ? 6 : 8,"0")}` : " · pendiente"}</strong></td><td>{document.part_number}/{document.part_count}</td><td>{currency(document.amount)}</td><td>{document.status === "QUEUED" ? "Pendiente de emisión" : document.status}<small className="closure-event-reason">{document.provider_message === "Pendiente de emisión por el tope configurado." ? "En espera de reintento; revisa la conexión y los datos fiscales." : document.provider_message}</small></td><td className="closure-actions">{(["pdf","xml"] as const).map((format)=><button key={format} className={`mini-button${document.storedFiles?.[format] ? " electronic-action-ready" : ""}`} disabled={!document.storedFiles?.[format]} onClick={()=>window.open(document.legacy && document.closure_id ? `/api/branches/${detail.branch.id}/closures/${document.closure_id}/electronic-document/${format}` : `/api/branches/${detail.branch.id}/electronic-documents/${document.id}/${format}`,"_blank")}>{format === "pdf" ? <Eye size={12}/> : <Download size={12}/>} {format.toUpperCase()}</button>)}{document.canRetry && <button className={`mini-button${processing ? "" : " electronic-action-ready"}`} disabled={processing || sourceId == null} onClick={()=>void retryElectronicDocuments(document)}><RefreshCw size={12} className={processing ? "electronic-action-spinner" : undefined}/> {processing ? "Emitiendo…" : document.status === "QUEUED" ? "Emitir pendientes" : "Reintentar emisión"}</button>}</td></tr>})}
+        {(detail.electronicDocuments ?? []).map((document)=>{const sourceType=document.closure_id != null ? "closure" : "operation";const sourceId=document.closure_id ?? document.operation_id;const requestKey=`${branchId}:${sourceType}:${sourceId}`;const processing=processingElectronicSources.has(requestKey);const displayedMessage=document.provider_message === "Pendiente de emisión por el tope configurado." ? "En espera de reintento; revisa la conexión y los datos fiscales." : electronicStatusMessage(document.status, document.provider_message);return <tr key={`${document.legacy ? "legacy" : "current"}-${document.id}`}><td>{dateTime(document.created_at)}</td><td>{document.closure_id ? `Cierre #${document.closure_id}` : `Operación #${document.operation_id}`}</td><td><strong>{document.series}{document.correlativo ? `-${String(document.correlativo).padStart(document.legacy ? 6 : 8,"0")}` : " · pendiente"}</strong></td><td>{document.part_number}/{document.part_count}</td><td>{currency(document.amount)}</td><td><span className={`electronic-status ${electronicStatusClass(document.status)}`}>{electronicStatusLabel(document.status)}</span><small className="closure-event-reason">{displayedMessage}</small></td><td className="closure-actions">{(["pdf","xml"] as const).map((format)=><button key={format} className={`mini-button${document.storedFiles?.[format] ? " electronic-action-ready" : ""}`} disabled={!document.storedFiles?.[format]} onClick={()=>window.open(document.legacy && document.closure_id ? `/api/branches/${detail.branch.id}/closures/${document.closure_id}/electronic-document/${format}` : `/api/branches/${detail.branch.id}/electronic-documents/${document.id}/${format}`,"_blank")}>{format === "pdf" ? <Eye size={12}/> : <Download size={12}/>} {format.toUpperCase()}</button>)}{document.canRetry && <button className={`mini-button${processing ? "" : " electronic-action-ready"}`} disabled={processing || sourceId == null} onClick={()=>void retryElectronicDocuments(document)}><RefreshCw size={12} className={processing ? "electronic-action-spinner" : undefined}/> {processing ? "Emitiendo…" : document.status === "QUEUED" ? "Emitir pendientes" : "Reintentar emisión"}</button>}</td></tr>})}
         {!detail.electronicDocuments?.length && <tr><td colSpan={7} className="empty-cell">Esta filial todavía no tiene boletas electrónicas archivadas.</td></tr>}
       </tbody></table></div></div>}
     </div>
