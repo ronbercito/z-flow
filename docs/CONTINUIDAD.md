@@ -464,6 +464,8 @@ El siguiente trabajo no es rediseñar usuarios ni volver a socios.
 - Los PDF, XML y CDR se guardan en el almacenamiento local de Z-FLOW bajo `backups/boletas-electronicas/filial-<id>/...`.
 - El tope configurado divide la comisión en boletas que no exceden el máximo. Se pide identificación del comprador si el importe individual de una boleta supera S/ 700.00; con el tope de S/ 500.00 se usa consumidor final sin DNI cuando no hay datos del comprador.
 - ApiSunat está limitado a Desarrollo (`DEV_`); los documentos de prueba no tienen valor tributario. Confirmar el tratamiento contable e IGV antes de habilitar producción.
+- Para consumidor final, el payload incluye el nodo `cac:PartyIdentification/cbc:ID` requerido por ApiSunat con `schemeID: "-"` y el valor técnico `00000000`. Corrige el error visto en la instalación nueva.
+- Pendiente: repetir la emisión en Desarrollo con el mismo token y RUC. El contenedor no está conectado a esta sesión.
 
 ## Puerto web predeterminado
 
