@@ -358,3 +358,7 @@ pm`, y el `pnpm` incluido no pudo resolver el directorio del workspace (EPERM). 
 - Las boletas aceptadas se archivan localmente con PDF, XML y CDR. Los archivos y errores quedan visibles en la consulta administrativa de cada filial.
 - El flujo sigue limitado al ambiente ApiSunat Desarrollo con token `DEV_`; no genera comprobantes con valor tributario. Falta confirmación contable del tratamiento del IGV antes de habilitar producción.
 - La integración compiló y se desplegó previamente en `develop`; el despliegue de `main` debe verificarse por separado antes de considerar esta rama publicada en el panel.
+## 10/10/2026 — corrección detectada por CI en main
+
+- CI compiló correctamente la API y encontró dos definiciones duplicadas del historial de cierres en la interfaz de la filial, resultado del merge de ramas.
+- Se eliminó la duplicación y se conserva la actualización automática de estados pendientes. La nueva compilación web y el build Docker deben terminar para dar por validada esta promoción.

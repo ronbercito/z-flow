@@ -962,34 +962,6 @@ function ClosePage({ branchId, dashboard, canManageElectronic, onClose, onOpen }
     return () => window.clearInterval(timer);
   }, [branchId, closures]);
 
-  async function loadHistory() {
-    try {
-      setHistoryError("");
-      const response = await fetch(`/api/branches/${branchId}/closures`, { credentials: "same-origin" });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error ?? "No se pudo consultar el historial");
-      setClosures(result.closures ?? []);
-    } catch (err) {
-      setHistoryError(err instanceof Error ? err.message : "No se pudo consultar el historial");
-    }
-  }
-
-  async function showDetail(closureId: number) {
-    if (selectedDetail === closureId) { setSelectedDetail(null); setDetail(null); return; }
-    setSelectedDetail(closureId);
-    setDetail(null);
-    try {
-      const response = await fetch(`/api/branches/${branchId}/closures/${closureId}/detail`, { credentials: "same-origin" });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error ?? "No se pudo cargar el cierre");
-      setDetail(result);
-    } catch (err) {
-      setHistoryError(err instanceof Error ? err.message : "No se pudo cargar el cierre");
-    }
-  }
-
-  useEffect(() => { void loadHistory(); }, [branchId, dashboard?.session?.id]);
-
   useEffect(() => {
     if (!dashboard?.session) {
       setPreview(null);
