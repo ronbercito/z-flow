@@ -253,24 +253,33 @@ async function issueDocument(input: {
     const partNumber = input.partNumber ?? 1;
     const partCount = input.partCount ?? 1;
     const [existing] = await db.query<any[]>(`SELECT id,series,correlativo,status,provider_document_id,provider_message,amount,part_number,part_count FROM electronic_documents WHERE ${duplicateField}=? AND part_number=? LIMIT 1`, [input.sourceId, partNumber]);
-    const queuedRecordId = existing[0]?.status === "QUEUED" ? Number(existing[0].id) : null;
-    if (existing.length && !queuedRecordId) return { status: existing[0].status, series: existing[0].series, correlativo: existing[0].correlativo == null ? undefined : Number(existing[0].correlativo), documentId: existing[0].provider_document_id ?? undefined, message: existing[0].provider_message ?? undefined, amount: Number(existing[0].amount), partNumber, partCount: Number(existing[0].part_count) };
+    const retryRecordId = existing[0]?.status === "QUEUED" || (existing[0]?.status === "ERROR" && !existing[0]?.provider_document_id) ? Number(existing[0].id) : null;
+    if (existing.length && !retryRecordId) return { status: existing[0].status, series: existing[0].series, correlativo: existing[0].correlativo == null ? undefined : Number(existing[0].correlativo), documentId: existing[0].provider_document_id ?? undefined, message: existing[0].provider_message ?? undefined, amount: Number(existing[0].amount), partNumber, partCount: Number(existing[0].part_count) };
 
     let last: any;
     try {
       last = await apiJson(`${APISUNAT_URL}/personas/lastDocument`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ personaId: c.persona_id, personaToken: c.persona_token, type: "03", serie: c.series }) });
     } catch (error) {
       const message = (error instanceof Error ? error.message : "ApiSunat no pudo consultar el correlativo.").slice(0, 900);
-      if (queuedRecordId) await db.execute("UPDATE electronic_documents SET provider_message=? WHERE id=? AND status='QUEUED'", [message, queuedRecordId]);
+      if (retryRecordId) await db.execute("UPDATE electronic_documents SET provider_message=? WHERE id=? AND status IN ('QUEUED','ERROR')", [message, retryRecordId]);
       return { status: "ERROR", message, amount: money(input.amount), partNumber, partCount };
     }
     const next = String(last?.suggestedNumber ?? "").padStart(8, "0");
     if (!/^\d{8}$/.test(next) || Number(next) < 1) {
       const message = "ApiSunat no devolvió un correlativo válido para la serie " + c.series + ".";
-      if (queuedRecordId) await db.execute("UPDATE electronic_documents SET provider_message=? WHERE id=? AND status='QUEUED'", [message, queuedRecordId]);
+      if (retryRecordId) await db.execute("UPDATE electronic_documents SET provider_message=? WHERE id=? AND status IN ('QUEUED','ERROR')", [message, retryRecordId]);
       return { status: "ERROR", message, amount: money(input.amount), partNumber, partCount };
     }
     const number = String(Number(next)).padStart(8, "0");
+    const collisionSql = `SELECT id,closure_id,operation_id,status,provider_document_id FROM electronic_documents WHERE branch_id=? AND series=? AND correlativo=?${retryRecordId ? " AND id<>?" : ""} LIMIT 1`;
+    const [collisions] = await db.query<any[]>(collisionSql, retryRecordId ? [input.branchId, c.series, Number(number), retryRecordId] : [input.branchId, c.series, Number(number)]);
+    if (collisions.length) {
+      const collision = collisions[0];
+      const earlierSource = collision.operation_id ? `Operación #${collision.operation_id}` : collision.closure_id ? `Cierre #${collision.closure_id}` : "otra boleta";
+      const message = `El correlativo ${c.series}-${number} está reservado por ${earlierSource}. Reintenta primero esa boleta.`;
+      if (retryRecordId) await db.execute("UPDATE electronic_documents SET provider_message=? WHERE id=? AND status IN ('QUEUED','ERROR')", [message, retryRecordId]);
+      return { status: "ERROR", message, series: c.series, amount: money(input.amount), partNumber, partCount };
+    }
     const fileName = `${String(c.ruc)}-03-${c.series}-${number}`;
     const date = new Date();
     const body = documentBody({ ruc: String(c.ruc), issuer: String(c.legal_name || c.business_name), address: c.address, series: c.series, number, date: localDate(date), time: localTime(date), amount: money(input.amount), description: input.description, customerName: input.customerName, customerDocumentType: input.customerDocumentType, customerDocumentNumber: input.customerDocumentNumber });
@@ -280,8 +289,8 @@ async function issueDocument(input: {
       const status = response?.status === "PENDIENTE" ? "PENDING" : "ERROR";
       const documentId = typeof response?.documentId === "string" ? response.documentId : null;
       const message = status === "PENDING" ? "Enviada a ApiSunat; esperando validación." : String(response?.error?.message ?? response?.message ?? "ApiSunat no confirmó la emisión.").slice(0, 900);
-      if (queuedRecordId) {
-        await db.execute(`UPDATE electronic_documents SET series=?,correlativo=?,part_count=?,description=?,amount=?,status=?,provider_document_id=?,provider_message=?,file_name=?,created_by_user_id=? WHERE id=? AND status='QUEUED'`, [c.series, Number(number), partCount, input.description.slice(0, 250), money(input.amount), status, documentId, message, fileName, input.createdBy, queuedRecordId]);
+      if (retryRecordId) {
+        await db.execute(`UPDATE electronic_documents SET series=?,correlativo=?,part_count=?,description=?,amount=?,status=?,provider_document_id=?,provider_message=?,file_name=?,created_by_user_id=? WHERE id=? AND status IN ('QUEUED','ERROR')`, [c.series, Number(number), partCount, input.description.slice(0, 250), money(input.amount), status, documentId, message, fileName, input.createdBy, retryRecordId]);
       } else {
         await db.execute(`INSERT INTO electronic_documents (branch_id,closure_id,operation_id,series,correlativo,part_number,part_count,customer_document_type,customer_document_number,customer_name,description,amount,status,provider_document_id,provider_message,file_name,created_by_user_id)
           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [input.branchId, input.sourceType === "CLOSURE" ? input.sourceId : null, input.sourceType === "OPERATION" ? input.sourceId : null, c.series, Number(number), partNumber, partCount, input.customerDocumentType ?? null, input.customerDocumentNumber ?? null, input.customerName || "CLIENTES VARIOS", input.description.slice(0, 250), money(input.amount), status, documentId, message, fileName, input.createdBy]);
@@ -290,8 +299,8 @@ async function issueDocument(input: {
       return { status, message, documentId: documentId ?? undefined, series: c.series, correlativo: Number(number), amount: money(input.amount), partNumber, partCount };
     } catch (error) {
       const message = (error instanceof Error ? error.message : "No se pudo conectar con ApiSunat.").slice(0, 900);
-      if (queuedRecordId) {
-        await db.execute(`UPDATE electronic_documents SET series=?,correlativo=?,part_count=?,description=?,amount=?,status='ERROR',provider_message=?,file_name=?,created_by_user_id=? WHERE id=? AND status='QUEUED'`, [c.series, Number(number), partCount, input.description.slice(0, 250), money(input.amount), message, fileName, input.createdBy, queuedRecordId]);
+      if (retryRecordId) {
+        await db.execute(`UPDATE electronic_documents SET series=?,correlativo=?,part_count=?,description=?,amount=?,status='ERROR',provider_message=?,file_name=?,created_by_user_id=? WHERE id=? AND status IN ('QUEUED','ERROR')`, [c.series, Number(number), partCount, input.description.slice(0, 250), money(input.amount), message, fileName, input.createdBy, retryRecordId]);
       } else {
         await db.execute(`INSERT INTO electronic_documents (branch_id,closure_id,operation_id,series,correlativo,part_number,part_count,customer_document_type,customer_document_number,customer_name,description,amount,status,provider_message,file_name,created_by_user_id)
           VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'ERROR',?,?,?)`, [input.branchId, input.sourceType === "CLOSURE" ? input.sourceId : null, input.sourceType === "OPERATION" ? input.sourceId : null, c.series, Number(number), partNumber, partCount, input.customerDocumentType ?? null, input.customerDocumentNumber ?? null, input.customerName || "CLIENTES VARIOS", input.description.slice(0, 250), money(input.amount), message, fileName, input.createdBy]);
@@ -384,7 +393,7 @@ function currencyText(amount: number) { return `S/ ${money(amount).toFixed(2)}`;
 
 async function processQueuedDocuments(branchId: number, sourceType: "CLOSURE" | "OPERATION", sourceId: number, createdBy: number) {
   const sourceField = sourceType === "CLOSURE" ? "closure_id" : "operation_id";
-  const [queued] = await db.query<any[]>(`SELECT id,part_number,part_count,amount,customer_document_type,customer_document_number,customer_name,description FROM electronic_documents WHERE branch_id=? AND ${sourceField}=? AND status='QUEUED' ORDER BY part_number`, [branchId, sourceId]);
+  const [queued] = await db.query<any[]>(`SELECT id,part_number,part_count,amount,customer_document_type,customer_document_number,customer_name,description FROM electronic_documents WHERE branch_id=? AND ${sourceField}=? AND (status='QUEUED' OR (status='ERROR' AND provider_document_id IS NULL)) ORDER BY part_number`, [branchId, sourceId]);
   const results: EmissionResult[] = [];
   for (const item of queued) {
     const result = await issueDocument({ branchId, sourceType, sourceId, amount: Number(item.amount), description: String(item.description), createdBy,
@@ -458,7 +467,7 @@ export async function registerElectronicRoutes(app: FastifyInstance) {
     if (!auth) return;
     const sourceType = parsed.data.sourceType === "closure" ? "CLOSURE" : "OPERATION";
     const results = await processQueuedDocuments(parsed.data.branchId, sourceType, parsed.data.sourceId, auth.userId);
-    const [remaining] = await db.query<any[]>(`SELECT COUNT(*) AS count FROM electronic_documents WHERE branch_id=? AND ${sourceType === "CLOSURE" ? "closure_id" : "operation_id"}=? AND status='QUEUED'`, [parsed.data.branchId, parsed.data.sourceId]);
+    const [remaining] = await db.query<any[]>(`SELECT COUNT(*) AS count FROM electronic_documents WHERE branch_id=? AND ${sourceType === "CLOSURE" ? "closure_id" : "operation_id"}=? AND (status='QUEUED' OR (status='ERROR' AND provider_document_id IS NULL))`, [parsed.data.branchId, parsed.data.sourceId]);
     return { results, remaining: Number(remaining[0]?.count ?? 0) };
   });
 
@@ -466,10 +475,10 @@ export async function registerElectronicRoutes(app: FastifyInstance) {
     const parsed = ownerParams.safeParse(request.params);
     if (!parsed.success) return reply.code(400).send({ error: "Filial inválida" });
     if (!await requireOwner(request, reply)) return;
-    const [rows] = await db.query<any[]>(`SELECT id,closure_id,operation_id,series,correlativo,part_number,part_count,amount,status,provider_message,created_at,0 AS legacy
+    const [rows] = await db.query<any[]>(`SELECT id,closure_id,operation_id,series,correlativo,part_number,part_count,amount,status,provider_message,provider_document_id,created_at,0 AS legacy
       FROM electronic_documents WHERE branch_id=?
       UNION ALL
-      SELECT id,closure_id,NULL AS operation_id,series,correlativo,1 AS part_number,1 AS part_count,amount,status,provider_message,created_at,1 AS legacy
+      SELECT id,closure_id,NULL AS operation_id,series,correlativo,1 AS part_number,1 AS part_count,amount,status,provider_message,NULL AS provider_document_id,created_at,1 AS legacy
       FROM factiliza_documents WHERE branch_id=?
       ORDER BY created_at DESC,id DESC LIMIT 300`, [parsed.data.branchId, parsed.data.branchId]);
     const documents = await Promise.all(rows.map(async (row) => {
@@ -477,7 +486,7 @@ export async function registerElectronicRoutes(app: FastifyInstance) {
       const folder = join(process.env.ZFLOW_BACKUP_DIR || "/backups", "boletas-electronicas", `filial-${parsed.data.branchId}`, sourceFolder);
       const number = row.correlativo == null ? "" : `${row.series}-${String(row.correlativo).padStart(row.legacy ? 6 : 8, "0")}`;
       const exists = async (ext: string) => { try { await access(join(folder, `${number}.${ext}`)); return true; } catch { return false; } };
-      return { ...row, storedFiles: row.status === "ACCEPTED" && row.correlativo != null
+      return { ...row, canRetry: !row.legacy && (row.status === "QUEUED" || (row.status === "ERROR" && row.provider_document_id == null)), storedFiles: row.status === "ACCEPTED" && row.correlativo != null
         ? { pdf: await exists("pdf"), xml: await exists("xml"), cdr: await exists("cdr.zip"), folder: `boletas-electronicas/filial-${parsed.data.branchId}/${sourceFolder}` }
         : { pdf: false, xml: false, cdr: false, folder: `boletas-electronicas/filial-${parsed.data.branchId}/${sourceFolder}` } };
     }));
@@ -503,3 +512,4 @@ export async function registerElectronicRoutes(app: FastifyInstance) {
   });
 
 }
+
