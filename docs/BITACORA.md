@@ -361,4 +361,4 @@ pm`, y el `pnpm` incluido no pudo resolver el directorio del workspace (EPERM). 
 ## 10/10/2026 — corrección detectada por CI en main
 
 - CI compiló correctamente la API y encontró dos definiciones duplicadas del historial de cierres en la interfaz de la filial, resultado del merge de ramas.
-- Se eliminó la duplicación y se conserva la actualización automática de estados pendientes. La nueva compilación web y el build Docker deben terminar para dar por validada esta promoción.
+- Se eliminó la duplicación y se conserva la actualización automática de estados pendientes. La ejecución posterior aprobó las compilaciones de API, web y Docker.

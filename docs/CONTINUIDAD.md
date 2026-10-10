@@ -4,7 +4,7 @@
 **Repositorio:** `ronbercito/z-flow`
 **Rama publicada:** `main`
 **Ramas integradas:** `main` contiene la revisión general y el flujo electrónico desarrollado en `develop`.
-**Estado general:** se integraron en `main` la revisión general, la preparación de instalación y la emisión electrónica por filial. ApiSunat permanece restringido a Desarrollo (`DEV_`). Verificar CI y el despliegue desde `main` antes de usarlo en el panel.
+**Estado general:** se integraron en `main` la revisión general, la preparación de instalación y la emisión electrónica por filial. ApiSunat permanece restringido a Desarrollo (`DEV_`). GitHub Actions aprobó API, web y Docker en la corrección final; falta actualizar el panel desde `main` y probar el flujo real.
 
 ## Revisión general y preparación de instalación (10/10/2026)
 
@@ -454,7 +454,7 @@ Si se abre un chat nuevo, empezar leyendo:
 
 El siguiente trabajo no es rediseñar usuarios ni volver a socios.
 
-**Siguiente objetivo:** revisar CI de la integración en `main`, actualizar el entorno objetivo y validar emisión, reintentos de filial, consulta administrativa y archivos usando ApiSunat Desarrollo.
+**Siguiente objetivo:** actualizar el entorno objetivo desde `main` y validar emisión, reintentos de filial, consulta administrativa y archivos usando ApiSunat Desarrollo.
 
 ## Estado actual de emisión electrónica por filial (10/10/2026)
 
