@@ -256,9 +256,20 @@ async function issueDocument(input: {
     const queuedRecordId = existing[0]?.status === "QUEUED" ? Number(existing[0].id) : null;
     if (existing.length && !queuedRecordId) return { status: existing[0].status, series: existing[0].series, correlativo: existing[0].correlativo == null ? undefined : Number(existing[0].correlativo), documentId: existing[0].provider_document_id ?? undefined, message: existing[0].provider_message ?? undefined, amount: Number(existing[0].amount), partNumber, partCount: Number(existing[0].part_count) };
 
-    const last = await apiJson(`${APISUNAT_URL}/personas/lastDocument`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ personaId: c.persona_id, personaToken: c.persona_token, type: "03", serie: c.series }) });
+    let last: any;
+    try {
+      last = await apiJson(`${APISUNAT_URL}/personas/lastDocument`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ personaId: c.persona_id, personaToken: c.persona_token, type: "03", serie: c.series }) });
+    } catch (error) {
+      const message = (error instanceof Error ? error.message : "ApiSunat no pudo consultar el correlativo.").slice(0, 900);
+      if (queuedRecordId) await db.execute("UPDATE electronic_documents SET provider_message=? WHERE id=? AND status='QUEUED'", [message, queuedRecordId]);
+      return { status: "ERROR", message, amount: money(input.amount), partNumber, partCount };
+    }
     const next = String(last?.suggestedNumber ?? "").padStart(8, "0");
-    if (!/^\d{8}$/.test(next) || Number(next) < 1) return { status: "ERROR", message: "ApiSunat no devolvió un correlativo válido para la serie " + c.series + "." };
+    if (!/^\d{8}$/.test(next) || Number(next) < 1) {
+      const message = "ApiSunat no devolvió un correlativo válido para la serie " + c.series + ".";
+      if (queuedRecordId) await db.execute("UPDATE electronic_documents SET provider_message=? WHERE id=? AND status='QUEUED'", [message, queuedRecordId]);
+      return { status: "ERROR", message, amount: money(input.amount), partNumber, partCount };
+    }
     const number = String(Number(next)).padStart(8, "0");
     const fileName = `${String(c.ruc)}-03-${c.series}-${number}`;
     const date = new Date();

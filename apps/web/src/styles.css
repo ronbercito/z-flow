@@ -248,7 +248,14 @@ tr:last-child td { border-bottom:0; }
   padding: 4px 7px;
   font-size: 8px;
   font-weight: 700;
+  cursor: pointer;
+  transition: background-color .16s ease, border-color .16s ease, color .16s ease, box-shadow .16s ease;
 }
+.mini-button:disabled { cursor: not-allowed; opacity: .52; }
+.mini-button.electronic-action-ready { border-color:#8bb8ff; background:#f1f7ff; color:#1758c7; animation: electronic-action-ready 2.2s ease-in-out infinite; }
+.mini-button.electronic-action-ready:hover { background:#e5f0ff; border-color:#4f91f5; }
+@keyframes electronic-action-ready { 0%,100% { box-shadow:0 0 0 0 rgba(37,99,235,0); } 50% { box-shadow:0 0 0 3px rgba(37,99,235,.14); } }
+@media (prefers-reduced-motion: reduce) { .mini-button.electronic-action-ready { animation:none; } }
 .empty-cell { text-align: center; padding: 24px; color: #96a2b1; }
 
 .detail-grid {
