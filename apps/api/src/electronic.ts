@@ -351,10 +351,11 @@ async function issueSplitDocuments(input: {
       const firstQueuedIndex = result.correlativo ? index + 1 : index;
       for (let queuedIndex = firstQueuedIndex; queuedIndex < parts.length; queuedIndex++) {
         await db.execute(`INSERT IGNORE INTO electronic_documents (branch_id,closure_id,operation_id,series,correlativo,part_number,part_count,customer_document_type,customer_document_number,customer_name,description,amount,status,provider_message,file_name,created_by_user_id)
-          VALUES (?,?,?, ?,NULL,?,?,?,?,?,?,?,'QUEUED','Pendiente de emisión por el tope configurado.','pendiente',?)`, [
+          VALUES (?,?,?, ?,NULL,?,?,?,?,?,?,?,'QUEUED',?,'pendiente',?)`, [
           input.branchId, input.sourceType === "CLOSURE" ? input.sourceId : null, input.sourceType === "OPERATION" ? input.sourceId : null,
           input.series, queuedIndex + 1, parts.length, input.customerDocumentType ?? null, input.customerDocumentNumber ?? null,
-          input.customerName || "CLIENTES VARIOS", input.description.slice(0, 250), parts[queuedIndex] / 100, input.createdBy
+          input.customerName || "CLIENTES VARIOS", input.description.slice(0, 250), parts[queuedIndex] / 100,
+          queuedIndex === index ? (result.message ?? "Error al solicitar la emisión; pendiente de reintento.").slice(0, 900) : "En espera de resolver el error de emisión de una parte anterior.", input.createdBy
         ]);
       }
       break;
