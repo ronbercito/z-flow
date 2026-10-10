@@ -1,25 +1,26 @@
 # Z-FLOW — Documento de continuidad
 
-**Fecha de corte:** 09/10/2026
+**Fecha de corte:** 10/10/2026
 **Repositorio:** `ronbercito/z-flow`
-**Rama de trabajo:** `develop`
-**Checkpoint publicado:** `main` `16c6c82` (README breve); `develop` `69d5785` antes de esta actualización
-**Estado general:** el repositorio está sincronizado con `origin/develop`. La emisión de comprobantes Factiliza se retiró; no se ha confirmado todavía la actualización del LXC con estos cambios. Las pruebas técnicas locales están aprobadas y falta validar las 5 filiales reales antes de cerrar la etapa.
+**Rama publicada:** `main`
+**Checkpoint publicado:** `main` `c09fffeb`
+**Estado general:** la revisión del código y la preparación para instalación limpia se integraron en `main`. CI aprobó API, web y Docker. Factiliza permanece retirado. El LXC no se actualizó y la primera instalación en un contenedor limpio todavía debe ejecutarse.
 
-## Revisión general y preparación de instalación (09/10/2026)
+## Revisión general y preparación de instalación (10/10/2026)
 
-Se corrigieron problemas identificados antes de la primera instalación limpia:
+La revisión del repositorio se integró en `main` mediante PR #4. GitHub Actions aprobó los builds de API, web y Docker. La compilación local no se ejecutó; la validación se realizó en CI.
 
-- Las instalaciones nuevas ya no cargan movimientos de muestra ni abren una caja automáticamente.
-- Las transacciones de apertura, operación y cierre quedan serializadas para evitar sesiones duplicadas o cierres con totales incompletos.
-- Se rechazan montos infinitos y valores mayores al rango de la base de datos.
-- Se quitó CORS abierto; el panel web y la API operan bajo el mismo origen.
-- Los permisos de cajero se limitan a su filial; no se pueden asignar permisos globales al rol.
-- El rate limit de acceso limpia intentos antiguos y limita la memoria que ocupa.
-- Backups con permisos privados; restauración de consola validada antes de importar, con copia previa y recuperación automática ante error.
-- `scripts/install-local.sh` instala en Debian/Ubuntu desde `main`; genera secretos, configura Docker, backups diarios y rotación.
+La instalación limpia ya está versionada en `scripts/install-local.sh`. Descarga el código desde `main`, crea secretos aleatorios, inicia los servicios, configura backups diarios y rotación, y guarda una copia inicial. Las instalaciones nuevas empiezan sin operaciones de muestra y sin una caja abierta.
 
-La instalación desde cero está documentada en `docs/LOCAL_PRODUCTION.md`. La compilación de API/web y la configuración de Docker deben quedar aprobadas en GitHub Actions antes de promover esta revisión a `main`. No instalar todavía desde `main` hasta que se confirme esa promoción.
+Comando publicado para Debian/Ubuntu:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ronbercito/z-flow/main/scripts/install-local.sh | bash
+```
+
+Ejecutar como `root` en un contenedor limpio. En Proxmox LXC, Docker requiere `nesting=1` y `keyctl=1`. Se puede descargar el script antes y definir `WEB_PORT` y `API_PORT` si los puertos predeterminados están ocupados. El instalador muestra la IP, el puerto y las credenciales iniciales del propietario y encargado; guárdalas al terminar.
+
+**Pendiente operativo:** probar este comando en el contenedor de destino y validar que API y web queden saludables. Esa instalación real no se ha ejecutado desde este entorno.
 
 ## Estado del README y ramas al 09/10/2026
 
@@ -355,63 +356,23 @@ En Proxmox mantener activado **Start at boot** para el CT de Z-FLOW.
 
 ## 13. Pendiente inmediato
 
-### Prioridad 1 — actualizar y comprobar el LXC
+### Primera instalación limpia
 
-1. Actualizar `/opt/z-flow` usando `bash scripts/update-local.sh`.
-2. Confirmar que Docker, API y Web queden saludables.
-3. Confirmar que la opción Integraciones/Factiliza ya no aparezca.
-4. Revisar un cierre con y sin registro electrónico histórico y verificar que los datos archivados sigan consultables.
+1. Ejecutar el instalador publicado en un contenedor Debian/Ubuntu vacío.
+2. En Proxmox, habilitar `nesting=1` y `keyctl=1`.
+3. Confirmar que Docker, API y Web queden saludables.
+4. Guardar las credenciales iniciales mostradas por el instalador.
+5. Abrir la primera caja y validar una operación de cada tipo, cierre y backup.
 
-### Prioridad 2 — 5 filiales reales
+### Validación operativa pendiente
 
-Para cada filial:
+Después de la instalación, actualizar el LXC de pruebas desde el repositorio y comprobar:
 
-1. crear/configurar filial;
-2. crear su único encargado;
-3. iniciar sesión como encargado;
-4. abrir caja;
-5. registrar una Yape → Efectivo;
-6. registrar una Efectivo → Yape;
-7. revisar caja y ganancia;
-8. cerrar caja;
-9. revisar PDF;
-10. entrar como propietario;
-11. verificar que operaciones, cierre y ganancia pertenezcan solo a esa filial.
-
-No marcar Fase 5 como terminada hasta completar las cinco.
-
-### Prioridad 3 — cierre de etapa local
-
-Cuando las 5 filiales pasen:
-
-- marcar `Pruebas paso a paso en el LXC real con las filiales` como completado en ROADMAP;
-- marcar `Validación con las 5 filiales reales` como completado;
-- actualizar BITACORA y CONTINUIDAD;
-- dejar un checkpoint/tag estable si se decide;
-- no migrar todavía a nube sin cerrar este punto.
-
-### Prioridad 4 — instalador
-
-Después del cierre local, preparar un instalador reproducible para un servidor nuevo.
-
-Debe contemplar como mínimo:
-
-- requisitos del host;
-- Docker;
-- clonación del repositorio;
-- selección de versión estable;
-- generación/configuración de `.env`;
-- contraseñas seguras;
-- inicio de servicios;
-- inicialización/migraciones;
-- instalación de cron de backup;
-- permisos;
-- health checks;
-- creación segura de OWNER;
-- validación automática final;
-- instrucciones de recuperación.
-
-El instalador debe usar únicamente lo que esté versionado en el repositorio.
+- que Integraciones/Factiliza ya no aparezca;
+- que el historial electrónico antiguo siga consultable;
+- que cada filial vea solo su identidad, reporte y cierres;
+- que el propietario pueda consultar la información consolidada;
+- los flujos con las cinco filiales reales antes de cerrar esa etapa.
 
 ## 14. Fase final futura
 
@@ -456,4 +417,4 @@ Si se abre un chat nuevo, empezar leyendo:
 
 El siguiente trabajo no es rediseñar usuarios ni volver a socios.
 
-**Siguiente objetivo:** validar y desplegar este cambio de aislamiento por filial en el entorno de pruebas, completar la validación operativa de las 5 filiales reales y, después, preparar el instalador reproducible para otro servidor.
+**Siguiente objetivo:** ejecutar la primera instalación limpia con el instalador publicado en `main` y validar la operación en el contenedor de destino.
