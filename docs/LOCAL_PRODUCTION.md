@@ -12,7 +12,7 @@ Ejecuta una sola vez:
 curl -fsSL https://raw.githubusercontent.com/ronbercito/z-flow/main/scripts/install-local.sh | bash
 ```
 
-El instalador instala Docker si hace falta, descarga `main`, genera secretos aleatorios, construye la aplicación, espera la API y la web, configura backups diarios con rotación y crea el primer backup. Las contraseñas temporales del propietario y de la filial inicial se imprimen en los logs de la API; guárdalas y cámbialas al ingresar. No reutilices el archivo `.env` entre instalaciones.
+El instalador instala Docker si hace falta, descarga `main`, genera secretos aleatorios, construye la aplicación, espera la API y la web, configura backups diarios con rotación y crea el primer backup. La base empieza sin filiales ni usuarios operativos. Solo se crea el usuario propietario `admin`, con una contraseña temporal que aparece en los logs de la API; guárdala y cámbiala al ingresar. Luego crea las filiales y sus usuarios desde el panel. No reutilices el archivo `.env` entre instalaciones.
 
 El puerto web predeterminado es `8080`. Para elegir otros puertos, defínelos al ejecutar el comando:
 

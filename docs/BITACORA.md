@@ -8,7 +8,7 @@
 ## 10/10/2026 — Revisión general integrada a main
 
 - Se revisaron caja, permisos por filial, validaciones financieras, autenticación y manejo de backups/restauración.
-- La instalación nueva ya no carga operaciones ficticias ni abre una caja por defecto.
+- La instalación nueva ya no carga operaciones ficticias, no abre una caja por defecto y tampoco precarga filiales ni usuarios operativos. Solo crea el propietario `admin`.
 - El instalador de Debian/Ubuntu está publicado en `scripts/install-local.sh`; obtiene la versión de `main`, configura Docker, genera secretos aleatorios, activa backups programados y guarda una copia inicial.
 - La revisión se integró en `main` mediante PR #4. CI aprobó API, web y Docker; Docker pasó al reintentar una descarga afectada por el límite temporal de Docker Hub.
 - Instalación: `curl -fsSL https://raw.githubusercontent.com/ronbercito/z-flow/main/scripts/install-local.sh | bash`.

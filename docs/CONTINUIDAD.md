@@ -10,7 +10,7 @@
 
 La revisión del repositorio se integró en `main` mediante PR #4. GitHub Actions aprobó los builds de API, web y Docker. La compilación local no se ejecutó; la validación se realizó en CI.
 
-La instalación limpia ya está versionada en `scripts/install-local.sh`. Descarga el código desde `main`, crea secretos aleatorios, inicia los servicios, configura backups diarios y rotación, y guarda una copia inicial. Las instalaciones nuevas empiezan sin operaciones de muestra y sin una caja abierta.
+La instalación limpia ya está versionada en `scripts/install-local.sh`. Descarga el código desde `main`, crea secretos aleatorios, inicia los servicios, configura backups diarios y rotación, y guarda una copia inicial. Las instalaciones nuevas empiezan sin operaciones de muestra, caja abierta, filiales ni usuarios operativos. El arranque crea solo el propietario `admin`; el resto se registra desde el panel.
 
 Comando publicado para Debian/Ubuntu:
 

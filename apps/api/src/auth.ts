@@ -126,26 +126,13 @@ export async function bootstrapUsersIfEmpty(log: Pick<Console, "warn" | "info"> 
   if (Number(countRows[0]?.total ?? 0) > 0) return;
 
   const [roles] = await db.query<any[]>(
-    "SELECT id, code FROM roles WHERE code IN ('OWNER','CASHIER')"
+    "SELECT id, code FROM roles WHERE code = 'OWNER' LIMIT 1"
   );
-  const ownerRole = roles.find((role) => role.code === "OWNER");
-  const cashierRole = roles.find((role) => role.code === "CASHIER");
-
-  const [branches] = await db.query<any[]>(
-    "SELECT id, name FROM branches WHERE active = 1 ORDER BY id LIMIT 1"
-  );
-  const firstBranch = branches[0];
-
-  if (!ownerRole || !cashierRole || !firstBranch) {
-    throw new Error("No se pudo crear usuarios iniciales: faltan roles o una filial activa");
-  }
+  const ownerRole = roles[0];
+  if (!ownerRole) throw new Error("No se pudo crear el propietario inicial: falta el rol OWNER");
 
   const ownerPassword = tempPassword();
-  const branchPassword = tempPassword();
-  const [ownerHash, branchHash] = await Promise.all([
-    bcrypt.hash(ownerPassword, 12),
-    bcrypt.hash(branchPassword, 12)
-  ]);
+  const ownerHash = await bcrypt.hash(ownerPassword, 12);
 
   await db.execute(
     `INSERT INTO users (branch_id, role_id, username, password_hash, full_name, active)
@@ -153,17 +140,10 @@ export async function bootstrapUsersIfEmpty(log: Pick<Console, "warn" | "info"> 
     [ownerRole.id, ownerHash]
   );
 
-  await db.execute(
-    `INSERT INTO users (branch_id, role_id, username, password_hash, full_name, active)
-     VALUES (?, ?, 'miraflores', ?, 'Encargado Miraflores', 1)`,
-    [firstBranch.id, cashierRole.id, branchHash]
-  );
-
   log.warn("============================================================");
   log.warn("Z-FLOW - CREDENCIALES TEMPORALES GENERADAS (GUARDAR AHORA)");
   log.warn(`OWNER      usuario: admin       contraseña: ${ownerPassword}`);
-  log.warn(`FILIAL     usuario: miraflores  contraseña: ${branchPassword}`);
-  log.warn("Cambie estas contraseñas después del primer ingreso.");
+  log.warn("Cámbiala después del primer ingreso.");
   log.warn("============================================================");
 }
 
