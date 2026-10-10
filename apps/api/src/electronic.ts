@@ -62,16 +62,15 @@ function documentBody(input: {
 }) {
   const customerNumber = input.customerDocumentNumber?.trim() ?? "";
   const customerName = input.customerName?.trim() || "CLIENTES VARIOS";
+  const customerScheme = input.customerDocumentType === "RUC" ? "6" : input.customerDocumentType === "CE" ? "4" : input.customerDocumentType === "PASSPORT" ? "7" : "1";
   const party: Record<string, unknown> = {
+    // ApiSunat's widget requires this UBL node even when the buyer has no document.
+    "cac:PartyIdentification": { "cbc:ID": {
+      "_attributes": { schemeID: customerNumber ? customerScheme : "-" },
+      "_text": customerNumber || "00000000"
+    } },
     "cac:PartyLegalEntity": { "cbc:RegistrationName": { "_text": customerName } }
   };
-  // A consumidor final has no buyer document node in UBL; an empty ID/schemeID is invalid.
-  if (customerNumber) {
-    party["cac:PartyIdentification"] = { "cbc:ID": {
-      "_attributes": { schemeID: input.customerDocumentType === "RUC" ? "6" : input.customerDocumentType === "CE" ? "4" : input.customerDocumentType === "PASSPORT" ? "7" : "1" },
-      "_text": customerNumber
-    } };
-  }
   const amount = money(input.amount);
   return {
     "cbc:UBLVersionID": { "_text": "2.1" },
