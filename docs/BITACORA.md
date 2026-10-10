@@ -1,9 +1,9 @@
 # Z-FLOW — Bitácora de desarrollo
 
-**Última actualización:** 09/10/2026
+**Última actualización:** 10/10/2026
 **Repositorio:** `ronbercito/z-flow`  
-**Rama activa:** `develop`  
-**Estado:** producción local en Proxmox, pruebas reales en curso.
+**Rama publicada:** `main`  
+**Estado:** revisión publicada en `main`; pendiente ejecutar la instalación limpia en el contenedor destino y continuar las pruebas reales.
 
 ## 10/10/2026 — Revisión general integrada a main
 
