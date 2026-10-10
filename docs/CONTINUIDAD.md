@@ -131,7 +131,7 @@ Servicios Docker:
 
 Puertos actuales:
 
-- Web: `8080`.
+- Web: `80`.
 - API: `127.0.0.1:3001`.
 - MariaDB: solo red interna de Docker.
 
@@ -464,3 +464,7 @@ El siguiente trabajo no es rediseñar usuarios ni volver a socios.
 - Los PDF, XML y CDR se guardan en el almacenamiento local de Z-FLOW bajo `backups/boletas-electronicas/filial-<id>/...`.
 - El tope configurado divide la comisión en boletas que no exceden el máximo. Se pide identificación del comprador si el importe individual de una boleta supera S/ 700.00; con el tope de S/ 500.00 se usa consumidor final sin DNI cuando no hay datos del comprador.
 - ApiSunat está limitado a Desarrollo (`DEV_`); los documentos de prueba no tienen valor tributario. Confirmar el tratamiento contable e IGV antes de habilitar producción.
+
+## Puerto web predeterminado
+
+Las instalaciones nuevas publican el panel en el puerto 80 (`http://IP_DEL_CONTENEDOR`). El puerto se puede cambiar con `WEB_PORT` antes de instalar.

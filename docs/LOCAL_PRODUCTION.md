@@ -14,7 +14,7 @@ curl -fsSL https://raw.githubusercontent.com/ronbercito/z-flow/main/scripts/inst
 
 El instalador instala Docker si hace falta, descarga `main`, genera secretos aleatorios, construye la aplicación, espera la API y la web, configura backups diarios con rotación y crea el primer backup. La base empieza sin filiales ni usuarios operativos. Solo se crea el usuario propietario `admin`, con una contraseña temporal que aparece en los logs de la API; guárdala y cámbiala al ingresar. Luego crea las filiales y sus usuarios desde el panel. No reutilices el archivo `.env` entre instalaciones.
 
-El puerto web predeterminado es `8080`. Para elegir otros puertos, defínelos al ejecutar el comando:
+El puerto web predeterminado es `80`; el panel se abre como `http://IP_DEL_CONTENEDOR`. Para elegir otros puertos, defínelos al ejecutar el comando:
 
 ```bash
 WEB_PORT=8090 API_PORT=3010 curl -fsSL https://raw.githubusercontent.com/ronbercito/z-flow/main/scripts/install-local.sh | bash

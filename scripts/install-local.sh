@@ -4,7 +4,7 @@ set -Eeuo pipefail
 [ "$(id -u)" -eq 0 ] || { echo "Ejecuta como root."; exit 1; }
 command -v apt-get >/dev/null || { echo "Requiere Debian o Ubuntu."; exit 1; }
 INSTALL_DIR="${1:-/opt/z-flow}"
-WEB_PORT="${WEB_PORT:-8080}"
+WEB_PORT="${WEB_PORT:-80}"
 API_PORT="${API_PORT:-3001}"
 [ ! -e "$INSTALL_DIR" ] || { echo "Ya existe $INSTALL_DIR; elige otra ruta."; exit 1; }
 

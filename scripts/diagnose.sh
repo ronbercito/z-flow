@@ -39,7 +39,7 @@ echo "--- Salud API ---"
 if curl -fsS http://127.0.0.1:"${API_PORT:-3001}"/health; then echo; else echo "API NO RESPONDE"; fi
 echo
 echo "--- Salud Web ---"
-if curl -fsSI http://127.0.0.1:"${WEB_PORT:-8080}"/health | head -n 1; then :; else echo "WEB NO RESPONDE"; fi
+if curl -fsSI http://127.0.0.1:"${WEB_PORT:-80}"/health | head -n 1; then :; else echo "WEB NO RESPONDE"; fi
 echo
 echo "--- Uso Docker ---"
 docker system df || true

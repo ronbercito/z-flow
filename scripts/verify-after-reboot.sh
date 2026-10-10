@@ -52,7 +52,7 @@ for i in $(seq 1 45); do
   api_ok=0
   web_ok=0
   curl -fsS "http://127.0.0.1:${API_PORT:-3001}/health" >/dev/null 2>&1 && api_ok=1
-  curl -fsS "http://127.0.0.1:${WEB_PORT:-8080}/health" >/dev/null 2>&1 && web_ok=1
+  curl -fsS "http://127.0.0.1:${WEB_PORT:-80}/health" >/dev/null 2>&1 && web_ok=1
   if [ "$api_ok" -eq 1 ] && [ "$web_ok" -eq 1 ]; then
     break
   fi
