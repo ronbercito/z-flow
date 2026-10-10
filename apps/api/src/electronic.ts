@@ -75,7 +75,7 @@ function documentBody(input: {
   return {
     "cbc:UBLVersionID": { "_text": "2.1" },
     "cbc:CustomizationID": { "_text": "2.0" },
-    "cbc:ID": { "_text": `${input.series ?? "B001"}-${input.number}` },
+    "cbc:ID": { "_attributes": {}, "_text": `${input.series ?? "B001"}-${input.number}` },
     "cbc:IssueDate": { "_text": input.date },
     "cbc:IssueTime": { "_text": input.time },
     "cbc:InvoiceTypeCode": { "_attributes": { listID: "0113" }, "_text": "03" },
@@ -91,7 +91,7 @@ function documentBody(input: {
     "cac:TaxTotal": { "cbc:TaxAmount": { "_attributes": { currencyID: "PEN" }, "_text": 0 }, "cac:TaxSubtotal": [{
       "cbc:TaxableAmount": { "_attributes": { currencyID: "PEN" }, "_text": amount },
       "cbc:TaxAmount": { "_attributes": { currencyID: "PEN" }, "_text": 0 },
-      "cac:TaxCategory": { "cac:TaxScheme": { "cbc:ID": { "_text": "1000" }, "cbc:Name": { "_text": "IGV" }, "cbc:TaxTypeCode": { "_text": "VAT" } } }
+      "cac:TaxCategory": { "cac:TaxScheme": { "cbc:ID": { "_attributes": {}, "_text": "1000" }, "cbc:Name": { "_text": "IGV" }, "cbc:TaxTypeCode": { "_text": "VAT" } } }
     }] },
     "cac:LegalMonetaryTotal": {
       "cbc:LineExtensionAmount": { "_attributes": { currencyID: "PEN" }, "_text": amount },
@@ -99,7 +99,7 @@ function documentBody(input: {
       "cbc:PayableAmount": { "_attributes": { currencyID: "PEN" }, "_text": amount }
     },
     "cac:InvoiceLine": [{
-      "cbc:ID": { "_text": 1 }, "cbc:InvoicedQuantity": { "_attributes": { unitCode: "ZZ" }, "_text": 1 },
+      "cbc:ID": { "_attributes": {}, "_text": 1 }, "cbc:InvoicedQuantity": { "_attributes": { unitCode: "ZZ" }, "_text": 1 },
       "cbc:LineExtensionAmount": { "_attributes": { currencyID: "PEN" }, "_text": amount },
       "cac:PricingReference": { "cac:AlternativeConditionPrice": {
         "cbc:PriceAmount": { "_attributes": { currencyID: "PEN" }, "_text": amount }, "cbc:PriceTypeCode": { "_text": "01" }
@@ -108,7 +108,7 @@ function documentBody(input: {
         "cbc:TaxableAmount": { "_attributes": { currencyID: "PEN" }, "_text": amount },
         "cbc:TaxAmount": { "_attributes": { currencyID: "PEN" }, "_text": 0 },
         "cac:TaxCategory": { "cbc:Percent": { "_text": 0 }, "cbc:TaxExemptionReasonCode": { "_text": "10" },
-          "cac:TaxScheme": { "cbc:ID": { "_text": "1000" }, "cbc:Name": { "_text": "IGV" }, "cbc:TaxTypeCode": { "_text": "VAT" } } }
+          "cac:TaxScheme": { "cbc:ID": { "_attributes": {}, "_text": "1000" }, "cbc:Name": { "_text": "IGV" }, "cbc:TaxTypeCode": { "_text": "VAT" } } }
       }] },
       "cac:Item": { "cbc:Description": { "_text": input.description } },
       "cac:Price": { "cbc:PriceAmount": { "_attributes": { currencyID: "PEN" }, "_text": amount } }
