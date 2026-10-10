@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { db } from "./db.js";
-import { canWriteBranch, requireAuth } from "./auth.js";
+import { canReadBranch, canWriteBranch, requireAuth } from "./auth.js";
 
 const branchParams = z.object({ branchId: z.coerce.number().int().positive() });
 const operationParams = z.object({
@@ -19,18 +19,32 @@ const settingsBody = z.object({
   address: z.string().trim().max(255).nullable().optional(),
   phone: z.string().trim().max(40).nullable().optional(),
   logoDataUrl: z.string().max(3000000).refine(
-    (value) => /^data:image\/(png|jpeg);base64,/.test(value),
-    "El logo debe ser PNG o JPG"
+    (value) => /^data:image\/(png|jpeg|webp);base64,/.test(value),
+    "El logo debe ser PNG, JPG o WEBP"
   ).nullable().optional(),
   currencyCode: z.string().trim().min(3).max(8).default("PEN"),
   timezoneName: z.string().trim().min(3).max(80).default("America/Lima"),
   ticketFooter: z.string().trim().max(255).nullable().optional(),
   receiptPrefix: z.string().trim().min(1).max(12).regex(/^[A-Za-z0-9_-]+$/).default("ZF"),
-  defaultMaxOperationAmount: z.coerce.number().positive(),
+  defaultMaxOperationAmount: z.coerce.number().finite().positive().max(999999999999.99),
   defaultCommissionType: z.enum(["FLAT", "PERCENT"]),
-  defaultCommissionValue: z.coerce.number().positive(),
+  defaultCommissionValue: z.coerce.number().finite().positive().max(999999999999.99),
   requireCashToYapeReference: z.boolean(),
   allowCashierCancel: z.boolean()
+});
+
+const branchBusinessBody = z.object({
+  businessName: z.string().trim().min(2).max(140),
+  legalName: z.string().trim().max(180).nullable().optional(),
+  ruc: z.string().trim().max(20).nullable().optional(),
+  address: z.string().trim().max(255).nullable().optional(),
+  phone: z.string().trim().max(40).nullable().optional(),
+  logoDataUrl: z.string().max(3000000).refine(
+    (value) => /^data:image\/(png|jpeg|webp);base64,/.test(value),
+    "El logo debe ser PNG, JPG o WEBP"
+  ).nullable().optional(),
+  ticketFooter: z.string().trim().max(255).nullable().optional(),
+  receiptPrefix: z.string().trim().min(1).max(12).regex(/^[A-Za-z0-9_-]+$/).default("ZF")
 });
 
 const reasonBody = z.object({
@@ -39,9 +53,8 @@ const reasonBody = z.object({
 
 const rolePermissionBody = z.object({
   permissions: z.array(z.enum([
-    "GLOBAL_READ","GLOBAL_WRITE","BRANCH_READ","BRANCH_WRITE",
-    "USER_ADMIN","BRANCH_USER_ADMIN","AUDIT_READ","CANCEL_OPERATION"
-  ])).max(8)
+    "BRANCH_READ","BRANCH_WRITE","CANCEL_OPERATION"
+  ])).max(3)
 });
 
 const roleCodeParams = z.object({
@@ -135,6 +148,30 @@ export async function ensureStage4Schema() {
     INSERT INTO system_settings (id, business_name)
     VALUES (1, 'Z-FLOW')
     ON DUPLICATE KEY UPDATE id = VALUES(id)
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS branch_business_settings (
+      branch_id BIGINT UNSIGNED NOT NULL,
+      business_name VARCHAR(140) NOT NULL,
+      legal_name VARCHAR(180) NULL,
+      ruc VARCHAR(20) NULL,
+      address VARCHAR(255) NULL,
+      phone VARCHAR(40) NULL,
+      logo_data_url LONGTEXT NULL,
+      ticket_footer VARCHAR(255) NULL,
+      receipt_prefix VARCHAR(12) NOT NULL DEFAULT 'ZF',
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (branch_id),
+      CONSTRAINT fk_branch_business_settings_branch FOREIGN KEY (branch_id) REFERENCES branches(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+  await db.query(`
+    INSERT INTO branch_business_settings (branch_id, business_name, address)
+    SELECT b.id, b.name, b.address
+    FROM branches b
+    LEFT JOIN branch_business_settings s ON s.branch_id=b.id
+    WHERE s.branch_id IS NULL
   `);
 
   // Current operating model: one Cajero / Encargado per filial and 100% of
@@ -274,6 +311,65 @@ export async function ensureStage4Schema() {
 }
 
 export async function registerStage4Routes(app: FastifyInstance) {
+  app.get("/api/branches/:branchId/business", async (request, reply) => {
+    const parsed = branchParams.safeParse(request.params);
+    if (!parsed.success) return reply.code(400).send({ error: "Filial inválida" });
+    const auth = await requireAuth(request, reply);
+    if (!auth) return;
+    if (!canReadBranch(auth, parsed.data.branchId)) return reply.code(403).send({ error: "Acceso denegado" });
+    const [rows] = await db.query<any[]>(`SELECT business_name, legal_name, ruc, address, phone,
+      logo_data_url, ticket_footer, receipt_prefix, updated_at
+      FROM branch_business_settings WHERE branch_id=? LIMIT 1`, [parsed.data.branchId]);
+    if (!rows.length) {
+      const [branchRows] = await db.query<any[]>(
+        "SELECT name AS business_name, address FROM branches WHERE id=? AND active=1 LIMIT 1",
+        [parsed.data.branchId]
+      );
+      if (!branchRows.length) return reply.code(404).send({ error: "Filial no encontrada" });
+      return {
+        businessName: branchRows[0].business_name,
+        legalName: null,
+        ruc: null,
+        address: branchRows[0].address,
+        phone: null,
+        logoDataUrl: null,
+        ticketFooter: null,
+        receiptPrefix: "ZF",
+        updatedAt: null
+      };
+    }
+    const row = rows[0];
+    return {
+      businessName: row.business_name, legalName: row.legal_name, ruc: row.ruc,
+      address: row.address, phone: row.phone, logoDataUrl: row.logo_data_url,
+      ticketFooter: row.ticket_footer, receiptPrefix: row.receipt_prefix, updatedAt: row.updated_at
+    };
+  });
+
+  app.post("/api/branches/:branchId/business", async (request, reply) => {
+    const parsedParams = branchParams.safeParse(request.params);
+    const parsedBody = branchBusinessBody.safeParse(request.body);
+    if (!parsedParams.success || !parsedBody.success) {
+      return reply.code(400).send({ error: parsedBody.success ? "Filial inválida" : parsedBody.error.issues[0]?.message ?? "Datos inválidos" });
+    }
+    const auth = await requireAuth(request, reply);
+    if (!auth) return;
+    if (!canWriteBranch(auth, parsedParams.data.branchId)) return reply.code(403).send({ error: "Acceso denegado" });
+    const s = parsedBody.data;
+    await db.execute(`INSERT INTO branch_business_settings
+      (branch_id, business_name, legal_name, ruc, address, phone, logo_data_url, ticket_footer, receipt_prefix)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE business_name=VALUES(business_name), legal_name=VALUES(legal_name),
+        ruc=VALUES(ruc), address=VALUES(address), phone=VALUES(phone), logo_data_url=VALUES(logo_data_url),
+        ticket_footer=VALUES(ticket_footer), receipt_prefix=VALUES(receipt_prefix)`, [
+      parsedParams.data.branchId, s.businessName, s.legalName ?? null, s.ruc ?? null,
+      s.address ?? null, s.phone ?? null, s.logoDataUrl ?? null, s.ticketFooter ?? null,
+      s.receiptPrefix.toUpperCase()
+    ]);
+    await audit(request, parsedParams.data.branchId, auth.userId, "BRANCH_BUSINESS_UPDATED", "BRANCH", parsedParams.data.branchId, { businessName: s.businessName });
+    return { ok: true };
+  });
+
   app.get("/api/admin/system/settings", async (request, reply) => {
     const auth = await requireOwner(request, reply);
     if (!auth) return;
@@ -502,10 +598,7 @@ export async function registerStage4Routes(app: FastifyInstance) {
           .filter((item) => item.role_code === role.code)
           .map((item) => item.permission_code)
       })),
-      availablePermissions: [
-        "GLOBAL_READ","GLOBAL_WRITE","BRANCH_READ","BRANCH_WRITE",
-        "USER_ADMIN","BRANCH_USER_ADMIN","AUDIT_READ","CANCEL_OPERATION"
-      ]
+      availablePermissions: ["BRANCH_READ","BRANCH_WRITE","CANCEL_OPERATION"]
     };
   });
 

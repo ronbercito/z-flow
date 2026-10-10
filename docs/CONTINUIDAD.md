@@ -1,10 +1,32 @@
 # Z-FLOW — Documento de continuidad
 
-**Fecha de corte:** 08/10/2026
+**Fecha de corte:** 09/10/2026
 **Repositorio:** `ronbercito/z-flow`
 **Rama de trabajo:** `develop`
-**Checkpoint al actualizar este documento:** `5bdbe81`
+**Checkpoint publicado:** `main` `16c6c82` (README breve); `develop` `69d5785` antes de esta actualización
 **Estado general:** el repositorio está sincronizado con `origin/develop`. La emisión de comprobantes Factiliza se retiró; no se ha confirmado todavía la actualización del LXC con estos cambios. Las pruebas técnicas locales están aprobadas y falta validar las 5 filiales reales antes de cerrar la etapa.
+
+## Revisión general y preparación de instalación (09/10/2026)
+
+Se corrigieron problemas identificados antes de la primera instalación limpia:
+
+- Las instalaciones nuevas ya no cargan movimientos de muestra ni abren una caja automáticamente.
+- Las transacciones de apertura, operación y cierre quedan serializadas para evitar sesiones duplicadas o cierres con totales incompletos.
+- Se rechazan montos infinitos y valores mayores al rango de la base de datos.
+- Se quitó CORS abierto; el panel web y la API operan bajo el mismo origen.
+- Los permisos de cajero se limitan a su filial; no se pueden asignar permisos globales al rol.
+- El rate limit de acceso limpia intentos antiguos y limita la memoria que ocupa.
+- Backups con permisos privados; restauración de consola validada antes de importar, con copia previa y recuperación automática ante error.
+- `scripts/install-local.sh` instala en Debian/Ubuntu desde `main`; genera secretos, configura Docker, backups diarios y rotación.
+
+La instalación desde cero está documentada en `docs/LOCAL_PRODUCTION.md`. La compilación de API/web y la configuración de Docker deben quedar aprobadas en GitHub Actions antes de promover esta revisión a `main`. No instalar todavía desde `main` hasta que se confirme esa promoción.
+
+## Estado del README y ramas al 09/10/2026
+
+- La página principal de GitHub estaba en `main`, que antes solo mostraba el README inicial. La PR #2 se combinó para llevar el proyecto completo a `main`.
+- El README se redujo a una presentación del producto, funciones y tecnología. El manual operativo detallado queda en `docs/LOCAL_PRODUCTION.md`.
+- La PR #3 ya se combinó en `main`; `main` está en `16c6c82` y el README breve es visible en la portada.
+- Las bitácoras de esta sesión se actualizan en `develop`; después deben promocionarse a `main` mediante una PR para conservar el flujo de ramas.
 
 ## Cambio más reciente: retiro de Factiliza
 
@@ -18,6 +40,24 @@ El propietario decidió retirar Factiliza para evitar emitir comprobantes por me
 - Próximo paso de despliegue: ejecutar `bash scripts/update-local.sh` en `/opt/z-flow` y comprobar que Integraciones ya no muestre Factiliza, que el estado del sistema sea saludable y que los registros electrónicos históricos continúen consultables.
 
 Los cambios de caja que figuraban como modificaciones locales antes de sincronizar el checkout ya están incluidos en `origin/develop`; el checkout local se alineó sobre esa versión y el commit de estilo de usuario ya estaba aplicado allí.
+
+## Cambio en curso: espacios separados por filial (09/10/2026)
+
+En `develop` se implementó una primera versión para que cada filial use su propia identidad comercial, reportes e historial de cierres:
+
+- La API tiene una tabla de identidad independiente por filial y protege lectura/escritura mediante permisos y el ID de filial autenticado.
+- La sección «Mi Negocio» permite mantener nombre comercial, razón social, RUC, dirección, teléfono, logo, prefijo de comprobante y pie de ticket.
+- Los documentos internos y reportes generados por la API toman los datos comerciales de la filial.
+- El reporte de filial incorpora rangos día, semana, mes y personalizado, además del detalle tabular de operaciones.
+- Cierres de filial muestra el historial, PDF y detalle de las operaciones del turno cerrado.
+- El propietario conserva las pantallas consolidadas existentes. No se actualizó el LXC.
+- `git diff --check` quedó limpio. No fue posible compilar localmente: `npm` no está instalado y el intento con el pnpm incluido falló al resolver la ruta del workspace, que no tiene dependencias locales instaladas.
+
+Antes de desplegar, revisar CI/build y probar aislamiento entre al menos dos filiales: usuario de filial A no puede consultar ni editar B; propietario puede consultar ambas. Verificar también que los datos y el logo correctos aparezcan en PDF de cierre y comprobante interno.
+
+### Corrección de carga del logo (09/10/2026)
+
+El primer uso de «Mi Negocio» mostró `Unexpected token '<'` al guardar una identidad con logo. El formulario acepta archivos de hasta 2 MB; Nginx y Fastify tenían un límite predeterminado cercano a 1 MB. Se elevaron ambos límites a 4 MB y se mejoró el manejo de respuestas HTML inesperadas. Esta corrección requiere CI y despliegue por `scripts/update-local.sh` antes de reintentar guardar.
 
 ---
 
@@ -416,4 +456,4 @@ Si se abre un chat nuevo, empezar leyendo:
 
 El siguiente trabajo no es rediseñar usuarios ni volver a socios.
 
-**Siguiente objetivo:** completar la validación operativa de las 5 filiales reales y, después, preparar el instalador reproducible para otro servidor.
+**Siguiente objetivo:** validar y desplegar este cambio de aislamiento por filial en el entorno de pruebas, completar la validación operativa de las 5 filiales reales y, después, preparar el instalador reproducible para otro servidor.

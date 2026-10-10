@@ -1,9 +1,26 @@
 # Z-FLOW — Bitácora de desarrollo
 
-**Última actualización:** 08/10/2026
+**Última actualización:** 09/10/2026
 **Repositorio:** `ronbercito/z-flow`  
 **Rama activa:** `develop`  
 **Estado:** producción local en Proxmox, pruebas reales en curso.
+
+## 09/10/2026 — Límite de carga de logos en Mi Negocio
+
+- El formulario permite logos de hasta 2 MB (base64 hasta 3 MB), por lo que el límite predeterminado de 1 MB en Nginx/Fastify podía responder con una página HTML 413 al guardar.
+- Se aumentó el límite del proxy web y de Fastify a 4 MB y el formulario ahora maneja respuestas no JSON con un mensaje HTTP legible.
+- Pendiente: CI y volver a guardar el logo en el panel actualizado.
+
+## 09/10/2026 — Espacio independiente por filial
+
+- Se agregó el modelo de identidad comercial por filial: nombre, razón social, RUC, teléfono, logo, dirección, prefijo y pie del comprobante.
+- Se agregaron las rutas de lectura/edición de identidad con autorización de filial y registro en auditoría. Las filiales existentes se inicializan desde sus datos de sucursal.
+- El panel de encargado incorpora «Mi Negocio», con edición de la identidad de su propia filial.
+- Los reportes de filial permiten elegir día, semana, mes o rango manual y muestran el registro de operaciones del periodo.
+- La pantalla de cierres de filial conserva el resumen del turno abierto y agrega el historial de esa filial, detalle de operaciones y PDF.
+- Las rutas de listado y detalle de cierres continúan comprobando acceso a la filial en la API. El nombre comercial y los datos de documentos internos ahora pueden salir de la identidad de la filial.
+- No se actualizó el panel desplegado. La compilación no pudo ejecutarse en este entorno porque no hay `npm` y las dependencias locales no están instaladas; `git diff --check` no reportó problemas de formato.
+- Próximo paso: validar el build en CI y probar con dos usuarios de filiales distintas que reportes, identidad, historial, detalle y PDF respeten el aislamiento antes de actualizar el LXC.
 
 ---
 
@@ -215,6 +232,13 @@ Z-FLOW arrancó automáticamente y está sano.
   - `scripts/verify-local-production.sh`
   - `scripts/verify-after-reboot.sh`
 
+## Actualización del 09/10/2026 — README y ramas
+
+- Se simplificó `README.md`: ahora presenta el sistema, sus funciones y tecnología, con enlaces a la documentación; el manual detallado ya no se muestra en la portada.
+- La PR #3 se combinó en `main` el 09/10/2026. `main` contiene el proyecto completo; la portada breve ya está publicada allí.
+- Estado de referencia: `main` en `16c6c82`; `develop` en `69d5785` al momento de esta actualización.
+- No se actualizó el LXC en este cambio. Sigue pendiente desplegar desde el repositorio y comprobar el retiro de Factiliza en el panel.
+
 ## Actualización del 08/10/2026 — integración electrónica
 
 - Se retiró Factiliza como proveedor de emisión desde el panel y la API. La emisión de boletas desde Z-FLOW queda deshabilitada hasta elegir un proveedor autorizado y validar el flujo tributario.
@@ -224,6 +248,17 @@ Z-FLOW arrancó automáticamente y está sano.
 - Se sincronizó el checkout local con `origin/develop`; los cambios de caja que estaban pendientes localmente ya estaban incluidos en la rama remota.
 - El último cambio publicado al corte de esta bitácora es `eeabdf1` (`remove: purge retired Factiliza credentials on update`).
 - No se confirma en esta actualización que el LXC de producción ya haya sido actualizado; hacerlo y comprobar el panel es el siguiente paso operativo.
+
+## Actualización del 09/10/2026 — revisión general y primera instalación limpia
+
+- La base de una instalación nueva ya no incluye operaciones ficticias ni una caja abierta; empieza lista para configurarse y abrir el primer turno real.
+- Apertura y cierre de caja se serializan con las operaciones para evitar doble apertura y diferencias si un movimiento llega mientras se cierra el turno.
+- Se validan montos finitos dentro del rango decimal de MariaDB; se retira CORS con credenciales abiertas porque el panel usa rutas del mismo origen.
+- Se limita el almacenamiento de intentos de inicio de sesión y solo se permiten permisos de alcance filial para el rol de cajero.
+- Los backups restringen permisos, evitan reemplazarse cuando coinciden en el segundo y la restauración de consola valida el gzip, crea copia previa e intenta recuperarla ante una importación fallida.
+- El instalador limpio obtiene el código desde `main`, genera contraseñas aleatorias, configura Docker, backups diarios y rotación, y deja una copia inicial.
+- `scripts/update-local.sh` actualiza desde `main`; la guía documenta la instalación en Debian/Ubuntu y los requisitos de LXC en Proxmox.
+- No se ejecutaron pruebas locales; la compilación/configuración se comprobará mediante los checks automáticos del repositorio antes de promover a `main`.
 
 ## Regla de trabajo del proyecto
 

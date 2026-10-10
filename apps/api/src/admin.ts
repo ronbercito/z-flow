@@ -16,9 +16,9 @@ const createBranchBody = z.object({
   code: z.string().trim().min(2).max(20).regex(/^[A-Za-z0-9_-]+$/),
   name: z.string().trim().min(2).max(120),
   address: z.string().trim().max(255).optional(),
-  maxOperationAmount: z.coerce.number().positive().default(50),
+  maxOperationAmount: z.coerce.number().finite().positive().max(999999999999.99).default(50),
   commissionType: z.enum(["FLAT", "PERCENT"]).default("FLAT"),
-  commissionValue: z.coerce.number().positive().default(1)
+  commissionValue: z.coerce.number().finite().positive().max(999999999999.99).default(1)
 });
 
 const updateBranchBody = z.object({
@@ -29,9 +29,9 @@ const updateBranchBody = z.object({
 });
 
 const branchSettingsBody = z.object({
-  maxOperationAmount: z.coerce.number().positive(),
+  maxOperationAmount: z.coerce.number().finite().positive().max(999999999999.99),
   commissionType: z.enum(["FLAT", "PERCENT"]),
-  commissionValue: z.coerce.number().positive()
+  commissionValue: z.coerce.number().finite().positive().max(999999999999.99)
 });
 
 const createUserBody = z.object({

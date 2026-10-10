@@ -1,6 +1,6 @@
 import Fastify from "fastify";
-import cors from "@fastify/cors";
 import cookie from "@fastify/cookie";
+import type { Pool, PoolConnection } from "mysql2/promise";
 import { z } from "zod";
 import { db } from "./db.js";
 import { registerAdminRoutes } from "./admin.js";
@@ -24,14 +24,9 @@ import {
   requireAuth
 } from "./auth.js";
 
-const app = Fastify({ logger: true, trustProxy: true });
+const app = Fastify({ logger: true, trustProxy: true, bodyLimit: 4 * 1024 * 1024 });
 
 await app.register(cookie);
-await app.register(cors, {
-  origin: true,
-  credentials: true,
-  methods: ["GET", "POST", "OPTIONS"]
-});
 
 const branchParams = z.object({
   branchId: z.coerce.number().int().positive()
@@ -55,18 +50,18 @@ const operationBody = z.object({
   operationType: z.enum(["YAPE_TO_CASH", "CASH_TO_YAPE"]),
   referenceCode: z.string().trim().min(1).max(80).optional(),
   customerName: z.string().trim().max(140).optional(),
-  amount: z.coerce.number().positive(),
+  amount: z.coerce.number().finite().positive().max(999999999999.99),
   notes: z.string().trim().max(255).optional()
 });
 
 const openCashBody = z.object({
-  initialCash: z.coerce.number().min(0),
-  initialWallet: z.coerce.number().min(0)
+  initialCash: z.coerce.number().finite().min(0).max(999999999999.99),
+  initialWallet: z.coerce.number().finite().min(0).max(999999999999.99)
 });
 
 const closeCashBody = z.object({
-  declaredCash: z.coerce.number().min(0),
-  declaredWallet: z.coerce.number().min(0),
+  declaredCash: z.coerce.number().finite().min(0).max(999999999999.99),
+  declaredWallet: z.coerce.number().finite().min(0).max(999999999999.99),
   notes: z.string().trim().max(255).optional()
 });
 
@@ -95,22 +90,26 @@ async function authorizeBranch(
 }
 
 
-async function cashClosurePreview(branchId: number) {
-  const [sessionRows] = await db.query<any[]>(
+async function cashClosurePreview(
+  branchId: number,
+  executor: Pool | PoolConnection = db,
+  sessionId?: number
+) {
+  const [sessionRows] = await executor.query<any[]>(
     `SELECT cs.id, cs.user_id, cs.initial_cash, cs.initial_wallet,
             DATE_FORMAT(cs.started_at, '%Y-%m-%dT%H:%i:%s') AS started_at,
             u.full_name AS assigned_to
      FROM cash_sessions cs
      LEFT JOIN users u ON u.id=cs.user_id
-     WHERE cs.branch_id=? AND cs.status='OPEN'
-     ORDER BY cs.started_at DESC LIMIT 1`,
-    [branchId]
+     WHERE cs.branch_id=? AND cs.status='OPEN' ${sessionId ? "AND cs.id=?" : ""}
+     ORDER BY cs.started_at DESC LIMIT 1${sessionId ? " FOR UPDATE" : ""}`,
+    sessionId ? [branchId, sessionId] : [branchId]
   );
 
   if (!sessionRows.length) return null;
   const session = sessionRows[0];
 
-  const [summaryRows] = await db.query<any[]>(
+  const [summaryRows] = await executor.query<any[]>(
     `SELECT
        COALESCE(SUM(CASE WHEN operation_type='YAPE_TO_CASH' AND status='COMPLETED' THEN amount ELSE 0 END),0) AS yape_received,
        COALESCE(SUM(CASE WHEN operation_type='YAPE_TO_CASH' AND status='COMPLETED' THEN net_amount ELSE 0 END),0) AS cash_delivered,
@@ -383,44 +382,56 @@ app.post("/api/branches/:branchId/cash/open", async (request, reply) => {
   const auth = await authorizeBranch(request, reply, branchId, true);
   if (!auth) return;
 
-  const [existing] = await db.query<any[]>(
-    "SELECT id FROM cash_sessions WHERE branch_id = ? AND status = 'OPEN' LIMIT 1",
-    [branchId]
-  );
+  const connection = await db.getConnection();
+  let sessionId: number;
+  try {
+    await connection.beginTransaction();
+    // Lock the branch row so simultaneous opening requests cannot create two sessions.
+    const [branchRows] = await connection.execute<any[]>(
+      "SELECT id FROM branches WHERE id=? AND active=1 FOR UPDATE",
+      [branchId]
+    );
+    if (!branchRows.length) {
+      await connection.rollback();
+      return reply.code(404).send({ error: "Filial no encontrada o inactiva" });
+    }
 
-  if (existing.length) {
-    return reply.code(409).send({ error: "La caja ya se encuentra abierta" });
+    const [existing] = await connection.execute<any[]>(
+      "SELECT id FROM cash_sessions WHERE branch_id = ? AND status = 'OPEN' LIMIT 1",
+      [branchId]
+    );
+    if (existing.length) {
+      await connection.rollback();
+      return reply.code(409).send({ error: "La caja ya se encuentra abierta" });
+    }
+
+    const initialCash = money(parsedBody.data.initialCash);
+    const initialWallet = money(parsedBody.data.initialWallet);
+    const [result] = await connection.execute<any>(
+      `INSERT INTO cash_sessions
+        (branch_id, user_id, initial_cash, initial_wallet, status, started_at)
+       VALUES (?, ?, ?, ?, 'OPEN', NOW())`,
+      [branchId, auth.userId, initialCash, initialWallet]
+    );
+    sessionId = Number(result.insertId);
+
+    await connection.execute(
+      `INSERT INTO audit_logs
+        (branch_id, user_id, action, entity_type, entity_id, details, ip_address, user_agent)
+       VALUES (?, ?, 'CASH_OPENED', 'CASH_SESSION', ?,
+         JSON_OBJECT('initial_cash', ?, 'initial_wallet', ?), ?, ?)`,
+      [branchId, auth.userId, sessionId, initialCash, initialWallet, request.ip,
+        String(request.headers["user-agent"] ?? "").slice(0, 255)]
+    );
+    await connection.commit();
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
   }
 
-  const [result] = await db.execute<any>(
-    `INSERT INTO cash_sessions
-      (branch_id, user_id, initial_cash, initial_wallet, status, started_at)
-     VALUES (?, ?, ?, ?, 'OPEN', NOW())`,
-    [
-      branchId,
-      auth.userId,
-      money(parsedBody.data.initialCash),
-      money(parsedBody.data.initialWallet)
-    ]
-  );
-
-  await db.execute(
-    `INSERT INTO audit_logs
-      (branch_id, user_id, action, entity_type, entity_id, details, ip_address, user_agent)
-     VALUES (?, ?, 'CASH_OPENED', 'CASH_SESSION', ?,
-       JSON_OBJECT('initial_cash', ?, 'initial_wallet', ?), ?, ?)`,
-    [
-      branchId,
-      auth.userId,
-      Number(result.insertId),
-      money(parsedBody.data.initialCash),
-      money(parsedBody.data.initialWallet),
-      request.ip,
-      String(request.headers["user-agent"] ?? "").slice(0, 255)
-    ]
-  );
-
-  return reply.code(201).send({ id: Number(result.insertId), status: "OPEN" });
+  return reply.code(201).send({ id: sessionId, status: "OPEN" });
 });
 
 app.get("/api/branches/:branchId/cash/close-preview", async (request, reply) => {
@@ -447,33 +458,50 @@ app.post("/api/branches/:branchId/cash/close", async (request, reply) => {
   const auth = await authorizeBranch(request, reply, branchId, true);
   if (!auth) return;
 
-  const preview = await cashClosurePreview(branchId);
-  if (!preview) {
-    return reply.code(409).send({ error: "No hay una caja abierta para cerrar" });
-  }
-
-  const declaredCash = money(parsedBody.data.declaredCash);
-  const declaredWallet = money(parsedBody.data.declaredWallet);
-  const differenceCash = money(declaredCash - preview.expectedCash);
-  const differenceWallet = money(declaredWallet - preview.expectedWallet);
-  const hasDifference = Math.abs(differenceCash) >= 0.005 || Math.abs(differenceWallet) >= 0.005;
-
-  if (hasDifference && !parsedBody.data.notes?.trim()) {
-    return reply.code(422).send({
-      error: "Debes escribir una observación cuando existe diferencia de efectivo o Yape"
-    });
-  }
-
-  const resultType =
-    !hasDifference ? "BALANCED"
-    : differenceCash < 0 || differenceWallet < 0
-      ? (differenceCash > 0 || differenceWallet > 0 ? "MIXED" : "SHORTAGE")
-      : "SURPLUS";
-
   const connection = await db.getConnection();
   let closureId = 0;
+  let closedResult: Record<string, unknown> = {};
   try {
     await connection.beginTransaction();
+
+    // The same session row is locked by operation writes. This makes the closing
+    // totals include every operation committed before the close, and rejects any
+    // operation that arrives after the session has been closed.
+    const [openSessionRows] = await connection.execute<any[]>(
+      `SELECT id FROM cash_sessions
+       WHERE branch_id=? AND status='OPEN'
+       ORDER BY started_at DESC LIMIT 1 FOR UPDATE`,
+      [branchId]
+    );
+    if (!openSessionRows.length) {
+      await connection.rollback();
+      return reply.code(409).send({ error: "No hay una caja abierta para cerrar" });
+    }
+
+    const preview = await cashClosurePreview(branchId, connection, Number(openSessionRows[0].id));
+    if (!preview) {
+      await connection.rollback();
+      return reply.code(409).send({ error: "No hay una caja abierta para cerrar" });
+    }
+
+    const declaredCash = money(parsedBody.data.declaredCash);
+    const declaredWallet = money(parsedBody.data.declaredWallet);
+    const differenceCash = money(declaredCash - preview.expectedCash);
+    const differenceWallet = money(declaredWallet - preview.expectedWallet);
+    const hasDifference = Math.abs(differenceCash) >= 0.005 || Math.abs(differenceWallet) >= 0.005;
+
+    if (hasDifference && !parsedBody.data.notes?.trim()) {
+      await connection.rollback();
+      return reply.code(422).send({
+        error: "Debes escribir una observación cuando existe diferencia de efectivo o Yape"
+      });
+    }
+
+    const resultType =
+      !hasDifference ? "BALANCED"
+      : differenceCash < 0 || differenceWallet < 0
+        ? (differenceCash > 0 || differenceWallet > 0 ? "MIXED" : "SHORTAGE")
+        : "SURPLUS";
 
     const [closure] = await connection.execute<any>(
       `INSERT INTO daily_closures
@@ -532,6 +560,25 @@ app.post("/api/branches/:branchId/cash/close", async (request, reply) => {
       ]
     );
 
+    closedResult = {
+      closureId,
+      status: "CLOSED",
+      resultType,
+      expectedCash: preview.expectedCash,
+      declaredCash,
+      differenceCash,
+      expectedWallet: preview.expectedWallet,
+      declaredWallet,
+      differenceWallet,
+      operationCount: preview.operationCount,
+      commissionTotal: preview.commissionTotal,
+      staffShareTotal: preview.staffShareTotal,
+      partnerShareTotal: preview.partnerShareTotal,
+      unassignedCommission: preview.unassignedCommission,
+      assignedTo: preview.assignedTo,
+      notes: parsedBody.data.notes ?? null
+    };
+
     await connection.commit();
   } catch (error) {
     await connection.rollback();
@@ -540,24 +587,7 @@ app.post("/api/branches/:branchId/cash/close", async (request, reply) => {
     connection.release();
   }
 
-  return {
-    closureId,
-    status: "CLOSED",
-    resultType,
-    expectedCash: preview.expectedCash,
-    declaredCash,
-    differenceCash,
-    expectedWallet: preview.expectedWallet,
-    declaredWallet,
-    differenceWallet,
-    operationCount: preview.operationCount,
-    commissionTotal: preview.commissionTotal,
-    staffShareTotal: preview.staffShareTotal,
-    partnerShareTotal: preview.partnerShareTotal,
-    unassignedCommission: preview.unassignedCommission,
-    assignedTo: preview.assignedTo,
-    notes: parsedBody.data.notes ?? null
-  };
+  return closedResult;
 });
 app.get("/api/branches/:branchId/settings", async (request, reply) => {
   const parsed = branchParams.safeParse(request.params);

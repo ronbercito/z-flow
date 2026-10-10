@@ -1774,6 +1774,58 @@ tr:last-child td { border-bottom:0; }
   font-size: 8px;
 }
 
+.branch-business-card { overflow:hidden; }
+.branch-business-form { padding:18px; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+.branch-business-form > label { display:grid; gap:7px; color:#56657a; font-size:10px; font-weight:700; }
+.branch-business-form > label.wide { grid-column:1 / -1; }
+.branch-business-form input:not([type="file"]) { height:40px; min-width:0; border:1px solid #dce5ef; border-radius:9px; padding:0 11px; color:#26334a; background:#fff; font-size:11px; outline:none; }
+.branch-business-form input:focus { border-color:#8ab4f8; box-shadow:0 0 0 3px #2563eb12; }
+.branch-business-form input:disabled { background:#f8fafc; color:#667085; }
+.branch-business-form .logo-upload-row { margin-top:2px; }
+.branch-business-footer { border-top:1px solid #eef2f6; padding:13px 18px; display:flex; justify-content:space-between; align-items:center; gap:10px; }
+.branch-business-footer > span { color:#8b98aa; font-size:9px; }
+.branch-business-footer button { margin-left:auto; }
+.branch-business-card > .error-banner,.branch-business-card > .success-banner { margin:0 18px 12px; }
+.branch-business-card > .success-banner { padding:10px 12px; border:1px solid #ccebd9; border-radius:9px; background:#effaf4; color:#197348; font-size:10px; }
+.branch-close-page { display:grid; gap:14px; margin-top:16px; }
+.branch-no-open-session { min-height:125px; padding:18px; display:flex; flex-direction:row; justify-content:flex-start; align-items:center; gap:12px; text-align:left; }
+.branch-no-open-session h2 { margin:0; font-size:14px; }
+.branch-no-open-session p { margin:3px auto 0 0; color:#8b98aa; font-size:10px; }
+.branch-no-open-session > button { margin-left:auto; }
+.branch-closure-history { min-width:0; overflow:hidden; }
+.closure-row-actions { display:flex; align-items:center; gap:5px; }
+.status-pill { display:inline-flex; align-items:center; border-radius:999px; padding:5px 8px; font-size:8px; font-weight:800; }
+.status-pill.ok { color:#17804e; background:#eaf8f0; }
+.status-pill.cancelled { color:#c44747; background:#fff0f0; }
+.positive-text { color:#17804e; font-size:8px; }
+.negative-text { color:#c44747; font-size:8px; }
+.closure-detail-panel { margin:14px; padding:14px; border:1px solid #e4ebf4; border-radius:11px; background:#fbfdff; }
+.closure-detail-heading { display:flex; justify-content:space-between; align-items:center; gap:10px; padding:0 0 10px; }
+.closure-detail-heading > div { display:grid; gap:3px; }
+.closure-detail-heading strong { font-size:11px; }
+.closure-detail-heading span { color:#8b98aa; font-size:9px; }
+.closure-detail-heading > strong { color:#17804e; font-size:10px; }
+.closure-notes { padding:9px 11px; border-radius:8px; background:#f4f7fb; color:#68778b; font-size:9px; }
+.report-period-buttons { display:flex; align-items:center; gap:3px; padding:3px; border:1px solid #e1e8f1; border-radius:9px; background:#f7f9fc; }
+.report-period-buttons button { height:29px; padding:0 9px; border:0; border-radius:6px; background:transparent; color:#647388; font-size:9px; font-weight:700; }
+.report-period-buttons button:hover,.report-period-buttons button.active { background:#fff; color:#2563eb; box-shadow:0 1px 3px #17203314; }
+.branch-daily-report { overflow:hidden; }
+.branch-daily-report .card-head > span { color:#2563eb; font-size:9px; font-weight:700; }
+.branch-daily-report td small { display:inline-block; margin-top:3px; color:#8b98aa; font-size:8px; }
+.branch-daily-report tfoot th { color:#26334a; background:#f6f9fd; border-top:1px solid #e7edf5; }
+.operation-type { display:inline-flex; padding:4px 6px; border-radius:6px; font-size:8px; font-weight:750; }
+.operation-type.yape-cash { color:#6e4bd8; background:#f3efff; }
+.operation-type.cash-yape { color:#138653; background:#edf9f2; }
+
+@media (max-width: 650px) {
+  .branch-business-form { grid-template-columns:1fr; padding:14px; }
+  .branch-business-form > label.wide { grid-column:auto; }
+  .branch-no-open-session { align-items:flex-start; flex-wrap:wrap; }
+  .branch-no-open-session > button { margin-left:0; }
+  .closure-detail-heading { align-items:flex-start; flex-direction:column; }
+  .branch-report-toolbar .admin-filters { flex-wrap:wrap; }
+}
+
 
 /* Stage 4 - professional daily closure */
 .closure-preview-grid {
