@@ -8,7 +8,7 @@ No se usa dominio en esta etapa.
 - API: Fastify + TypeScript.
 - Base de datos: MariaDB.
 - Proxy: Nginx reenvía `/api` al contenedor API.
-- Acceso: `http://IP_DEL_CONTENEDOR` (puerto 80)`.
+- Acceso: `http://IP_DEL_CONTENEDOR` (puerto 80).
 
 La base de datos no se publica hacia la red; solo la API puede acceder a ella dentro de Docker.
 
