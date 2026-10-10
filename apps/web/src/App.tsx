@@ -1641,7 +1641,7 @@ function CloseCashModal({ branchId, dashboard, onClose, onClosed }: { branchId: 
 
           {result.notes && <div className="closure-result-note"><span>Observación</span><strong>{result.notes}</strong></div>}
 
-          {result.electronicDocument && <div className={["PENDING","PARTIAL"].includes(result.electronicDocument.status) ? "friendly-info" : result.electronicDocument.status === "ERROR" ? "modal-error" : "success-message"}>
+          {result.electronicDocument && <div className={["PENDING","PARTIAL","UNKNOWN"].includes(result.electronicDocument.status) ? "friendly-info" : ["ERROR","CANCELLED"].includes(result.electronicDocument.status) ? "modal-error" : "success-message"}>
             <ReceiptText size={16}/><span>{result.electronicDocument.message || `Boleta ${result.electronicDocument.status}.`}{result.electronicDocument.series && ` · ${result.electronicDocument.series}-${String(result.electronicDocument.correlativo ?? "").padStart(8,"0")}`}{Number(result.electronicDocument.partCount ?? 1) > 1 && ` · ${result.electronicDocument.partCount} boletas`}</span>
           </div>}
 

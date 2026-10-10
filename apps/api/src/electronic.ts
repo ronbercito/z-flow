@@ -63,14 +63,15 @@ function documentBody(input: {
   const customerNumber = input.customerDocumentNumber?.trim() ?? "";
   const customerName = input.customerName?.trim() || "CLIENTES VARIOS";
   const party: Record<string, unknown> = {
-    // ApiSunat expects this UBL node even when SUNAT does not require buyer identification.
-    // Keep cbc:ID empty for consumidor final; do not invent a DNI or document type.
-    "cac:PartyIdentification": { "cbc:ID": customerNumber ? {
-      "_attributes": { schemeID: input.customerDocumentType === "RUC" ? "6" : input.customerDocumentType === "CE" ? "4" : input.customerDocumentType === "PASSPORT" ? "7" : "1" },
-      "_text": customerNumber
-    } : { "_attributes": { schemeID: "" }, "_text": "" } },
     "cac:PartyLegalEntity": { "cbc:RegistrationName": { "_text": customerName } }
   };
+  // A consumidor final has no buyer document node in UBL; an empty ID/schemeID is invalid.
+  if (customerNumber) {
+    party["cac:PartyIdentification"] = { "cbc:ID": {
+      "_attributes": { schemeID: input.customerDocumentType === "RUC" ? "6" : input.customerDocumentType === "CE" ? "4" : input.customerDocumentType === "PASSPORT" ? "7" : "1" },
+      "_text": customerNumber
+    } };
+  }
   const amount = money(input.amount);
   return {
     "cbc:UBLVersionID": { "_text": "2.1" },
@@ -184,12 +185,20 @@ export async function ensureElectronicSchema() {
   if (!indexNames.has("uq_electronic_operation_part")) await db.query("ALTER TABLE electronic_documents ADD UNIQUE KEY uq_electronic_operation_part (operation_id,part_number)");
 }
 
+class ApiSunatRequestError extends Error {
+  constructor(message: string, readonly outcomeUnknown: boolean) { super(message); }
+}
+
 async function apiJson(url: string, init?: RequestInit) {
-  const response = await fetch(url, { ...init, signal: AbortSignal.timeout(30000) });
-  const raw = await response.text();
+  let response: Response;
+  try { response = await fetch(url, { ...init, signal: AbortSignal.timeout(30000) }); }
+  catch (error) { throw new ApiSunatRequestError(error instanceof Error ? error.message : "No se pudo conectar con ApiSunat.", true); }
+  let raw: string;
+  try { raw = await response.text(); }
+  catch (error) { throw new ApiSunatRequestError(error instanceof Error ? error.message : "No se pudo leer la respuesta de ApiSunat.", true); }
   let data: any;
-  try { data = raw ? JSON.parse(raw) : {}; } catch { throw new Error("ApiSunat respondió con un formato inesperado."); }
-  if (!response.ok) throw new Error(String(data?.error?.message ?? data?.message ?? `ApiSunat respondió ${response.status}.`).slice(0, 700));
+  try { data = raw ? JSON.parse(raw) : {}; } catch { throw new ApiSunatRequestError("ApiSunat respondió con un formato inesperado; no se pudo confirmar el resultado.", true); }
+  if (!response.ok) throw new ApiSunatRequestError(String(data?.error?.message ?? data?.message ?? `ApiSunat respondió ${response.status}.`).slice(0, 700), response.status >= 500);
   return data;
 }
 
@@ -230,16 +239,25 @@ async function saveProviderFiles(branchId: number, sourceType: "CLOSURE" | "OPER
   await mkdir(baseDir, { recursive: true, mode: 0o700 });
   const pdfUrl = `${APISUNAT_URL}/documents/${encodeURIComponent(documentId)}/getPDF/A4/${encodeURIComponent(fileName)}.pdf`;
   const pdfResponse = await fetch(pdfUrl, { signal: AbortSignal.timeout(30000) });
-  if (pdfResponse.ok) await writeFile(join(baseDir, `${series}-${String(correlativo).padStart(8, "0")}.pdf`), Buffer.from(await pdfResponse.arrayBuffer()), { mode: 0o600 });
+  if (!pdfResponse.ok) throw new Error(`ApiSunat no permitió descargar el PDF (${pdfResponse.status}).`);
+  await writeFile(join(baseDir, `${series}-${String(correlativo).padStart(8, "0")}.pdf`), Buffer.from(await pdfResponse.arrayBuffer()), { mode: 0o600 });
 
   const info = await apiJson(`${APISUNAT_URL}/documents/${encodeURIComponent(documentId)}/getById`);
+  if (typeof info?.xml !== "string") throw new Error("ApiSunat todavía no entrega el XML de la boleta aceptada.");
   for (const [key, ext] of [["xml", "xml"], ["cdr", "cdr.zip"]] as const) {
     const url = info?.[key];
     if (typeof url !== "string") continue;
     const parsed = new URL(url);
-    if (parsed.protocol !== "https:" || !(parsed.hostname === "apisunat.com" || parsed.hostname.endsWith(".apisunat.com"))) continue;
+    if (parsed.protocol !== "https:" || !(parsed.hostname === "apisunat.com" || parsed.hostname.endsWith(".apisunat.com"))) {
+      if (key === "xml") throw new Error("ApiSunat devolvió una dirección no válida para descargar el XML.");
+      continue;
+    }
     const response = await fetch(parsed, { signal: AbortSignal.timeout(30000) });
-    if (response.ok) await writeFile(join(baseDir, `${series}-${String(correlativo).padStart(8, "0")}.${ext}`), Buffer.from(await response.arrayBuffer()), { mode: 0o600 });
+    if (!response.ok) {
+      if (key === "xml") throw new Error(`ApiSunat no permitió descargar el XML (${response.status}).`);
+      continue;
+    }
+    await writeFile(join(baseDir, `${series}-${String(correlativo).padStart(8, "0")}.${ext}`), Buffer.from(await response.arrayBuffer()), { mode: 0o600 });
   }
 }
 
@@ -260,21 +278,31 @@ async function issueDocument(input: {
     const partNumber = input.partNumber ?? 1;
     const partCount = input.partCount ?? 1;
     const [existing] = await db.query<any[]>(`SELECT id,series,correlativo,status,provider_document_id,provider_message,amount,part_number,part_count FROM electronic_documents WHERE ${duplicateField}=? AND part_number=? LIMIT 1`, [input.sourceId, partNumber]);
-    const retryRecordId = existing[0]?.status === "QUEUED" || (existing[0]?.status === "ERROR" && !existing[0]?.provider_document_id) || existing[0]?.status === "EXCEPTION" ? Number(existing[0].id) : null;
+    let retryRecordId = existing[0]?.status === "QUEUED" || (existing[0]?.status === "ERROR" && !existing[0]?.provider_document_id) || existing[0]?.status === "EXCEPTION" ? Number(existing[0].id) : null;
     if (existing.length && !retryRecordId) return { status: existing[0].status, series: existing[0].series, correlativo: existing[0].correlativo == null ? undefined : Number(existing[0].correlativo), documentId: existing[0].provider_document_id ?? undefined, message: existing[0].provider_message ?? undefined, amount: Number(existing[0].amount), partNumber, partCount: Number(existing[0].part_count) };
+    if (!retryRecordId) {
+      const [inserted] = await db.execute<any>(`INSERT INTO electronic_documents
+        (branch_id,closure_id,operation_id,series,correlativo,part_number,part_count,customer_document_type,customer_document_number,customer_name,description,amount,status,provider_message,file_name,created_by_user_id)
+        VALUES (?,?,?,?,NULL,?,?,?,?,?,?,?,'QUEUED','Preparando la emisión.','pendiente',?)`, [
+        input.branchId, input.sourceType === "CLOSURE" ? input.sourceId : null, input.sourceType === "OPERATION" ? input.sourceId : null,
+        c.series, partNumber, partCount, input.customerDocumentType ?? null, input.customerDocumentNumber ?? null,
+        input.customerName || "CLIENTES VARIOS", input.description.slice(0, 250), money(input.amount), input.createdBy
+      ]);
+      retryRecordId = Number(inserted.insertId);
+    }
 
     let last: any;
     try {
       last = await apiJson(`${APISUNAT_URL}/personas/lastDocument`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ personaId: c.persona_id, personaToken: c.persona_token, type: "03", serie: c.series }) });
     } catch (error) {
       const message = (error instanceof Error ? error.message : "ApiSunat no pudo consultar el correlativo.").slice(0, 900);
-      if (retryRecordId) await db.execute("UPDATE electronic_documents SET provider_message=? WHERE id=? AND status IN ('QUEUED','ERROR')", [message, retryRecordId]);
+      if (retryRecordId) await db.execute("UPDATE electronic_documents SET provider_message=? WHERE id=? AND status IN ('QUEUED','ERROR','EXCEPTION')", [message, retryRecordId]);
       return { status: "ERROR", message, amount: money(input.amount), partNumber, partCount };
     }
     const next = String(last?.suggestedNumber ?? "").padStart(8, "0");
     if (!/^\d{8}$/.test(next) || Number(next) < 1) {
       const message = "ApiSunat no devolvió un correlativo válido para la serie " + c.series + ".";
-      if (retryRecordId) await db.execute("UPDATE electronic_documents SET provider_message=? WHERE id=? AND status IN ('QUEUED','ERROR')", [message, retryRecordId]);
+      if (retryRecordId) await db.execute("UPDATE electronic_documents SET provider_message=? WHERE id=? AND status IN ('QUEUED','ERROR','EXCEPTION')", [message, retryRecordId]);
       return { status: "ERROR", message, amount: money(input.amount), partNumber, partCount };
     }
     const number = String(Number(next)).padStart(8, "0");
@@ -288,16 +316,44 @@ async function issueDocument(input: {
       return { status: "ERROR", message, series: c.series, amount: money(input.amount), partNumber, partCount };
     }
     const fileName = `${String(c.ruc)}-03-${c.series}-${number}`;
+    const connection = await db.getConnection();
+    let operationWasCancelled = false;
+    try {
+      await connection.beginTransaction();
+      if (input.sourceType === "OPERATION") {
+        const [operations] = await connection.query<any[]>("SELECT status FROM operations WHERE id=? AND branch_id=? LIMIT 1 FOR UPDATE", [input.sourceId, input.branchId]);
+        operationWasCancelled = !operations.length || operations[0].status !== "COMPLETED";
+      }
+      if (operationWasCancelled) {
+        await connection.execute("UPDATE electronic_documents SET status='CANCELLED',provider_message='Operación anulada antes del envío de la boleta.' WHERE id=? AND status IN ('QUEUED','ERROR','EXCEPTION')", [retryRecordId]);
+      } else {
+        await connection.execute(`UPDATE electronic_documents SET series=?,correlativo=?,part_count=?,customer_document_type=?,customer_document_number=?,customer_name=?,description=?,amount=?,status='UNKNOWN',provider_document_id=NULL,provider_message='Enviando a ApiSunat; confirmando el resultado.',file_name=?,created_by_user_id=? WHERE id=? AND status IN ('QUEUED','ERROR','EXCEPTION')`, [c.series, Number(number), partCount, input.customerDocumentType ?? null, input.customerDocumentNumber ?? null, input.customerName || "CLIENTES VARIOS", input.description.slice(0, 250), money(input.amount), fileName, input.createdBy, retryRecordId]);
+      }
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+    if (operationWasCancelled) {
+      return { status: "CANCELLED", message: "La operación fue anulada antes de enviar la boleta.", amount: money(input.amount), partNumber, partCount };
+    }
     const date = new Date();
     const body = documentBody({ ruc: String(c.ruc), issuer: String(c.legal_name || c.business_name), address: c.address, series: c.series, number, date: localDate(date), time: localTime(date), amount: money(input.amount), description: input.description, customerName: input.customerName, customerDocumentType: input.customerDocumentType, customerDocumentNumber: input.customerDocumentNumber });
     const payload = { personaId: c.persona_id, personaToken: c.persona_token, fileName, documentBody: body };
     try {
       const response = await apiJson(`${APISUNAT_URL}/personas/v1/sendBill`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-      const status = response?.status === "PENDIENTE" ? "PENDING" : "ERROR";
       const documentId = typeof response?.documentId === "string" ? response.documentId : null;
-      const message = status === "PENDING" ? "Enviada a ApiSunat; esperando validación." : String(response?.error?.message ?? response?.message ?? "ApiSunat no confirmó la emisión.").slice(0, 900);
+      const isPending = response?.status === "PENDIENTE";
+      const status = isPending ? (documentId ? "PENDING" : "UNKNOWN") : "ERROR";
+      const message = isPending
+        ? documentId
+          ? "Enviada a ApiSunat; esperando validación."
+          : "ApiSunat indicó que recibió la boleta, pero no devolvió el identificador para consultar su estado. Verifica el documento en ApiSunat antes de volver a emitir."
+        : String(response?.error?.message ?? response?.message ?? "ApiSunat no confirmó la emisión.").slice(0, 900);
       if (retryRecordId) {
-        await db.execute(`UPDATE electronic_documents SET series=?,correlativo=?,part_count=?,description=?,amount=?,status=?,provider_document_id=?,provider_message=?,file_name=?,created_by_user_id=? WHERE id=? AND status IN ('QUEUED','ERROR')`, [c.series, Number(number), partCount, input.description.slice(0, 250), money(input.amount), status, documentId, message, fileName, input.createdBy, retryRecordId]);
+        await db.execute(`UPDATE electronic_documents SET series=?,correlativo=?,part_count=?,customer_document_type=?,customer_document_number=?,customer_name=?,description=?,amount=?,status=?,provider_document_id=?,provider_message=?,file_name=?,created_by_user_id=? WHERE id=? AND status IN ('UNKNOWN','QUEUED','ERROR','EXCEPTION')`, [c.series, Number(number), partCount, input.customerDocumentType ?? null, input.customerDocumentNumber ?? null, input.customerName || "CLIENTES VARIOS", input.description.slice(0, 250), money(input.amount), status, documentId, message, fileName, input.createdBy, retryRecordId]);
       } else {
         await db.execute(`INSERT INTO electronic_documents (branch_id,closure_id,operation_id,series,correlativo,part_number,part_count,customer_document_type,customer_document_number,customer_name,description,amount,status,provider_document_id,provider_message,file_name,created_by_user_id)
           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [input.branchId, input.sourceType === "CLOSURE" ? input.sourceId : null, input.sourceType === "OPERATION" ? input.sourceId : null, c.series, Number(number), partNumber, partCount, input.customerDocumentType ?? null, input.customerDocumentNumber ?? null, input.customerName || "CLIENTES VARIOS", input.description.slice(0, 250), money(input.amount), status, documentId, message, fileName, input.createdBy]);
@@ -306,35 +362,67 @@ async function issueDocument(input: {
       return { status, message, documentId: documentId ?? undefined, series: c.series, correlativo: Number(number), amount: money(input.amount), partNumber, partCount };
     } catch (error) {
       const message = (error instanceof Error ? error.message : "No se pudo conectar con ApiSunat.").slice(0, 900);
+      const status = error instanceof ApiSunatRequestError && error.outcomeUnknown ? "UNKNOWN" : "ERROR";
+      const displayMessage = status === "UNKNOWN"
+        ? `No se pudo confirmar la respuesta de ApiSunat. Verifica el comprobante antes de volver a emitir. ${message}`.slice(0, 900)
+        : message;
       if (retryRecordId) {
-        await db.execute(`UPDATE electronic_documents SET series=?,correlativo=?,part_count=?,description=?,amount=?,status='ERROR',provider_message=?,file_name=?,created_by_user_id=? WHERE id=? AND status IN ('QUEUED','ERROR')`, [c.series, Number(number), partCount, input.description.slice(0, 250), money(input.amount), message, fileName, input.createdBy, retryRecordId]);
+        await db.execute(`UPDATE electronic_documents SET series=?,correlativo=?,part_count=?,customer_document_type=?,customer_document_number=?,customer_name=?,description=?,amount=?,status=?,provider_document_id=NULL,provider_message=?,file_name=?,created_by_user_id=? WHERE id=? AND status IN ('UNKNOWN','QUEUED','ERROR','EXCEPTION')`, [c.series, Number(number), partCount, input.customerDocumentType ?? null, input.customerDocumentNumber ?? null, input.customerName || "CLIENTES VARIOS", input.description.slice(0, 250), money(input.amount), status, displayMessage, fileName, input.createdBy, retryRecordId]);
       } else {
         await db.execute(`INSERT INTO electronic_documents (branch_id,closure_id,operation_id,series,correlativo,part_number,part_count,customer_document_type,customer_document_number,customer_name,description,amount,status,provider_message,file_name,created_by_user_id)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'ERROR',?,?,?)`, [input.branchId, input.sourceType === "CLOSURE" ? input.sourceId : null, input.sourceType === "OPERATION" ? input.sourceId : null, c.series, Number(number), partNumber, partCount, input.customerDocumentType ?? null, input.customerDocumentNumber ?? null, input.customerName || "CLIENTES VARIOS", input.description.slice(0, 250), money(input.amount), message, fileName, input.createdBy]);
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?)`, [input.branchId, input.sourceType === "CLOSURE" ? input.sourceId : null, input.sourceType === "OPERATION" ? input.sourceId : null, c.series, Number(number), partNumber, partCount, input.customerDocumentType ?? null, input.customerDocumentNumber ?? null, input.customerName || "CLIENTES VARIOS", input.description.slice(0, 250), money(input.amount), status, displayMessage, fileName, input.createdBy]);
       }
-      return { status: "ERROR", message, series: c.series, correlativo: Number(number), amount: money(input.amount), partNumber, partCount };
+      return { status, message: displayMessage, series: c.series, correlativo: Number(number), amount: money(input.amount), partNumber, partCount };
     }
   });
 }
 
+const pollingDocuments = new Set<string>();
+
 async function refreshDocument(branchId: number, sourceId: number, sourceType: "CLOSURE" | "OPERATION", partNumber: number, documentId: string, series: string, number: number, fileName: string) {
+  if (pollingDocuments.has(documentId)) return;
+  pollingDocuments.add(documentId);
   const key = sourceType === "CLOSURE" ? "closure_id" : "operation_id";
-  // ApiSunat may take longer than a few seconds to validate. Keep checking for
-  // up to five minutes so the stored state and archived files reach a final result.
-  for (let attempt = 0; attempt < 60; attempt++) {
+  try {
     try {
-      await new Promise((resolve) => setTimeout(resolve, attempt ? 5000 : 2500));
       const result = await apiJson(`${APISUNAT_URL}/documents/${encodeURIComponent(documentId)}/getById`);
-      const status = result.status === "ACEPTADO" ? "ACCEPTED" : result.status === "RECHAZADO" ? "REJECTED" : result.status === "EXCEPCION" ? "EXCEPTION" : "PENDING";
+      const providerStatus = String(result.status ?? "").trim().toUpperCase();
+      const status = providerStatus === "ACEPTADO" ? "ACCEPTED" : providerStatus === "RECHAZADO" ? "REJECTED" : providerStatus === "EXCEPCION" ? "EXCEPTION" : "PENDING";
       const message = [...(Array.isArray(result.faults) ? result.faults : []), ...(Array.isArray(result.notes) ? result.notes : [])].map((item: any) => typeof item === "string" ? item : JSON.stringify(item)).join(" · ").slice(0, 900) || (status === "ACCEPTED" ? "Boleta aceptada en el ambiente de ApiSunat." : "Estado informado por ApiSunat: " + status);
-      await db.execute(`UPDATE electronic_documents SET status=?,provider_message=? WHERE ${key}=? AND part_number=? AND branch_id=?`, [status, message, sourceId, partNumber, branchId]);
+      await db.execute(`UPDATE electronic_documents SET status=?,provider_message=?,updated_at=CURRENT_TIMESTAMP WHERE ${key}=? AND part_number=? AND branch_id=?`, [status, message, sourceId, partNumber, branchId]);
       if (status === "ACCEPTED") {
-        try { await saveProviderFiles(branchId, sourceType, sourceId, series, number, documentId, fileName); } catch { /* Keep the accepted record; archive download can be retried from the panel. */ }
-        return;
+        try { await saveProviderFiles(branchId, sourceType, sourceId, series, number, documentId, fileName); }
+        catch (error) {
+          const archiveMessage = `Boleta aceptada. No se pudo completar el archivo local: ${error instanceof Error ? error.message : "error de descarga"}`.slice(0, 900);
+          await db.execute(`UPDATE electronic_documents SET provider_message=?,updated_at=CURRENT_TIMESTAMP WHERE ${key}=? AND part_number=? AND branch_id=?`, [archiveMessage, sourceId, partNumber, branchId]);
+        }
       }
-      if (status !== "PENDING") return;
-    } catch { /* Retry transient provider responses. */ }
+    } catch { /* The scheduled reconciler will retry transient provider responses. */ }
+  } finally {
+    pollingDocuments.delete(documentId);
   }
+}
+
+async function refreshPendingDocuments() {
+  const [rows] = await db.query<any[]>(`SELECT branch_id,closure_id,operation_id,part_number,provider_document_id,series,correlativo,file_name
+    FROM electronic_documents WHERE status='PENDING' AND provider_document_id IS NOT NULL AND correlativo IS NOT NULL
+    ORDER BY updated_at ASC LIMIT 100`);
+  await Promise.all(rows.map((row) => refreshDocument(
+    Number(row.branch_id), Number(row.closure_id ?? row.operation_id), row.closure_id == null ? "OPERATION" : "CLOSURE",
+    Number(row.part_number), String(row.provider_document_id), String(row.series), Number(row.correlativo), String(row.file_name)
+  )));
+  const [accepted] = await db.query<any[]>(`SELECT branch_id,closure_id,operation_id,part_number,provider_document_id,series,correlativo,file_name
+    FROM electronic_documents WHERE status='ACCEPTED' AND provider_document_id IS NOT NULL AND correlativo IS NOT NULL
+      AND updated_at < DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 1 MINUTE)
+    ORDER BY updated_at ASC LIMIT 100`);
+  await Promise.all(accepted.map(async (row) => {
+    const sourceId = Number(row.closure_id ?? row.operation_id);
+    const sourceType = row.closure_id == null ? "OPERATION" : "CLOSURE";
+    const folder = join(process.env.ZFLOW_BACKUP_DIR || "/backups", "boletas-electronicas", `filial-${Number(row.branch_id)}`, sourceType === "CLOSURE" ? `cierre-${sourceId}` : `operacion-${sourceId}`);
+    const stem = `${row.series}-${String(row.correlativo).padStart(8, "0")}`;
+    try { await Promise.all([access(join(folder, `${stem}.pdf`)), access(join(folder, `${stem}.xml`))]); }
+    catch { await refreshDocument(Number(row.branch_id), sourceId, sourceType, Number(row.part_number), String(row.provider_document_id), String(row.series), Number(row.correlativo), String(row.file_name)); }
+  }));
 }
 
 export async function issueClosureDocument(branchId: number, closureId: number, createdBy: number, customer?: { name?: string; documentType?: string; documentNumber?: string }): Promise<EmissionResult | null> {
@@ -376,7 +464,8 @@ async function issueSplitDocuments(input: {
     try { result = await issueDocument({ ...input, amount: parts[index] / 100, partNumber, partCount: parts.length }); }
     catch (error) { result = { status: "ERROR", message: (error instanceof Error ? error.message : "No se pudo emitir la boleta.").slice(0, 900), amount: parts[index] / 100, partNumber, partCount: parts.length }; }
     results.push(result);
-    if (result.status === "ERROR") {
+    if (["ERROR", "UNKNOWN", "CANCELLED"].includes(result.status)) {
+      if (result.status === "CANCELLED") break;
       const firstQueuedIndex = result.correlativo ? index + 1 : index;
       for (let queuedIndex = firstQueuedIndex; queuedIndex < parts.length; queuedIndex++) {
         await db.execute(`INSERT IGNORE INTO electronic_documents (branch_id,closure_id,operation_id,series,correlativo,part_number,part_count,customer_document_type,customer_document_number,customer_name,description,amount,status,provider_message,file_name,created_by_user_id)
@@ -390,11 +479,13 @@ async function issueSplitDocuments(input: {
       break;
     }
   }
-  const firstError = results.find((item) => item.status === "ERROR");
-  const status = firstError ? "PARTIAL" : results.every((item) => item.status === "ACCEPTED") ? "ACCEPTED" : "PENDING";
+  const firstError = results.find((item) => item.status === "ERROR" || item.status === "UNKNOWN");
+  const wasCancelled = results.some((item) => item.status === "CANCELLED");
+  const status = wasCancelled ? "CANCELLED" : firstError?.status === "UNKNOWN" ? "UNKNOWN" : firstError ? "PARTIAL" : results.every((item) => item.status === "ACCEPTED") ? "ACCEPTED" : "PENDING";
   return { ...results[0], status, amount: money(input.amount), partNumber: results.length, partCount: parts.length,
     message: firstError
       ? `${results.length} de ${parts.length} boleta(s) procesada(s). El resto quedó pendiente. ${firstError.message ?? ""}`
+      : wasCancelled ? "La operación se anuló antes de completar la emisión."
       : parts.length > 1 ? `Comisión dividida en ${parts.length} boletas, ninguna supera ${currencyText(input.maxAmount)}.` : results[0]?.message };
 }
 
@@ -416,7 +507,7 @@ async function processQueuedDocuments(branchId: number, sourceType: "CLOSURE" | 
       customerName: item.customer_name, customerDocumentType: item.customer_document_type, customerDocumentNumber: item.customer_document_number,
       partNumber: Number(item.part_number), partCount: Number(item.part_count) });
     results.push(result);
-    if (result.status === "ERROR") break;
+    if (["ERROR", "UNKNOWN", "CANCELLED"].includes(result.status)) break;
   }
   return results;
 }
@@ -429,6 +520,10 @@ async function requireOwner(request: FastifyRequest, reply: FastifyReply) {
 }
 
 export async function registerElectronicRoutes(app: FastifyInstance) {
+  const pendingRefreshTimer = setInterval(() => { void refreshPendingDocuments().catch(() => {}); }, 15_000);
+  pendingRefreshTimer.unref?.();
+  void refreshPendingDocuments().catch(() => {});
+
   app.get("/api/admin/branches/:branchId/electronic-settings", async (request, reply) => {
     const parsed = ownerParams.safeParse(request.params);
     if (!parsed.success) return reply.code(400).send({ error: "Filial inválida" });

@@ -1140,20 +1140,20 @@ function ClosureElectronicDocumentModal({ closure, onClose, onDocumentChange }: 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  async function loadDocuments() {
-    setLoading(true); setError("");
+  async function loadDocuments(silent = false) {
+    if (!silent) { setLoading(true); setError(""); }
     try {
       const result = await api<{documents:any[];document:any}>(`/api/branches/${closure.branch_id}/closures/${closure.id}/electronic-document`);
       const list = result.documents ?? (result.document ? [result.document] : []);
       setDocuments(list);
       if (list[0]) onDocumentChange(list[0]);
     } catch (err) { setError(err instanceof Error ? err.message : "No se pudo consultar la boleta archivada."); }
-    finally { setLoading(false); }
+    finally { if (!silent) setLoading(false); }
   }
   useEffect(() => { void loadDocuments(); }, [closure.id, closure.branch_id]);
   useEffect(() => {
-    if (!documents.some((document) => document.status === "PENDING")) return;
-    const timer = window.setInterval(() => void loadDocuments(), 4000);
+    if (!documents.some((document) => document.status === "PENDING" || (document.status === "ACCEPTED" && (!document.storedFiles?.pdf || !document.storedFiles?.xml)))) return;
+    const timer = window.setInterval(() => void loadDocuments(true), 4000);
     return () => window.clearInterval(timer);
   }, [documents, closure.id, closure.branch_id]);
 
@@ -2352,7 +2352,7 @@ function BranchDetailModal({
 
   // Refresh the administrator archive while ApiSunat is still validating documents.
   // Only the archive list is replaced; branch detail fields and the rest of the modal stay put.
-  const hasDocumentsBeingValidated = (detail?.electronicDocuments ?? []).some((document) => document.status === "PENDING");
+  const hasDocumentsBeingValidated = (detail?.electronicDocuments ?? []).some((document) => document.status === "PENDING" || (document.status === "ACCEPTED" && (!document.storedFiles?.pdf || !document.storedFiles?.xml)));
   useEffect(() => {
     if (tab !== "electronic" || !hasDocumentsBeingValidated) return;
     let active = true;
