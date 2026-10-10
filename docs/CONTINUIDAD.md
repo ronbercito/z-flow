@@ -1,10 +1,25 @@
 # Z-FLOW — Documento de continuidad
 
-**Fecha de corte:** 09/10/2026
+**Fecha de corte:** 10/10/2026
 **Repositorio:** `ronbercito/z-flow`
-**Rama de trabajo:** `develop`
+**Rama de trabajo:** `fix/branch-logo-upload` (cambios locales sin promover)
 **Checkpoint publicado:** `main` `16c6c82` (README breve); `develop` `69d5785` antes de esta actualización
-**Estado general:** el repositorio está sincronizado con `origin/develop`. La emisión de comprobantes Factiliza se retiró; no se ha confirmado todavía la actualización del LXC con estos cambios. Las pruebas técnicas locales están aprobadas y falta validar las 5 filiales reales antes de cerrar la etapa.
+**Estado general:** hay cambios locales sin promover en `fix/branch-logo-upload`. Factiliza se retiró y se implementó una integración inicial con ApiSunat limitada al ambiente de Desarrollo. Falta compilar, configurar un token `DEV_` real y hacer la prueba de emisión antes de considerar validada la función. No actualizar el LXC todavía.
+
+## Revisión general y preparación de instalación (09/10/2026)
+
+Se corrigieron problemas identificados antes de la primera instalación limpia:
+
+- Las instalaciones nuevas ya no cargan movimientos de muestra ni abren una caja automáticamente.
+- Las transacciones de apertura, operación y cierre quedan serializadas para evitar sesiones duplicadas o cierres con totales incompletos.
+- Se rechazan montos infinitos y valores mayores al rango de la base de datos.
+- Se quitó CORS abierto; el panel web y la API operan bajo el mismo origen.
+- Los permisos de cajero se limitan a su filial; no se pueden asignar permisos globales al rol.
+- El rate limit de acceso limpia intentos antiguos y limita la memoria que ocupa.
+- Backups con permisos privados; restauración de consola validada antes de importar, con copia previa y recuperación automática ante error.
+- `scripts/install-local.sh` instala en Debian/Ubuntu desde `main`; genera secretos, configura Docker, backups diarios y rotación.
+
+La instalación desde cero está documentada en `docs/LOCAL_PRODUCTION.md`. La compilación de API/web y la configuración de Docker deben quedar aprobadas en GitHub Actions antes de promover esta revisión a `main`. No instalar todavía desde `main` hasta que se confirme esa promoción.
 
 ## Revisión general y preparación de instalación (09/10/2026)
 
@@ -28,7 +43,7 @@ La instalación desde cero está documentada en `docs/LOCAL_PRODUCTION.md`. La c
 - La PR #3 ya se combinó en `main`; `main` está en `16c6c82` y el README breve es visible en la portada.
 - Las bitácoras de esta sesión se actualizan en `develop`; después deben promocionarse a `main` mediante una PR para conservar el flujo de ramas.
 
-## Cambio más reciente: retiro de Factiliza
+## Retiro de Factiliza
 
 El propietario decidió retirar Factiliza para evitar emitir comprobantes por medio de un proveedor cuya autorización no estaba confirmada.
 
@@ -36,8 +51,7 @@ El propietario decidió retirar Factiliza para evitar emitir comprobantes por me
 - Se conserva la consulta de registros/archivos electrónicos históricos de cada cierre, si existen.
 - La base conserva la tabla histórica `factiliza_documents`; se eliminan las tablas de configuración y correlativos del proveedor.
 - El actualizador `scripts/update-local.sh` elimina las variables antiguas `FACTILIZA_*` del archivo `.env` al actualizar.
-- Hasta definir y verificar otro proveedor y el tratamiento tributario, los documentos generados por Z-FLOW son comprobantes internos de control, no comprobantes electrónicos SUNAT.
-- Próximo paso de despliegue: ejecutar `bash scripts/update-local.sh` en `/opt/z-flow` y comprobar que Integraciones ya no muestre Factiliza, que el estado del sistema sea saludable y que los registros electrónicos históricos continúen consultables.
+- La integración que se añadió después usa ApiSunat en Desarrollo y solo emite documentos de prueba, que no se envían a SUNAT ni tienen valor tributario.
 
 Los cambios de caja que figuraban como modificaciones locales antes de sincronizar el checkout ya están incluidos en `origin/develop`; el checkout local se alineó sobre esa versión y el commit de estilo de usuario ya estaba aplicado allí.
 
@@ -54,6 +68,36 @@ En `develop` se implementó una primera versión para que cada filial use su pro
 - `git diff --check` quedó limpio. No fue posible compilar localmente: `npm` no está instalado y el intento con el pnpm incluido falló al resolver la ruta del workspace, que no tiene dependencias locales instaladas.
 
 Antes de desplegar, revisar CI/build y probar aislamiento entre al menos dos filiales: usuario de filial A no puede consultar ni editar B; propietario puede consultar ambas. Verificar también que los datos y el logo correctos aparezcan en PDF de cierre y comprobante interno.
+
+## Integración electrónica inicial con ApiSunat (10/10/2026)
+
+- El panel del propietario permite activar ApiSunat por filial y elegir una boleta por cierre o por operación. La serie de boleta es configurable.
+- La credencial queda cifrada por `ZFLOW_CREDENTIAL_KEY`, secreto que se crea durante instalación/actualización. Conservar esa misma clave en `.env` y en copias de seguridad; rotarla impide descifrar tokens guardados.
+- La emisión usa la comisión como valor y agrega una descripción con la fecha y el tipo de movimiento. Se usa consumidor final (`CLIENTES VARIOS`) sin identificación si no se ingresó comprador.
+- Conforme a SUNAT, solo se solicita nombre y tipo/número de documento cuando el total de una boleta supera S/ 700.00; exactamente S/ 700.00 no cruza el límite. La regla se aplica al importe de cada boleta, no al acumulado de ventas separadas.
+- Los archivos aceptados se almacenan en `backups/boletas-electronicas/filial-<id>/...` y el panel ofrece consulta/descarga de PDF, XML y CDR.
+- La integración está restringida al token `DEV_`: las pruebas no crean documentos tributarios válidos ni se envían a SUNAT. No configurar producción hasta completar las validaciones de ApiSunat, SUNAT y el contador.
+- No se ejecutó la compilación porque no hay `npm` ni dependencias locales; el `pnpm` empaquetado terminó con EPERM al resolver el directorio. No se hizo una emisión real porque el token proporcionado en el texto estaba redactado.
+
+### Tope por boleta y cola de emisión (10/10/2026)
+
+- El propietario configura el máximo por boleta para cada filial; el valor inicial es S/ 500.00.
+- La comisión del cierre u operación se divide en partes en céntimos. Cada boleta respeta el máximo y las partes suman el total original.
+- Si una parte no puede enviarse, queda en estado `QUEUED`. El propietario puede reanudar la emisión desde la consulta del cierre o la pestaña «Boletas electrónicas» de la filial.
+- El registro conserva el número y total de partes y el importe de cada boleta. La regla de documento de identidad se valida por boleta; con máximo S/ 500.00 no se exige DNI por el acumulado del cierre.
+- La ficha administrativa de cada filial lista estados y deja abrir PDF/descargar XML locales del volumen `backups/boletas-electronicas`.
+- Se añadieron migraciones de esquema en `ensureElectronicSchema()` para permitir múltiples documentos por cierre u operación y mantener instalaciones existentes.
+- Falta validar en MariaDB, completar un ciclo real de emisión y verificar cola, correlativos y archivos descargables. No habilitar producción: el adaptador sigue aceptando únicamente tokens `DEV_`.
+
+### Siguiente paso de validación
+
+1. Instalar dependencias y aprobar los builds de API y web en CI.
+2. Configurar en Integraciones el `personaId`, token `DEV_` y serie autorizada de una filial de pruebas.
+3. Con el tope inicial de S/ 500.00, probar un cierre con comisión de S/ 1,200.00: deben resultar boletas de S/ 500.00, S/ 500.00 y S/ 200.00, sin pedir DNI.
+4. Forzar un error de envío y confirmar que las partes no enviadas queden como `QUEUED`; después reanudar desde «Emitir pendientes» y comprobar correlativos sin duplicados.
+5. Configurar temporalmente un tope superior a S/ 700.00 y probar un importe individual de S/ 701.00: debe solicitar nombre, tipo y número de documento; verificar también el caso exacto de S/ 700.00.
+6. Probar cada modo de emisión, validar estado y abrir PDF/XML/CDR archivados desde la ficha administrativa de la filial.
+7. Mantener desactivada la emisión para filiales sin configuración y no habilitar producción todavía.
 
 ### Corrección de carga del logo (09/10/2026)
 

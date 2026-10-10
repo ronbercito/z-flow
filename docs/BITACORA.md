@@ -299,3 +299,23 @@ Corrección en repositorio si hace falta
 - `docs/ARCHITECTURE.md`
 - `docs/BACKUPS.md`
 - `docs/CONTINUIDAD.md`
+
+## 10/10/2026 — emisión de boletas por filial con ApiSunat
+
+- Se añadió configuración de ApiSunat por filial: emisión desactivada por defecto, serie B001 configurable y modo de una boleta por cierre o una por operación.
+- El token se cifra con AES-256-GCM usando `ZFLOW_CREDENTIAL_KEY`; el panel solo permite tokens del ambiente de Desarrollo (`DEV_`). No se habilitó producción.
+- Al emitir, la boleta usa la comisión como importe y describe la fecha del cierre o de la operación. Si no hay datos del comprador, se identifica como `CLIENTES VARIOS` sin enviar DNI.
+- El formulario solicita nombre, tipo y número de documento solo cuando el total de esa boleta supera S/ 700.00. En S/ 700.00 o menos permite consumidor final sin DNI. El servidor aplica la misma validación.
+- Los registros guardan estado, serie, correlativo y respuesta de ApiSunat. Al ser aceptadas, se archivan PDF, XML y CDR bajo `backups/boletas-electronicas/filial-<id>/cierre-<id>` o `operacion-<id>`.
+- Se conserva la lectura de documentos históricos de Factiliza. `scripts/update-local.sh` crea y vuelve a cargar la clave de cifrado si no existe en `.env`.
+- Verificado por revisión del código y consultas a la documentación de ApiSunat y SUNAT. La compilación no pudo ejecutarse en este entorno: falta `npm`, y el `pnpm` incluido no pudo resolver el directorio del workspace (EPERM). No se hicieron llamadas reales a ApiSunat porque el token del usuario está redactado; para probar se debe guardar el token `DEV_` de la filial en Integraciones.
+
+## 10/10/2026 — tope por boleta y archivo por filial
+
+- Se añadió a la configuración administrativa un importe máximo por boleta para cada filial, con S/ 500.00 como valor inicial.
+- Si una comisión supera ese tope, el servicio la parte en boletas cuyo importe suma exactamente el total del cierre u operación y ninguna excede el máximo configurado.
+- Cuando una parte todavía no se puede enviar, se guarda como `QUEUED` y el propietario puede procesar las boletas pendientes desde el detalle del cierre. No se solicita DNI por la suma del cierre si cada boleta queda bajo el umbral individual de SUNAT.
+- Se amplió el esquema para guardar número de parte, cantidad de partes y documentos múltiples por cierre u operación, con migración aditiva para instalaciones existentes.
+- El panel del propietario permite revisar boletas de la filial, estados, importes y abrir PDF/descargar XML archivados en el volumen local `backups/boletas-electronicas`.
+- ApiSunat sigue restringido al ambiente de Desarrollo (`DEV_`); esto aún no habilita comprobantes con validez tributaria.
+- Pendiente: validar contra una instalación MariaDB y credenciales de Desarrollo, revisar estados/respuestas reales del proveedor y probar recuperación de cola y descarga de PDF/XML.

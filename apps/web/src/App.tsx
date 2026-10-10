@@ -32,6 +32,7 @@ type Page = "home" | "operations" | "cash" | "close" | "receipts" | "reports" | 
 
 type Operation = {
   id: number;
+  branch_id: number;
   operation_type: "YAPE_TO_CASH" | "CASH_TO_YAPE";
   reference_code: string | null;
   customer_name: string | null;
@@ -44,6 +45,10 @@ type Operation = {
   created_at: string;
   receipt_series?: string | null;
   receipt_number?: number | null;
+  electronic_series?: string | null;
+  electronic_number?: number | null;
+  electronic_status?: string | null;
+  electronic_count?: number;
 };
 
 type Dashboard = {
@@ -83,6 +88,9 @@ type Settings = {
   partner_share_pct?: number | null;
   require_cash_to_yape_reference?: number | boolean;
   allow_cashier_cancel?: number | boolean;
+  electronic_enabled?: number | boolean;
+  electronic_emission_mode?: "CLOSURE" | "OPERATION";
+  electronic_max_amount_per_receipt?: number;
 };
 
 type AuthUser = {
@@ -169,6 +177,9 @@ type ClosurePreview = {
   yapeSent: number;
   expectedCash: number;
   expectedWallet: number;
+  electronicEnabled: boolean;
+  electronicEmissionMode: "CLOSURE" | "OPERATION";
+  electronicMaxAmountPerReceipt: number;
 };
 
 const sidebar: Array<{ page: Page; label: string; icon: typeof Home }> = [
@@ -1230,7 +1241,7 @@ function OperationsTable({ operations, onReceipt, onCancel }: { operations: Oper
               <td>{currency(op.amount)}</td>
               <td>{currency(op.commission)}</td>
               <td>{currency(op.net_amount)}</td>
-              <td><span className={`status ${operationStatusClass(op.status)}`}><i />{operationStatusLabel(op.status)}</span></td>
+            <td><span className={`status ${operationStatusClass(op.status)}`}><i />{operationStatusLabel(op.status)}</span>{op.electronic_status && <small className="closure-event-reason">{Number(op.electronic_count ?? 1) > 1 ? `${op.electronic_count} boletas` : `Boleta ${op.electronic_series}-${String(op.electronic_number ?? "").padStart(8,"0")}`} · {op.electronic_status === "ACCEPTED" ? <a href={`/api/branches/${op.branch_id}/operations/${op.id}/electronic-document/pdf`} target="_blank" rel="noreferrer">Ver PDF</a> : op.electronic_status}</small>}</td>
               {(onReceipt || onCancel) && <td><div className="inline-actions">{onReceipt && <button className="mini-button" onClick={() => onReceipt(op)}><ReceiptText size={13} /> Ver</button>}{onCancel && op.status === "COMPLETED" && <button className="mini-button danger-mini" onClick={() => void onCancel(op)}>Anular</button>}</div></td>}
             </tr>
           ))}
@@ -1289,6 +1300,8 @@ function OperationModal({
   const [amount, setAmount] = useState("");
   const [reference, setReference] = useState("");
   const [customer, setCustomer] = useState("");
+  const [customerDocumentType, setCustomerDocumentType] = useState("DNI");
+  const [customerDocumentNumber, setCustomerDocumentNumber] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -1299,6 +1312,9 @@ function OperationModal({
       : Number(settings.commission_value)
     : 0;
   const net = Math.max(0, numericAmount - commission);
+  const asksForCustomerDocument = Boolean(settings?.electronic_enabled)
+    && settings?.electronic_emission_mode === "OPERATION"
+    && Math.min(commission, Number(settings?.electronic_max_amount_per_receipt ?? 500)) > 700;
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -1312,7 +1328,9 @@ function OperationModal({
           operationType: type,
           amount: numericAmount,
           referenceCode: reference || undefined,
-          customerName: customer || undefined
+          customerName: customer || undefined,
+          customerDocumentType: asksForCustomerDocument ? customerDocumentType : undefined,
+          customerDocumentNumber: asksForCustomerDocument ? customerDocumentNumber : undefined
         })
       });
       const result = await response.json();
@@ -1347,7 +1365,12 @@ function OperationModal({
             <small>{type === "YAPE_TO_CASH" || Boolean(settings?.require_cash_to_yape_reference) ? "Código/referencia obligatorio" : "Opcional"}</small>
           </label>
         </div>
-        <label>Cliente<input value={customer} onChange={(e) => setCustomer(e.target.value)} placeholder="Nombre opcional" /></label>
+        <label>Cliente<input value={customer} onChange={(e) => setCustomer(e.target.value)} placeholder="Nombre opcional" required={asksForCustomerDocument} /></label>
+        {asksForCustomerDocument && <div className="field-grid">
+          <label>Tipo de documento del comprador<select value={customerDocumentType} onChange={(e)=>setCustomerDocumentType(e.target.value)}><option value="DNI">DNI</option><option value="RUC">RUC</option><option value="CE">Carné de extranjería</option><option value="PASSPORT">Pasaporte</option></select></label>
+          <label>Número de documento<input value={customerDocumentNumber} onChange={(e)=>setCustomerDocumentNumber(e.target.value)} required placeholder="Documento del comprador" /></label>
+        </div>}
+        {Boolean(settings?.electronic_enabled) && settings?.electronic_emission_mode === "OPERATION" && Math.min(commission, Number(settings?.electronic_max_amount_per_receipt ?? 500)) <= 700 && <small>Las boletas se emitirán sin DNI porque cada una respetará el tope y será de hasta S/ 700.00.</small>}
         <div className="calculation">
           <div><span>Monto</span><strong>{currency(numericAmount)}</strong></div>
           <div><span>Comisión</span><strong>- {currency(commission)}</strong></div>
@@ -1409,6 +1432,9 @@ function CloseCashModal({ branchId, dashboard, onClose, onClosed }: { branchId: 
   const [cash, setCash] = useState("");
   const [wallet, setWallet] = useState("");
   const [notes, setNotes] = useState("");
+  const [customerName, setCustomerName] = useState("");
+  const [customerDocumentType, setCustomerDocumentType] = useState("DNI");
+  const [customerDocumentNumber, setCustomerDocumentNumber] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<null | {
@@ -1418,6 +1444,7 @@ function CloseCashModal({ branchId, dashboard, onClose, onClosed }: { branchId: 
     expectedWallet: number; declaredWallet: number; differenceWallet: number;
     operationCount: number; commissionTotal: number; staffShareTotal: number; partnerShareTotal: number; unassignedCommission: number;
     assignedTo: string | null; notes: string | null;
+    electronicDocument?: { status: string; message?: string; series?: string; correlativo?: number; partCount?: number } | null;
   }>(null);
 
   useEffect(() => {
@@ -1440,12 +1467,20 @@ function CloseCashModal({ branchId, dashboard, onClose, onClosed }: { branchId: 
   const cashDiff = Number(cash || 0) - expectedCash;
   const walletDiff = Number(wallet || 0) - expectedWallet;
   const hasDifference = Math.abs(cashDiff) >= 0.005 || Math.abs(walletDiff) >= 0.005;
+  const asksForCustomerDocument = Boolean(preview?.electronicEnabled)
+    && preview?.electronicEmissionMode === "CLOSURE"
+    && Number(preview?.electronicMaxAmountPerReceipt ?? 500) > 700
+    && Number(preview?.commissionTotal ?? 0) > 700;
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (!preview) return;
     if (hasDifference && notes.trim().length < 5) {
       setError("Cuando existe una diferencia debes escribir una observación de al menos 5 caracteres.");
+      return;
+    }
+    if (asksForCustomerDocument && (!customerName.trim() || !customerDocumentNumber.trim())) {
+      setError("La boleta superará S/ 700.00. Completa nombre y documento del comprador para continuar.");
       return;
     }
     setSaving(true);
@@ -1458,7 +1493,10 @@ function CloseCashModal({ branchId, dashboard, onClose, onClosed }: { branchId: 
         body: JSON.stringify({
           declaredCash: Number(cash || 0),
           declaredWallet: Number(wallet || 0),
-          notes: notes.trim() || undefined
+          notes: notes.trim() || undefined,
+          customerName: asksForCustomerDocument ? customerName.trim() : undefined,
+          customerDocumentType: asksForCustomerDocument ? customerDocumentType : undefined,
+          customerDocumentNumber: asksForCustomerDocument ? customerDocumentNumber.trim() : undefined
         })
       });
       const data = await response.json();
@@ -1512,6 +1550,10 @@ function CloseCashModal({ branchId, dashboard, onClose, onClosed }: { branchId: 
 
           {result.notes && <div className="closure-result-note"><span>Observación</span><strong>{result.notes}</strong></div>}
 
+          {result.electronicDocument && <div className={["PENDING","PARTIAL"].includes(result.electronicDocument.status) ? "friendly-info" : result.electronicDocument.status === "ERROR" ? "modal-error" : "success-message"}>
+            <ReceiptText size={16}/><span>{result.electronicDocument.message || `Boleta ${result.electronicDocument.status}.`}{result.electronicDocument.series && ` · ${result.electronicDocument.series}-${String(result.electronicDocument.correlativo ?? "").padStart(8,"0")}`}{Number(result.electronicDocument.partCount ?? 1) > 1 && ` · ${result.electronicDocument.partCount} boletas`}</span>
+          </div>}
+
           <div className="modal-actions">
             <button className="soft" onClick={() => window.open(`/api/branches/${branchId}/closures/${result.closureId}/pdf`, "_blank")}><Download size={15}/> Descargar PDF</button>
             <button className="primary" onClick={onClosed}>Finalizar cierre</button>
@@ -1537,6 +1579,15 @@ function CloseCashModal({ branchId, dashboard, onClose, onClosed }: { branchId: 
             <span>Ganancia del encargado</span>
             <strong>{currency(preview.commissionTotal)}</strong>
           </div>
+
+          {asksForCustomerDocument && <>
+            <div className="friendly-info"><ReceiptText size={16}/><span>El total de esta boleta supera S/ 700.00; SUNAT pide identificar al comprador. Hasta S/ 700.00 puede emitirse sin DNI.</span></div>
+            <label>Nombre del comprador<input value={customerName} onChange={(e)=>setCustomerName(e.target.value)} required /></label>
+            <div className="field-grid">
+              <label>Tipo de documento<select value={customerDocumentType} onChange={(e)=>setCustomerDocumentType(e.target.value)}><option value="DNI">DNI</option><option value="RUC">RUC</option><option value="CE">Carné de extranjería</option><option value="PASSPORT">Pasaporte</option></select></label>
+              <label>Número de documento<input value={customerDocumentNumber} onChange={(e)=>setCustomerDocumentNumber(e.target.value)} required /></label>
+            </div>
+          </>}
 
           <div className="field-grid">
             <label>Efectivo declarado<div className="input-prefix"><span>S/</span><input value={cash} onChange={(e) => setCash(e.target.value)} inputMode="decimal" required /></div><small className={Math.abs(cashDiff)<0.005?"green-text":"red-text"}>Diferencia: {currency(cashDiff)}</small></label>

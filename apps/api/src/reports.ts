@@ -315,9 +315,9 @@ function contentDisposition(filename: string) {
   return `attachment; filename="${filename}"`;
 }
 
-function electronicDocumentPaths(branchId: number, closureId: number, series: string, correlativo: number | string) {
+function electronicDocumentPaths(branchId: number, closureId: number, series: string, correlativo: number | string, digits = 8) {
   const safeSeries = series.toUpperCase().replace(/[^A-Z0-9_-]/g, "") || "BOLETA";
-  const number = String(correlativo).padStart(6, "0");
+  const number = String(correlativo).padStart(digits, "0");
   const folder = join(
     process.env.ZFLOW_BACKUP_DIR || "/backups",
     "boletas-electronicas",
@@ -334,8 +334,8 @@ function electronicDocumentPaths(branchId: number, closureId: number, series: st
   };
 }
 
-async function storedElectronicFiles(branchId: number, closureId: number, series: string, correlativo: number | string) {
-  const paths = electronicDocumentPaths(branchId, closureId, series, correlativo);
+async function storedElectronicFiles(branchId: number, closureId: number, series: string, correlativo: number | string, digits = 8) {
+  const paths = electronicDocumentPaths(branchId, closureId, series, correlativo, digits);
   const exists = async (filePath: string) => {
     try { await access(filePath); return true; } catch { return false; }
   };
@@ -375,41 +375,60 @@ export async function registerReportRoutes(app: FastifyInstance) {
   app.get("/api/branches/:branchId/closures/:closureId/electronic-document", async (request, reply) => {
     const parsed = closureParams.safeParse(request.params);
     if (!parsed.success) return reply.code(400).send({ error: "Cierre inválido" });
-    const auth = await requireOwner(request, reply);
+    const auth = await requireAuth(request, reply);
     if (!auth) return;
     if (!canReadBranch(auth, parsed.data.branchId)) return reply.code(403).send({ error: "Acceso denegado" });
 
-    const [rows] = await db.query<any[]>(
+    const [currentRows] = await db.query<any[]>(
+      `SELECT id, status, series, correlativo, part_number, part_count, customer_document_type,
+              customer_document_number, customer_name, amount, provider_document_id,
+              provider_code, provider_message, created_at
+       FROM electronic_documents WHERE closure_id=? AND branch_id=? ORDER BY part_number`,
+      [parsed.data.closureId, parsed.data.branchId]
+    );
+    const [legacyRows] = currentRows.length ? [[]] : await db.query<any[]>(
       `SELECT id, status, series, correlativo, customer_document_type,
               customer_document_number, customer_name, amount, provider_document_id,
               provider_code, provider_message, created_at
-       FROM factiliza_documents WHERE closure_id=? AND branch_id=? LIMIT 1`,
+       FROM factiliza_documents WHERE closure_id=? AND branch_id=? ORDER BY id`,
       [parsed.data.closureId, parsed.data.branchId]
     );
-    const document = rows[0] ?? null;
-    const storedFiles = document?.status === "ACCEPTED"
-      ? await storedElectronicFiles(parsed.data.branchId, parsed.data.closureId, document.series, document.correlativo)
-      : null;
-    return { document: document ? { ...document, storedFiles } : null };
+    const documents = currentRows.length ? currentRows : legacyRows;
+    const documentsWithFiles = await Promise.all(documents.map(async (document) => ({
+      ...document,
+      legacy: !currentRows.length,
+      part_number: document.part_number ?? 1,
+      part_count: document.part_count ?? 1,
+      storedFiles: document.status === "ACCEPTED"
+        ? await storedElectronicFiles(parsed.data.branchId, parsed.data.closureId, document.series, document.correlativo, currentRows.length ? 8 : 6)
+        : null
+    })));
+    return { document: documentsWithFiles[0] ?? null, documents: documentsWithFiles };
   });
 
   app.get("/api/branches/:branchId/closures/:closureId/electronic-document/:format", async (request, reply) => {
     const parsed = closureParams.extend({ format: z.enum(["pdf", "xml", "cdr"]) }).safeParse(request.params);
     if (!parsed.success) return reply.code(400).send({ error: "Comprobante inválido" });
-    const auth = await requireOwner(request, reply);
+    const auth = await requireAuth(request, reply);
     if (!auth) return;
     if (!canReadBranch(auth, parsed.data.branchId)) return reply.code(403).send({ error: "Acceso denegado" });
 
-    const [rows] = await db.query<any[]>(
+    const [currentRows] = await db.query<any[]>(
+      `SELECT series, correlativo, status FROM electronic_documents
+       WHERE branch_id=? AND closure_id=? LIMIT 1`,
+      [parsed.data.branchId, parsed.data.closureId]
+    );
+    const [legacyRows] = currentRows.length ? [[]] : await db.query<any[]>(
       `SELECT series, correlativo, status FROM factiliza_documents
        WHERE branch_id=? AND closure_id=? LIMIT 1`,
       [parsed.data.branchId, parsed.data.closureId]
     );
+    const rows = currentRows.length ? currentRows : legacyRows;
     if (!rows.length || rows[0].status !== "ACCEPTED") return reply.code(409).send({ error: "No hay una boleta aceptada para descargar." });
 
     const series = String(rows[0].series);
     const correlativo = Number(rows[0].correlativo);
-    const paths = electronicDocumentPaths(parsed.data.branchId, parsed.data.closureId, series, correlativo);
+    const paths = electronicDocumentPaths(parsed.data.branchId, parsed.data.closureId, series, correlativo, currentRows.length ? 8 : 6);
     const filePath = parsed.data.format === "cdr" ? paths.cdr : paths[parsed.data.format];
     let data: Buffer | null = null;
     try { data = await readFile(filePath); } catch { data = null; }
@@ -417,7 +436,8 @@ export async function registerReportRoutes(app: FastifyInstance) {
     if (!data) return reply.code(404).send({ error: "No se encontró la copia electrónica archivada en el servidor." });
 
     const extension = parsed.data.format === "cdr" ? "cdr.zip" : parsed.data.format;
-    const filename = "boleta-" + series + "-" + String(correlativo).padStart(6, "0") + "." + extension;
+    const digits = currentRows.length ? 8 : 6;
+    const filename = "boleta-" + series + "-" + String(correlativo).padStart(digits, "0") + "." + extension;
     reply.header("Content-Type", parsed.data.format === "pdf" ? "application/pdf" : parsed.data.format === "xml" ? "application/xml" : "application/zip");
     reply.header("Content-Disposition", parsed.data.format === "pdf" ? "inline; filename=\"" + filename + "\"" : contentDisposition(filename));
     return reply.send(data);

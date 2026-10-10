@@ -7,6 +7,7 @@ import { registerAdminRoutes } from "./admin.js";
 import { registerBackupRoutes } from "./backup.js";
 import { registerReportRoutes } from "./reports.js";
 import { ensureStage4Schema, registerStage4Routes } from "./stage4.js";
+import { ensureElectronicSchema, issueClosureDocument, issueOperationDocument, registerElectronicRoutes } from "./electronic.js";
 import {
   backfillMissingReceipts,
   ensureBusinessSchema,
@@ -50,6 +51,8 @@ const operationBody = z.object({
   operationType: z.enum(["YAPE_TO_CASH", "CASH_TO_YAPE"]),
   referenceCode: z.string().trim().min(1).max(80).optional(),
   customerName: z.string().trim().max(140).optional(),
+  customerDocumentType: z.enum(["DNI", "RUC", "CE", "PASSPORT"]).optional(),
+  customerDocumentNumber: z.string().trim().max(20).optional(),
   amount: z.coerce.number().finite().positive().max(999999999999.99),
   notes: z.string().trim().max(255).optional()
 });
@@ -62,7 +65,10 @@ const openCashBody = z.object({
 const closeCashBody = z.object({
   declaredCash: z.coerce.number().finite().min(0).max(999999999999.99),
   declaredWallet: z.coerce.number().finite().min(0).max(999999999999.99),
-  notes: z.string().trim().max(255).optional()
+  notes: z.string().trim().max(255).optional(),
+  customerName: z.string().trim().max(140).optional(),
+  customerDocumentType: z.enum(["DNI", "RUC", "CE", "PASSPORT"]).optional(),
+  customerDocumentNumber: z.string().trim().max(20).optional()
 });
 
 function money(value: number) {
@@ -282,7 +288,7 @@ app.get("/api/branches/:branchId/dashboard", async (request, reply) => {
 
   const [recentRows] = await db.query<any[]>(
     `SELECT
-       id, operation_type, reference_code, customer_name, amount, commission,
+       id, branch_id, operation_type, reference_code, customer_name, amount, commission,
        net_amount, status,
        DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%s') AS created_at
      FROM operations
@@ -352,12 +358,16 @@ app.get("/api/branches/:branchId/operations", async (request, reply) => {
   if (!auth) return;
 
   const [rows] = await db.query<any[]>(
-    `SELECT o.id, o.operation_type, o.reference_code, o.customer_name, o.amount,
+    `SELECT o.id, o.branch_id, o.operation_type, o.reference_code, o.customer_name, o.amount,
             o.commission, o.staff_share_amount, o.partner_share_amount,
             o.net_amount, o.notes, o.status,
             DATE_FORMAT(o.created_at, '%Y-%m-%dT%H:%i:%s') AS created_at,
             u.full_name AS registered_by,
-            r.series AS receipt_series, r.sequence_number AS receipt_number
+            r.series AS receipt_series, r.sequence_number AS receipt_number,
+            (SELECT ed.series FROM electronic_documents ed WHERE ed.operation_id=o.id AND ed.branch_id=o.branch_id ORDER BY ed.part_number LIMIT 1) AS electronic_series,
+            (SELECT ed.correlativo FROM electronic_documents ed WHERE ed.operation_id=o.id AND ed.branch_id=o.branch_id ORDER BY ed.part_number LIMIT 1) AS electronic_number,
+            (SELECT ed.status FROM electronic_documents ed WHERE ed.operation_id=o.id AND ed.branch_id=o.branch_id ORDER BY ed.part_number LIMIT 1) AS electronic_status,
+            (SELECT COUNT(*) FROM electronic_documents ed WHERE ed.operation_id=o.id AND ed.branch_id=o.branch_id) AS electronic_count
      FROM operations o
      LEFT JOIN users u ON u.id = o.user_id
      LEFT JOIN receipts r ON r.operation_id = o.id
@@ -443,7 +453,8 @@ app.get("/api/branches/:branchId/cash/close-preview", async (request, reply) => 
 
   const preview = await cashClosurePreview(parsed.data.branchId);
   if (!preview) return reply.code(409).send({ error: "No hay una caja abierta para cerrar" });
-  return preview;
+  const [electronicRows] = await db.query<any[]>("SELECT enabled,emission_mode,max_amount_per_receipt FROM branch_electronic_settings WHERE branch_id=? LIMIT 1", [parsed.data.branchId]);
+  return { ...preview, electronicEnabled: Boolean(electronicRows[0]?.enabled), electronicEmissionMode: electronicRows[0]?.emission_mode ?? "CLOSURE", electronicMaxAmountPerReceipt: Number(electronicRows[0]?.max_amount_per_receipt ?? 500) };
 });
 
 app.post("/api/branches/:branchId/cash/close", async (request, reply) => {
@@ -484,6 +495,13 @@ app.post("/api/branches/:branchId/cash/close", async (request, reply) => {
       return reply.code(409).send({ error: "No hay una caja abierta para cerrar" });
     }
 
+    const [electronicRows] = await connection.execute<any[]>("SELECT enabled,emission_mode,max_amount_per_receipt FROM branch_electronic_settings WHERE branch_id=? LIMIT 1", [branchId]);
+    const emitsAtClosure = Boolean(electronicRows[0]?.enabled) && electronicRows[0]?.emission_mode === "CLOSURE";
+    if (emitsAtClosure && Number(electronicRows[0]?.max_amount_per_receipt ?? 500) > 700 && money(preview.commissionTotal) > 700
+        && (!parsedBody.data.customerName || !parsedBody.data.customerDocumentType || !parsedBody.data.customerDocumentNumber)) {
+      await connection.rollback();
+      return reply.code(422).send({ error: "La boleta del cierre superará S/ 700.00. Ingresa nombre, tipo y número de documento del comprador para continuar." });
+    }
     const declaredCash = money(parsedBody.data.declaredCash);
     const declaredWallet = money(parsedBody.data.declaredWallet);
     const differenceCash = money(declaredCash - preview.expectedCash);
@@ -587,6 +605,15 @@ app.post("/api/branches/:branchId/cash/close", async (request, reply) => {
     connection.release();
   }
 
+  try {
+    closedResult.electronicDocument = await issueClosureDocument(branchId, closureId, auth.userId, {
+      name: parsedBody.data.customerName,
+      documentType: parsedBody.data.customerDocumentType,
+      documentNumber: parsedBody.data.customerDocumentNumber
+    });
+  } catch (error) {
+    closedResult.electronicDocument = { status: "ERROR", message: error instanceof Error ? error.message : "No se pudo emitir la boleta." };
+  }
   return closedResult;
 });
 app.get("/api/branches/:branchId/settings", async (request, reply) => {
@@ -601,9 +628,12 @@ app.get("/api/branches/:branchId/settings", async (request, reply) => {
   const [rows] = await db.query<any[]>(
     `SELECT bs.max_operation_amount, bs.commission_type, bs.commission_value,
             bs.staff_share_pct, bs.partner_share_pct,
-            ss.require_cash_to_yape_reference, ss.allow_cashier_cancel
+            ss.require_cash_to_yape_reference, ss.allow_cashier_cancel,
+            COALESCE(es.enabled,0) AS electronic_enabled, COALESCE(es.emission_mode,'CLOSURE') AS electronic_emission_mode,
+            COALESCE(es.max_amount_per_receipt,500) AS electronic_max_amount_per_receipt
      FROM branch_settings bs
      CROSS JOIN system_settings ss
+     LEFT JOIN branch_electronic_settings es ON es.branch_id=bs.branch_id
      WHERE bs.branch_id = ? AND ss.id=1
      LIMIT 1`,
     [parsed.data.branchId]
@@ -675,6 +705,15 @@ app.post("/api/branches/:branchId/operations", async (request, reply) => {
       ? money(body.amount * (Number(settings.commission_value) / 100))
       : money(Number(settings.commission_value));
 
+  const [electronicSettings] = await db.query<any[]>(
+    "SELECT enabled,emission_mode,max_amount_per_receipt FROM branch_electronic_settings WHERE branch_id=? LIMIT 1",
+    [branchId]
+  );
+  const emitsPerOperation = Boolean(electronicSettings[0]?.enabled) && electronicSettings[0]?.emission_mode === "OPERATION";
+  if (emitsPerOperation && Number(electronicSettings[0]?.max_amount_per_receipt ?? 500) > 700 && commission > 700 && (!body.customerDocumentType || !body.customerDocumentNumber || !body.customerName)) {
+    return reply.code(422).send({ error: "La boleta superará S/ 700.00. Ingresa nombre, tipo y número de documento del comprador para continuar." });
+  }
+
   const netAmount = money(body.amount - commission);
 
   if (netAmount <= 0) {
@@ -686,6 +725,8 @@ app.post("/api/branches/:branchId/operations", async (request, reply) => {
   const managerEarning = commission;
 
   const connection = await db.getConnection();
+  let createdOperationId = 0;
+  let createdOperationResult: Record<string, unknown> = {};
   try {
     await connection.beginTransaction();
 
@@ -761,6 +802,7 @@ app.post("/api/branches/:branchId/operations", async (request, reply) => {
     );
 
     const operationId = Number(result.insertId);
+    createdOperationId = operationId;
 
     const receipt = await issueInternalReceipt(
       connection,
@@ -788,7 +830,7 @@ app.post("/api/branches/:branchId/operations", async (request, reply) => {
 
     await connection.commit();
 
-    return reply.code(201).send({
+    createdOperationResult = {
       id: operationId,
       operationType: body.operationType,
       amount: money(body.amount),
@@ -802,7 +844,7 @@ app.post("/api/branches/:branchId/operations", async (request, reply) => {
         series: receipt.series,
         number: Number(receipt.sequence_number)
       }
-    });
+    };
   } catch (error: any) {
     await connection.rollback();
     if (error?.code === "ER_DUP_ENTRY") {
@@ -814,6 +856,15 @@ app.post("/api/branches/:branchId/operations", async (request, reply) => {
   } finally {
     connection.release();
   }
+
+  if (emitsPerOperation) {
+    try {
+      createdOperationResult.electronicDocument = await issueOperationDocument(branchId, createdOperationId, auth.userId, body.customerDocumentType, body.customerDocumentNumber);
+    } catch (error) {
+      createdOperationResult.electronicDocument = { status: "ERROR", message: error instanceof Error ? error.message : "No se pudo emitir la boleta." };
+    }
+  }
+  return reply.code(201).send(createdOperationResult);
 });
 
 app.setErrorHandler((error, _request, reply) => {
@@ -824,12 +875,14 @@ app.setErrorHandler((error, _request, reply) => {
 await ensureAuthSchema();
 await ensureBusinessSchema();
 await ensureStage4Schema();
+await ensureElectronicSchema();
 await bootstrapUsersIfEmpty(app.log);
 await backfillMissingReceipts();
 await registerAdminRoutes(app);
 await registerBackupRoutes(app);
 await registerReportRoutes(app);
 await registerStage4Routes(app);
+await registerElectronicRoutes(app);
 
 const port = Number(process.env.PORT ?? 3001);
 await app.listen({ host: "0.0.0.0", port });
