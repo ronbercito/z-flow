@@ -366,3 +366,11 @@ pm`, y el `pnpm` incluido no pudo resolver el directorio del workspace (EPERM). 
 ## 10/10/2026 — puerto web predeterminado
 
 - Las instalaciones nuevas publican el panel por el puerto 80; `WEB_PORT` puede cambiarse para usar otro puerto.
+
+
+## 10/10/2026 — corrección de emisión sin documento del cliente
+
+- La instalación nueva devolvió `Cannot read properties of undefined (reading 'cbc:ID')` al emitir una operación sin documento del comprador.
+- ApiSunat requiere el nodo UBL `cac:PartyIdentification/cbc:ID` incluso para consumidor final. La integración ahora usa la representación sin documento del widget oficial: `schemeID: "-"` y `00000000`.
+- El valor técnico `00000000` no se muestra como DNI capturado del cliente. La boleta conserva el estado pendiente/error hasta recibir confirmación del proveedor.
+- Queda pendiente confirmar el envío con el mismo token DEV y RUC de la instalación; esta sesión no tiene conectado el contenedor ni sus credenciales.
