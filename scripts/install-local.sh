@@ -28,7 +28,7 @@ docker info >/dev/null || {
 git clone --depth 1 --branch main https://github.com/ronbercito/z-flow.git "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 cp .env.example .env
-sed -i "s/^WEB_PORT=.*/WEB_PORT=$WEB_PORT/; s/^API_PORT=.*/API_PORT=$API_PORT/; s/^DB_PASSWORD=.*/DB_PASSWORD=$(openssl rand -hex 32)/; s/^DB_ROOT_PASSWORD=.*/DB_ROOT_PASSWORD=$(openssl rand -hex 32)/" .env
+sed -i "s/^WEB_PORT=.*/WEB_PORT=$WEB_PORT/; s/^API_PORT=.*/API_PORT=$API_PORT/; s/^DB_PASSWORD=.*/DB_PASSWORD=$(openssl rand -hex 32)/; s/^DB_ROOT_PASSWORD=.*/DB_ROOT_PASSWORD=$(openssl rand -hex 32)/; s/^ZFLOW_CREDENTIAL_KEY=.*/ZFLOW_CREDENTIAL_KEY=$(openssl rand -hex 32)/" .env
 chmod 600 .env
 mkdir -p backups
 chmod 700 backups

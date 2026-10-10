@@ -30,6 +30,16 @@ echo "Retirando credenciales antiguas de Factiliza"
 unset FACTILIZA_API_TOKEN FACTILIZA_API_BASE_URL FACTILIZA_BOLETA_SERIES FACTILIZA_RUS_ACTIVITY_CONFIRMED
 if [ -f .env ]; then
   sed -i -E '/^[[:space:]]*(export[[:space:]]+)?FACTILIZA_[A-Z0-9_]+[[:space:]]*=/d' .env
+  if ! grep -qE '^[[:space:]]*(export[[:space:]]+)?ZFLOW_CREDENTIAL_KEY=[^[:space:]]+' .env; then
+    sed -i -E '/^[[:space:]]*(export[[:space:]]+)?ZFLOW_CREDENTIAL_KEY=/d' .env
+    echo "ZFLOW_CREDENTIAL_KEY=$(openssl rand -hex 32)" >> .env
+    chmod 600 .env
+  fi
+  unset ZFLOW_CREDENTIAL_KEY
+  set -a
+  # shellcheck disable=SC1091
+  source .env
+  set +a
 fi
 
 echo "3) Construyendo contenedores"

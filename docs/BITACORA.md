@@ -1,9 +1,9 @@
 # Z-FLOW — Bitácora de desarrollo
 
 **Última actualización:** 10/10/2026
-**Repositorio:** `ronbercito/z-flow`  
-**Rama publicada:** `main`  
-**Estado:** revisión publicada en `main`; pendiente ejecutar la instalación limpia en el contenedor destino y continuar las pruebas reales.
+**Repositorio:** `ronbercito/z-flow`
+**Rama publicada:** `main`
+**Estado:** emisión electrónica integrada en `main`; pendiente verificar el flujo desplegado desde esta rama en el entorno objetivo.
 
 ## 10/10/2026 — Revisión general integrada a main
 
@@ -29,7 +29,26 @@
 - Los reportes de filial permiten elegir día, semana, mes o rango manual y muestran el registro de operaciones del periodo.
 - La pantalla de cierres de filial conserva el resumen del turno abierto y agrega el historial de esa filial, detalle de operaciones y PDF.
 - Las rutas de listado y detalle de cierres continúan comprobando acceso a la filial en la API. El nombre comercial y los datos de documentos internos ahora pueden salir de la identidad de la filial.
-- No se actualizó el panel desplegado. La compilación no pudo ejecutarse en este entorno porque no hay `npm` y las dependencias locales no están instaladas; `git diff --check` no reportó problemas de formato.
+- No se actualizó el panel desplegado. La compilación no pudo ejecutarse en este entorno porque no hay
+pm` y las dependencias locales no están instaladas; `git diff --check` no reportó problemas de formato.
+- Próximo paso: validar el build en CI y probar con dos usuarios de filiales distintas que reportes, identidad, historial, detalle y PDF respeten el aislamiento antes de actualizar el LXC.
+
+## 09/10/2026 — Límite de carga de logos en Mi Negocio
+
+- El formulario permite logos de hasta 2 MB (base64 hasta 3 MB), por lo que el límite predeterminado de 1 MB en Nginx/Fastify podía responder con una página HTML 413 al guardar.
+- Se aumentó el límite del proxy web y de Fastify a 4 MB y el formulario ahora maneja respuestas no JSON con un mensaje HTTP legible.
+- Pendiente: CI y volver a guardar el logo en el panel actualizado.
+
+## 09/10/2026 — Espacio independiente por filial
+
+- Se agregó el modelo de identidad comercial por filial: nombre, razón social, RUC, teléfono, logo, dirección, prefijo y pie del comprobante.
+- Se agregaron las rutas de lectura/edición de identidad con autorización de filial y registro en auditoría. Las filiales existentes se inicializan desde sus datos de sucursal.
+- El panel de encargado incorpora «Mi Negocio», con edición de la identidad de su propia filial.
+- Los reportes de filial permiten elegir día, semana, mes o rango manual y muestran el registro de operaciones del periodo.
+- La pantalla de cierres de filial conserva el resumen del turno abierto y agrega el historial de esa filial, detalle de operaciones y PDF.
+- Las rutas de listado y detalle de cierres continúan comprobando acceso a la filial en la API. El nombre comercial y los datos de documentos internos ahora pueden salir de la identidad de la filial.
+- No se actualizó el panel desplegado. La compilación no pudo ejecutarse en este entorno porque no hay
+pm` y las dependencias locales no están instaladas; `git diff --check` no reportó problemas de formato.
 - Próximo paso: validar el build en CI y probar con dos usuarios de filiales distintas que reportes, identidad, historial, detalle y PDF respeten el aislamiento antes de actualizar el LXC.
 
 ---
@@ -281,9 +300,9 @@ Flujo normal:
 ```text
 Repositorio develop
         ↓
-CI
+CI e integración a main
         ↓
-Actualización del LXC
+Actualización desde main
         ↓
 Prueba real
         ↓
@@ -292,7 +311,7 @@ Corrección en repositorio si hace falta
 
 ## Pendiente actual
 
-- Actualizar el LXC desde `develop` y verificar que Integraciones/Factiliza ya no aparezca y que las boletas históricas sigan consultables.
+- Verificar CI, actualizar el entorno objetivo desde `main` y probar la emisión electrónica, los reintentos de filial y la consulta administrativa.
 - Validar las 5 filiales reales.
 - Cerrar formalmente la fase de pruebas locales cuando esas 5 filiales queden aprobadas.
 - Preparar instalador limpio para otro servidor.
@@ -300,7 +319,7 @@ Corrección en repositorio si hace falta
   - backup externo;
   - despliegue en nube;
   - dominio y HTTPS;
-  - integración tributaria/electrónica cuando se defina el flujo contable.
+  - integración tributaria/electrónica cuando el contador confirme el tratamiento tributario.
 
 ## Referencias
 
@@ -309,3 +328,33 @@ Corrección en repositorio si hace falta
 - `docs/ARCHITECTURE.md`
 - `docs/BACKUPS.md`
 - `docs/CONTINUIDAD.md`
+
+## 10/10/2026 — emisión de boletas por filial con ApiSunat
+
+- Se añadió configuración de ApiSunat por filial: emisión desactivada por defecto, serie B001 configurable y modo de una boleta por cierre o una por operación.
+- El token se cifra con AES-256-GCM usando `ZFLOW_CREDENTIAL_KEY`; el panel solo permite tokens del ambiente de Desarrollo (`DEV_`). No se habilitó producción.
+- Al emitir, la boleta usa la comisión como importe y describe la fecha del cierre o de la operación. Si no hay datos del comprador, se identifica como `CLIENTES VARIOS` sin enviar DNI.
+- El formulario solicita nombre, tipo y número de documento solo cuando el total de esa boleta supera S/ 700.00. En S/ 700.00 o menos permite consumidor final sin DNI. El servidor aplica la misma validación.
+- Los registros guardan estado, serie, correlativo y respuesta de ApiSunat. Al ser aceptadas, se archivan PDF, XML y CDR bajo `backups/boletas-electronicas/filial-<id>/cierre-<id>` o `operacion-<id>`.
+- Se conserva la lectura de documentos históricos de Factiliza. `scripts/update-local.sh` crea y vuelve a cargar la clave de cifrado si no existe en `.env`.
+- Verificado por revisión del código y consultas a la documentación de ApiSunat y SUNAT. La compilación no pudo ejecutarse en este entorno: falta
+pm`, y el `pnpm` incluido no pudo resolver el directorio del workspace (EPERM). No se hicieron llamadas reales a ApiSunat porque el token del usuario está redactado; para probar se debe guardar el token `DEV_` de la filial en Integraciones.
+
+## 10/10/2026 — tope por boleta y archivo por filial
+
+- Se añadió a la configuración administrativa un importe máximo por boleta para cada filial, con S/ 500.00 como valor inicial.
+- Si una comisión supera ese tope, el servicio la parte en boletas cuyo importe suma exactamente el total del cierre u operación y ninguna excede el máximo configurado.
+- Cuando una parte todavía no se puede enviar, se guarda como `QUEUED`; el usuario autorizado de la filial reintenta desde su panel. El propietario solo consulta estados, errores y archivos. No se solicita DNI por la suma del cierre si cada boleta queda bajo el umbral individual de SUNAT.
+- Se amplió el esquema para guardar número de parte, cantidad de partes y documentos múltiples por cierre u operación, con migración aditiva para instalaciones existentes.
+- El panel del propietario permite revisar boletas de la filial, estados, importes y abrir PDF/descargar XML archivados en el volumen local `backups/boletas-electronicas`.
+- ApiSunat sigue restringido al ambiente de Desarrollo (`DEV_`); esto aún no habilita comprobantes con validez tributaria.
+- Pendiente: validar contra una instalación MariaDB y credenciales de Desarrollo, revisar estados/respuestas reales del proveedor y probar recuperación de cola y descarga de PDF/XML.
+
+## 10/10/2026 — integración de emisión electrónica en main
+
+- Se integró a `main` el flujo de ApiSunat desarrollado en `develop`, junto con las mejoras de seguridad, instalación y operación que ya estaban publicadas en `main`.
+- Cada operación completada puede emitir su boleta desde la filial. Los reintentos y la cola pendiente se gestionan desde el panel de la filial; el panel propietario solo consulta estados, errores y PDF/XML disponibles.
+- Las respuestas de envío inciertas quedan en estado de confirmación y no se reenvían a ciegas. El proceso de recuperación consulta el estado de ApiSunat antes de actuar y evita duplicar comprobantes.
+- Las boletas aceptadas se archivan localmente con PDF, XML y CDR. Los archivos y errores quedan visibles en la consulta administrativa de cada filial.
+- El flujo sigue limitado al ambiente ApiSunat Desarrollo con token `DEV_`; no genera comprobantes con valor tributario. Falta confirmación contable del tratamiento del IGV antes de habilitar producción.
+- La integración compiló y se desplegó previamente en `develop`; el despliegue de `main` debe verificarse por separado antes de considerar esta rama publicada en el panel.

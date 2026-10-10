@@ -1005,9 +1005,10 @@ export async function registerAdminRoutes(app: FastifyInstance) {
              dc.notes, DATE_FORMAT(dc.closed_at, '%Y-%m-%dT%H:%i:%s') AS closed_at,
              b.id AS branch_id, b.name AS branch_name,
              u.full_name AS closed_by,
-             fd.series AS electronic_boleta_series,
-             fd.correlativo AS electronic_boleta_number,
-             fd.status AS electronic_boleta_status
+             COALESCE((SELECT ed.series FROM electronic_documents ed WHERE ed.closure_id=dc.id AND ed.branch_id=dc.branch_id ORDER BY ed.part_number LIMIT 1),fd.series) AS electronic_boleta_series,
+             COALESCE((SELECT ed.correlativo FROM electronic_documents ed WHERE ed.closure_id=dc.id AND ed.branch_id=dc.branch_id ORDER BY ed.part_number LIMIT 1),fd.correlativo) AS electronic_boleta_number,
+             COALESCE((SELECT ed.status FROM electronic_documents ed WHERE ed.closure_id=dc.id AND ed.branch_id=dc.branch_id ORDER BY ed.part_number LIMIT 1),fd.status) AS electronic_boleta_status,
+             COALESCE((SELECT COUNT(*) FROM electronic_documents ed WHERE ed.closure_id=dc.id AND ed.branch_id=dc.branch_id),IF(fd.id IS NULL,0,1)) AS electronic_boleta_count
       FROM daily_closures dc
       JOIN branches b ON b.id = dc.branch_id
       LEFT JOIN users u ON u.id=dc.closed_by_user_id

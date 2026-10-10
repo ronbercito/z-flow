@@ -63,6 +63,7 @@ type AdminPage =
   | "audit"
   | "backup"
   | "settings"
+  | "integrations"
   | "security"
   | "profile";
 
@@ -216,6 +217,7 @@ type Closure = {
   electronic_boleta_series?: string | null;
   electronic_boleta_number?: number | string | null;
   electronic_boleta_status?: "PENDING" | "ACCEPTED" | "REJECTED" | "UNKNOWN" | null;
+  electronic_boleta_count?: number;
 };
 
 type ClosureOperation = {
@@ -409,6 +411,25 @@ type BranchDetail = {
     closed_at: string;
     closed_by?: string | null;
   }>;
+  electronicDocuments?: ElectronicArchiveDocument[];
+};
+
+type ElectronicArchiveDocument = {
+  id: number;
+  closure_id: number | null;
+  operation_id: number | null;
+  series: string;
+  correlativo: number | null;
+  part_number: number;
+  part_count: number;
+  amount: number;
+  status: string;
+  provider_message: string | null;
+  operation_status?: string | null;
+  canRetry?: boolean;
+  created_at: string;
+  storedFiles: { pdf: boolean; xml: boolean; cdr: boolean; folder: string };
+  legacy?: boolean | number;
 };
 
 const nav: Array<{ page: AdminPage; label: string; icon: typeof Home }> = [
@@ -421,6 +442,7 @@ const nav: Array<{ page: AdminPage; label: string; icon: typeof Home }> = [
   { page: "reports", label: "Reportes", icon: BarChart3 },
   { page: "audit", label: "Auditoría", icon: FileSearch },
   { page: "backup", label: "Backup", icon: Database },
+  { page: "integrations", label: "Integraciones", icon: KeyRound },
   { page: "settings", label: "Configuración", icon: Settings2 },
   { page: "security", label: "Seguridad", icon: ShieldCheck },
   { page: "profile", label: "Mi perfil", icon: UserRound }
@@ -434,6 +456,37 @@ function currency(value: number | string | null | undefined) {
     currency: "PEN",
     minimumFractionDigits: 2
   }).format(Number(value ?? 0));
+}
+
+function electronicStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    QUEUED: "Pendiente de emisión",
+    PENDING: "En validación",
+    ACCEPTED: "Aceptada",
+    REJECTED: "Rechazada",
+    EXCEPTION: "Requiere corrección",
+    ERROR: "Error de envío",
+    CANCELLED: "Emisión cancelada",
+    UNKNOWN: "Estado por confirmar"
+  };
+  return labels[status] ?? "Estado por confirmar";
+}
+
+function electronicStatusClass(status: string) {
+  if (status === "ACCEPTED") return "accepted";
+  if (status === "PENDING") return "validating";
+  if (status === "QUEUED") return "queued";
+  if (["REJECTED", "EXCEPTION", "ERROR"].includes(status)) return "failed";
+  if (status === "CANCELLED") return "cancelled";
+  return "unknown";
+}
+
+function electronicStatusMessage(status: string, message: string | null | undefined) {
+  if (!message) return "";
+  if (status === "EXCEPTION" && message.includes("RegistrationAddress") && message.includes("cbc:Line")) {
+    return "La dirección del emisor no cumplía el formato XML requerido. Ya puedes volver a intentar la emisión.";
+  }
+  return message;
 }
 
 function dateTime(value: string | null | undefined) {
@@ -549,6 +602,7 @@ export default function OwnerApp({ user, onLogout, businessName }: { user: AuthU
     audit: ["Auditoría", "Historial de acciones sensibles del sistema"],
     backup: ["Backup", "Crea, descarga y restaura copias de la base de datos"],
     settings: ["Configuración general", "Datos del negocio y reglas centrales del sistema local"],
+    integrations: ["Integraciones", "Configura ApiSunat y la emisión electrónica por filial"],
     security: ["Seguridad y sesiones", "Control de sesiones activas y estado del entorno local"],
     profile: ["Mi perfil", "Cuenta propietaria y seguridad"]
   };
@@ -629,6 +683,7 @@ export default function OwnerApp({ user, onLogout, businessName }: { user: AuthU
           {page === "audit" && <AuditPage rows={auditRows} />}
           {page === "backup" && <BackupPage />}
           {page === "settings" && <SystemSettingsPage />}
+          {page === "integrations" && overview && <ElectronicIntegrationsPage branches={overview.branches} />}
           {page === "security" && <SecurityPage currentUserId={user.id} />}
           {page === "profile" && <OwnerProfile user={user} />}
         </section>
@@ -1020,7 +1075,7 @@ function CashAdminPage({ branches, closures }: { branches: Branch[]; closures: C
                       : null
                   );
                   const boletaNumber = electronicDocument?.series
-                    ? String(electronicDocument.series) + "-" + String(electronicDocument.correlativo ?? "").padStart(6, "0")
+                      ? String(electronicDocument.series) + "-" + String(electronicDocument.correlativo ?? "").padStart(8, "0")
                     : "";
                   return <Fragment key={item.id}>
                     <tr>
@@ -1033,7 +1088,7 @@ function CashAdminPage({ branches, closures }: { branches: Branch[]; closures: C
                       <td><div className="closure-actions">
                         <button className="mini-button" aria-expanded={open} onClick={() => void toggleClosure(item)}><ChevronDown size={12} className={open ? "closure-chevron open" : "closure-chevron"}/>{open ? "Ocultar" : "Detalle"}</button>
                         <button className="mini-button" onClick={() => window.open(`/api/branches/${item.branch_id}/closures/${item.id}/pdf`, "_blank")}><Download size={12}/> PDF</button>
-                        {electronicDocument ? <button className="mini-button closure-invoice-button" title="Consultar la boleta archivada" onClick={() => setInvoiceClosure(item)}><Eye size={12}/> {electronicDocument.status === "ACCEPTED" ? "Ver " + boletaNumber : "Ver registro"}</button> : <span className="closure-no-invoice">Sin boleta</span>}
+                        {electronicDocument ? <button className="mini-button closure-invoice-button" title="Consultar las boletas archivadas" onClick={() => setInvoiceClosure(item)}><Eye size={12}/> {Number(item.electronic_boleta_count ?? 1) > 1 ? `${item.electronic_boleta_count} boletas` : electronicDocument.status === "ACCEPTED" ? "Ver " + boletaNumber : "Ver registro"}</button> : <span className="closure-no-invoice">Sin boleta</span>}
                       </div></td>
                     </tr>
                     {open && <tr className="closure-detail-row"><td colSpan={8}>
@@ -1081,44 +1136,40 @@ function CashAdminPage({ branches, closures }: { branches: Branch[]; closures: C
 }
 
 function ClosureElectronicDocumentModal({ closure, onClose, onDocumentChange }: { closure: Closure; onClose: () => void; onDocumentChange: (document: any) => void }) {
-  const [document, setDocument] = useState<any>(null);
+  const [documents, setDocuments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  async function loadDocuments(silent = false) {
+    if (!silent) { setLoading(true); setError(""); }
+    try {
+      const result = await api<{documents:any[];document:any}>(`/api/branches/${closure.branch_id}/closures/${closure.id}/electronic-document`);
+      const list = result.documents ?? (result.document ? [result.document] : []);
+      setDocuments(list);
+      if (list[0]) onDocumentChange(list[0]);
+    } catch (err) { setError(err instanceof Error ? err.message : "No se pudo consultar la boleta archivada."); }
+    finally { if (!silent) setLoading(false); }
+  }
+  useEffect(() => { void loadDocuments(); }, [closure.id, closure.branch_id]);
   useEffect(() => {
-    void (async () => {
-      try {
-        const result = await api<{document:any}>(`/api/branches/${closure.branch_id}/closures/${closure.id}/electronic-document`);
-        setDocument(result.document);
-        if (result.document) onDocumentChange(result.document);
-      } catch (err) { setError(err instanceof Error ? err.message : "No se pudo consultar la boleta archivada."); }
-      finally { setLoading(false); }
-    })();
-  }, [closure.id, closure.branch_id]);
-
-  const number = document?.series ? `${document.series}-${String(document.correlativo ?? "").padStart(6, "0")}` : document?.provider_document_id;
+    if (!documents.some((document) => document.status === "PENDING" || (document.status === "ACCEPTED" && (!document.storedFiles?.pdf || !document.storedFiles?.xml)))) return;
+    const timer = window.setInterval(() => void loadDocuments(true), 4000);
+    return () => window.clearInterval(timer);
+  }, [documents, closure.id, closure.branch_id]);
 
   return <div className="modal-backdrop" role="presentation" onClick={onClose}>
     <section className="modal closure-invoice-modal" role="dialog" aria-modal="true" aria-labelledby="closure-invoice-title" onClick={(event) => event.stopPropagation()}>
-      <div className="modal-head"><div><h2 id="closure-invoice-title">Boleta electrónica · cierre #{closure.id}</h2><p>{closure.branch_name} · {dateTime(closure.closed_at)}</p></div><button className="icon-btn" onClick={onClose} aria-label="Cerrar"><X size={18}/></button></div>
-      <div className="invoice-closure-summary"><span>Comisión del cierre<strong>{currency(closure.commission_total)}</strong></span><span>Número de boleta<strong>{number || "—"}</strong></span></div>
+      <div className="modal-head"><div><h2 id="closure-invoice-title">Boletas electrónicas · cierre #{closure.id}</h2><p>{closure.branch_name} · {dateTime(closure.closed_at)}</p></div><button className="icon-btn" onClick={onClose} aria-label="Cerrar"><X size={18}/></button></div>
       {loading && <div className="closure-detail-message">Consultando el registro guardado…</div>}
       {error && <div className="closure-detail-error">{error}</div>}
-      {!loading && document?.status === "ACCEPTED" && <>
-        <div className="invoice-success-notice"><CheckCircle2 size={18}/><div><strong>Boleta aceptada por SUNAT</strong><span>{document.provider_message || "Comprobante registrado."}</span></div></div>
-        <div className="invoice-archive-notice">
-          <strong>Copia electrónica archivada en el servidor</strong>
-          <span>{document.storedFiles?.folder || ("boletas-electronicas/filial-" + closure.branch_id + "/cierre-" + closure.id)}</span>
-          <small>PDF {document.storedFiles?.pdf ? "✓" : "no disponible"} · XML {document.storedFiles?.xml ? "✓" : "no disponible"} · CDR {document.storedFiles?.cdr ? "✓" : "no disponible"}</small>
-        </div>
-        <div className="invoice-download-actions">
-          <button className="soft" disabled={!document.storedFiles?.pdf} onClick={() => window.open(`/api/branches/${closure.branch_id}/closures/${closure.id}/electronic-document/pdf`, "_blank")}><Eye size={14}/> Ver boleta PDF</button>
-          <button className="soft" disabled={!document.storedFiles?.xml} onClick={() => window.open(`/api/branches/${closure.branch_id}/closures/${closure.id}/electronic-document/xml`, "_blank")}><Download size={14}/> Descargar XML</button>
-          <button className="soft" disabled={!document.storedFiles?.cdr} onClick={() => window.open(`/api/branches/${closure.branch_id}/closures/${closure.id}/electronic-document/cdr`, "_blank")}><Download size={14}/> Descargar CDR</button>
-        </div>
-      </>}
-      {!loading && document && document.status !== "ACCEPTED" && <div className="invoice-setup-notice"><ReceiptText size={18}/><div><strong>Registro de emisión anterior</strong><span>{document.provider_message || "No se confirmó una boleta aceptada. No se puede emitir desde este panel."}</span></div></div>}
-      {!loading && !document && !error && <div className="invoice-setup-notice"><ShieldCheck size={18}/><div><strong>No hay una boleta registrada para este cierre</strong><span>La emisión electrónica está deshabilitada en esta instalación.</span></div></div>}
+      {!loading && documents.length > 0 && <div className="table-wrap"><table className="admin-table"><thead><tr><th>Boleta</th><th>Parte</th><th>Importe</th><th>Estado</th><th>Archivos locales</th><th>Descargas</th></tr></thead><tbody>{documents.map((document:any)=><tr key={document.id}>
+        <td><strong>{document.series}{document.correlativo ? `-${String(document.correlativo).padStart(document.legacy ? 6 : 8,"0")}` : " · por asignar"}</strong></td><td>{document.part_number}/{document.part_count}</td><td>{currency(document.amount)}</td>
+        <td><span className={`electronic-status ${electronicStatusClass(document.status)}`}>{electronicStatusLabel(document.status)}</span><small className="closure-event-reason">{electronicStatusMessage(document.status, document.provider_message)}</small></td>
+        <td>PDF {document.storedFiles?.pdf ? "✓" : "—"} · XML {document.storedFiles?.xml ? "✓" : "—"}</td>
+        <td className="closure-actions">{(["pdf","xml"] as const).map((format)=><button key={format} className="mini-button" disabled={!document.storedFiles?.[format]} onClick={()=>window.open(document.legacy ? `/api/branches/${closure.branch_id}/closures/${closure.id}/electronic-document/${format}` : `/api/branches/${closure.branch_id}/electronic-documents/${document.id}/${format}`,"_blank")}>{format === "pdf" ? <Eye size={12}/> : <Download size={12}/>} {format.toUpperCase()}</button>)}</td>
+      </tr>)}</tbody></table></div>}
+      {!loading && documents.length === 0 && !error && <div className="invoice-setup-notice"><ShieldCheck size={18}/><div><strong>No hay boletas registradas para este cierre</strong><span>La emisión electrónica está deshabilitada en esta instalación.</span></div></div>}
+      <div className="invoice-setup-notice"><ShieldCheck size={18}/><div><strong>Consulta de solo lectura</strong><span>La emisión y los reintentos se gestionan desde la filial.</span></div></div>
     </section>
   </div>;
 }
@@ -1707,6 +1758,77 @@ function SystemSettingsPage() {
   );
 }
 
+type ElectronicSettingsForm = {
+  enabled: boolean;
+  emissionMode: "CLOSURE" | "OPERATION";
+  personaId: string;
+  tokenConfigured: boolean;
+  personaToken: string;
+  series: string;
+  maxAmountPerReceipt: number;
+};
+
+function ElectronicIntegrationsPage({ branches }: { branches: Branch[] }) {
+  const [branchId, setBranchId] = useState(String(branches[0]?.id ?? ""));
+  const [form, setForm] = useState<ElectronicSettingsForm | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+
+  async function load() {
+    if (!branchId) return;
+    setLoading(true); setError(""); setMessage("");
+    try {
+      const data = await api<Omit<ElectronicSettingsForm, "personaToken">>(`/api/admin/branches/${branchId}/electronic-settings`);
+      setForm({ ...data, maxAmountPerReceipt: Number((data as any).maxAmountPerReceipt ?? 500), personaToken: "" });
+    } catch (err) { setError(err instanceof Error ? err.message : "No se pudo cargar la integración."); }
+    finally { setLoading(false); }
+  }
+
+  useEffect(() => { void load(); }, [branchId]);
+
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    if (!form || !branchId) return;
+    setSaving(true); setError(""); setMessage("");
+    try {
+      const result = await api<{ tokenConfigured: boolean }>(`/api/admin/branches/${branchId}/electronic-settings`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form)
+      });
+      setMessage(form.enabled ? "ApiSunat quedó configurado en modo Desarrollo para esta filial." : "La configuración quedó guardada; la emisión está desactivada.");
+      setForm({ ...form, personaToken: "", tokenConfigured: result.tokenConfigured });
+      await load();
+    } catch (err) { setError(err instanceof Error ? err.message : "No se pudo guardar la configuración."); }
+    finally { setSaving(false); }
+  }
+
+  if (!branches.length) return <div className="empty-cell">Crea una filial para configurar su emisión.</div>;
+  if (!form && loading) return <div className="owner-loading">Cargando integración…</div>;
+  if (!form) return <div className="error-banner">{error || "No se pudo cargar la integración."}<button onClick={() => void load()}><RefreshCw size={14}/> Reintentar</button></div>;
+
+  return <form className="stage4-settings-layout" onSubmit={save}>
+    <section className="card stage4-settings-card">
+      <div className="card-head"><div><strong>ApiSunat · boletas electrónicas</strong><span>La clave se cifra en el servidor y nunca vuelve a mostrarse.</span></div><KeyRound size={18}/></div>
+      <div className="settings-form-body">
+        <label>Filial<select value={branchId} onChange={(event)=>setBranchId(event.target.value)}>{branches.map((branch)=><option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>
+        <label className="active-toggle"><input type="checkbox" checked={form.enabled} onChange={(event)=>setForm({...form,enabled:event.target.checked})}/> Activar emisión automática para esta filial</label>
+        <label>Emitir comprobante<select value={form.emissionMode} onChange={(event)=>setForm({...form,emissionMode:event.target.value as "CLOSURE"|"OPERATION"})}><option value="CLOSURE">Una boleta por cada cierre de caja</option><option value="OPERATION">Una boleta por cada operación completada</option></select></label>
+        <div className="field-grid">
+          <label>Persona ID<input value={form.personaId} onChange={(event)=>setForm({...form,personaId:event.target.value})} placeholder="ID de empresa en ApiSunat" autoComplete="off" /></label>
+          <label>Serie de boleta<input value={form.series} onChange={(event)=>setForm({...form,series:event.target.value.toUpperCase()})} placeholder="B001" maxLength={4} /></label>
+        </div>
+        <label>Máximo por boleta (S/)<input type="number" min="0.01" step="0.01" value={form.maxAmountPerReceipt} onChange={(event)=>setForm({...form,maxAmountPerReceipt:Number(event.target.value)})} required /></label>
+        <label>Token API de Desarrollo<input type="password" value={form.personaToken} onChange={(event)=>setForm({...form,personaToken:event.target.value})} placeholder={form.tokenConfigured ? "Token guardado · escribe solo para reemplazarlo" : "Pega aquí el token DEV_ de ApiSunat"} autoComplete="new-password" /></label>
+        <div className="friendly-info"><ShieldCheck size={16}/><span>Esta conexión acepta tokens DEV_. El modo Desarrollo permite pruebas; esos documentos no se envían a SUNAT ni tienen valor tributario.</span></div>
+        <div className="stage4-policy-note"><ReceiptText size={16}/><span>Si la comisión supera este máximo, se divide en varias boletas y ninguna excede el tope. Las partes que no se logren enviar quedan pendientes para reintento. Se emite sin DNI cuando cada boleta es hasta S/ 700.00. <a href="https://cpe.sunat.gob.pe/tipos_de_comprobantes/boleta" target="_blank" rel="noreferrer">Regla SUNAT</a>.</span></div>
+      </div>
+    </section>
+    <div className="stage4-settings-actions"><div>{error&&<div className="modal-error">{error}</div>}{message&&<div className="success-message">{message}</div>}</div><button className="primary" disabled={saving||loading}>{saving?"Guardando…":"Guardar integración"}</button></div>
+  </form>;
+}
+
 function SecurityPage({ currentUserId }: { currentUserId: number }) {
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [sessions, setSessions] = useState<SecuritySession[]>([]);
@@ -2191,7 +2313,7 @@ function BranchDetailModal({
   onChanged: () => Promise<void>;
 }) {
   const [detail, setDetail] = useState<BranchDetail | null>(null);
-  const [tab, setTab] = useState<"overview"|"operations"|"users"|"closures">("overview");
+  const [tab, setTab] = useState<"overview"|"operations"|"users"|"closures"|"electronic">("overview");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -2207,8 +2329,11 @@ function BranchDetailModal({
   async function loadDetail() {
     setLoading(true); setError("");
     try {
-      const data = await api<BranchDetail>(`/api/admin/branches/${branchId}/detail`);
-      setDetail(data);
+      const [data, archives] = await Promise.all([
+        api<BranchDetail>(`/api/admin/branches/${branchId}/detail`),
+        api<{documents:ElectronicArchiveDocument[]}>(`/api/admin/branches/${branchId}/electronic-documents`)
+      ]);
+      setDetail({ ...data, electronicDocuments: archives.documents });
       setCode(data.branch.code);
       setName(data.branch.name);
       setAddress(data.branch.address ?? "");
@@ -2224,6 +2349,26 @@ function BranchDetailModal({
   }
 
   useEffect(() => { void loadDetail(); }, [branchId]);
+
+  // Refresh the administrator archive while ApiSunat is still validating documents.
+  // Only the archive list is replaced; branch detail fields and the rest of the modal stay put.
+  const hasDocumentsBeingValidated = (detail?.electronicDocuments ?? []).some((document) => document.status === "PENDING" || (document.status === "ACCEPTED" && (!document.storedFiles?.pdf || !document.storedFiles?.xml)));
+  useEffect(() => {
+    if (tab !== "electronic" || !hasDocumentsBeingValidated) return;
+    let active = true;
+    let checking = false;
+    const refreshElectronicDocuments = async () => {
+      if (checking) return;
+      checking = true;
+      try {
+        const archives = await api<{ documents: ElectronicArchiveDocument[] }>(`/api/admin/branches/${branchId}/electronic-documents`);
+        if (active) setDetail((current) => current ? { ...current, electronicDocuments: archives.documents } : current);
+      } catch { /* Retry on the next interval after a temporary network issue. */ }
+      finally { checking = false; }
+    };
+    const timer = window.setInterval(() => { void refreshElectronicDocuments(); }, 4000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [branchId, tab, hasDocumentsBeingValidated]);
 
   async function saveBranch(event: FormEvent) {
     event.preventDefault(); setSaving(true); setError(""); setMessage("");
@@ -2266,10 +2411,12 @@ function BranchDetailModal({
         <button className={tab==="operations"?"active":""} onClick={()=>setTab("operations")}>Operaciones</button>
         <button className={tab==="users"?"active":""} onClick={()=>setTab("users")}>Usuarios</button>
         <button className={tab==="closures"?"active":""} onClick={()=>setTab("closures")}>Cierres</button>
+        <button className={tab==="electronic"?"active":""} onClick={()=>setTab("electronic")}>Boletas electrónicas</button>
       </div>
 
       {loading && <div className="branch-detail-loading">Cargando filial…</div>}
       {error && <div className="modal-error branch-detail-error">{error}</div>}
+      {message && tab === "electronic" && <div className="success-banner branch-detail-success">{message}</div>}
 
       {!loading && detail && tab==="overview" && <div className="branch-detail-body">
         <div className="branch-detail-kpis">
@@ -2317,6 +2464,11 @@ function BranchDetailModal({
       {!loading && detail && tab==="closures" && <div className="branch-detail-table"><div className="table-wrap"><table className="admin-table"><thead><tr><th>Fecha</th><th>Resultado</th><th>Operaciones</th><th>Comisión</th><th>Diferencias</th><th>PDF</th></tr></thead><tbody>
         {detail.closures.map((item)=><tr key={item.id}><td>{dateTime(item.closed_at)}</td><td><span className={`branch-status ${closureResult(item as Closure).cls}`}>{closureResult(item as Closure).label}</span></td><td>{item.operation_count ?? 0}</td><td><strong>{currency(item.commission_total)}</strong><br/><small>Ganancia del encargado</small></td><td><span className={Math.abs(Number(item.difference_cash))<0.005?"green-text":"red-text"}>Efectivo {currency(item.difference_cash)}</span><br/><span className={Math.abs(Number(item.difference_wallet))<0.005?"green-text":"red-text"}>Yape {currency(item.difference_wallet)}</span></td><td><button className="mini-button" onClick={()=>window.open(`/api/branches/${detail.branch.id}/closures/${item.id}/pdf`,"_blank")}><Download size={12}/> PDF</button></td></tr>)}
         {!detail.closures.length && <tr><td colSpan={6} className="empty-cell">Todavía no hay cierres.</td></tr>}
+      </tbody></table></div></div>}
+
+      {!loading && detail && tab==="electronic" && <div className="branch-detail-table"><div className="table-wrap"><table className="admin-table"><thead><tr><th>Fecha</th><th>Origen</th><th>Boleta</th><th>Parte</th><th>Importe</th><th>Estado</th><th>Archivos</th></tr></thead><tbody>
+        {(detail.electronicDocuments ?? []).map((document)=>{const displayedMessage=document.provider_message === "Pendiente de emisión por el tope configurado." ? "En espera de reintento; revisa la conexión y los datos fiscales." : electronicStatusMessage(document.status, document.provider_message);return <tr key={`${document.legacy ? "legacy" : "current"}-${document.id}`}><td>{dateTime(document.created_at)}</td><td>{document.closure_id ? `Cierre #${document.closure_id}` : `Operación #${document.operation_id}`}</td><td><strong>{document.series}{document.correlativo ? `-${String(document.correlativo).padStart(document.legacy ? 6 : 8,"0")}` : " · pendiente"}</strong></td><td>{document.part_number}/{document.part_count}</td><td>{currency(document.amount)}</td><td><span className={`electronic-status ${electronicStatusClass(document.status)}`}>{electronicStatusLabel(document.status)}</span><small className="closure-event-reason">{displayedMessage}</small></td><td className="closure-actions">{(["pdf","xml"] as const).map((format)=><button key={format} className={`mini-button${document.storedFiles?.[format] ? " electronic-action-ready" : ""}`} disabled={!document.storedFiles?.[format]} onClick={()=>window.open(document.legacy && document.closure_id ? `/api/branches/${detail.branch.id}/closures/${document.closure_id}/electronic-document/${format}` : `/api/branches/${detail.branch.id}/electronic-documents/${document.id}/${format}`,"_blank")}>{format === "pdf" ? <Eye size={12}/> : <Download size={12}/>} {format.toUpperCase()}</button>)}</td></tr>})}
+        {!detail.electronicDocuments?.length && <tr><td colSpan={7} className="empty-cell">Esta filial todavía no tiene boletas electrónicas archivadas.</td></tr>}
       </tbody></table></div></div>}
     </div>
   </div>;

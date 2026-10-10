@@ -32,6 +32,7 @@ type Page = "home" | "operations" | "cash" | "close" | "receipts" | "reports" | 
 
 type Operation = {
   id: number;
+  branch_id: number;
   operation_type: "YAPE_TO_CASH" | "CASH_TO_YAPE";
   reference_code: string | null;
   customer_name: string | null;
@@ -44,6 +45,12 @@ type Operation = {
   created_at: string;
   receipt_series?: string | null;
   receipt_number?: number | null;
+  electronic_series?: string | null;
+  electronic_number?: number | null;
+  electronic_status?: string | null;
+  electronic_message?: string | null;
+  electronic_count?: number;
+  electronic_retry_count?: number;
 };
 
 type Dashboard = {
@@ -83,6 +90,9 @@ type Settings = {
   partner_share_pct?: number | null;
   require_cash_to_yape_reference?: number | boolean;
   allow_cashier_cancel?: number | boolean;
+  electronic_enabled?: number | boolean;
+  electronic_emission_mode?: "CLOSURE" | "OPERATION";
+  electronic_max_amount_per_receipt?: number;
 };
 
 type AuthUser = {
@@ -147,6 +157,9 @@ type ClosureHistoryRow = {
   notes: string | null;
   closed_at: string;
   closed_by: string | null;
+  electronic_status?: string | null;
+  electronic_message?: string | null;
+  electronic_retry_count?: number;
 };
 
 type ClosureDetail = { closure: ClosureHistoryRow & { branch_name: string; cash_session_id: number }; operations: Operation[] };
@@ -169,6 +182,9 @@ type ClosurePreview = {
   yapeSent: number;
   expectedCash: number;
   expectedWallet: number;
+  electronicEnabled: boolean;
+  electronicEmissionMode: "CLOSURE" | "OPERATION";
+  electronicMaxAmountPerReceipt: number;
 };
 
 const sidebar: Array<{ page: Page; label: string; icon: typeof Home }> = [
@@ -216,6 +232,29 @@ function operationStatusClass(status: string) {
   if (status === "CANCELLED") return "cancelled";
   if (status === "REVERSED") return "reversed";
   return "pending";
+}
+
+function electronicStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    QUEUED: "Pendiente de emisión",
+    PENDING: "En validación",
+    ACCEPTED: "Aceptada",
+    REJECTED: "Rechazada",
+    EXCEPTION: "Requiere corrección",
+    ERROR: "Error de envío",
+    CANCELLED: "Emisión cancelada",
+    UNKNOWN: "Estado por confirmar"
+  };
+  return labels[status] ?? "Estado por confirmar";
+}
+
+function electronicStatusClass(status: string) {
+  if (status === "ACCEPTED") return "accepted";
+  if (status === "PENDING") return "validating";
+  if (status === "QUEUED") return "queued";
+  if (["REJECTED", "EXCEPTION", "ERROR"].includes(status)) return "failed";
+  if (status === "CANCELLED") return "cancelled";
+  return "unknown";
 }
 
 function App() {
@@ -320,6 +359,27 @@ function App() {
   useEffect(() => {
     if (authUser && authUser.role.code !== "OWNER" && branchId) void load();
   }, [authUser?.id, authUser?.role.code, branchId]);
+
+  // Keep the branch operation table in sync while ApiSunat validates a document.
+  // This refresh is intentionally silent so it does not replace the page with a loader.
+  useEffect(() => {
+    if (page !== "operations" || !branchId || !operations.some((operation) => operation.electronic_status === "PENDING")) return;
+    let active = true;
+    let checking = false;
+    const refreshStatuses = async () => {
+      if (checking) return;
+      checking = true;
+      try {
+        const response = await fetch(`/api/branches/${branchId}/operations`, { credentials: "same-origin" });
+        if (!response.ok) return;
+        const result = await response.json();
+        if (active) setOperations(result.operations ?? []);
+      } catch { /* A later refresh can recover a temporary connection issue. */ }
+      finally { checking = false; }
+    };
+    const timer = window.setInterval(() => { void refreshStatuses(); }, 4000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [page, branchId, operations.some((operation) => operation.electronic_status === "PENDING")]);
 
   useEffect(() => {
     if (!authUser || authUser.role.code === "OWNER" || !branchId) return;
@@ -506,6 +566,17 @@ function App() {
               operations={operations}
               onNewOperation={(type) => setOperationModal(type)}
               onReceipt={setReceipt}
+              onRetryElectronic={async (op) => {
+                const response = await fetch(`/api/branches/${branchId}/electronic-documents/operation/${op.id}/process-pending`, { method: "POST", credentials: "same-origin" });
+                const result = await response.json();
+                if (!response.ok) {
+                  window.alert(result.error ?? "No se pudieron reintentar las boletas.");
+                  return;
+                }
+                const refreshed = await fetch(`/api/branches/${branchId}/operations`, { credentials: "same-origin" });
+                const operationResult = await refreshed.json();
+                if (refreshed.ok) setOperations(operationResult.operations ?? []);
+              }}
               canCreate={canWrite}
               canCancel={Boolean(canWrite && dashboard?.session && (authUser.role.code !== "CASHIER" || settings?.allow_cashier_cancel))}
               onCancel={async (op) => {
@@ -536,7 +607,7 @@ function App() {
           )}
 
           {page === "close" && (
-            <ClosePage branchId={branchId} dashboard={dashboard} onClose={() => setCloseCashModal(true)} onOpen={() => setOpenCashModal(true)} />
+            <ClosePage branchId={branchId} dashboard={dashboard} canManageElectronic={canWrite} onClose={() => setCloseCashModal(true)} onOpen={() => setOpenCashModal(true)} />
           )}
 
           {page === "receipts" && <ReceiptsPage branchId={branchId} operations={operations} onReceipt={setReceipt} />}
@@ -755,6 +826,7 @@ function OperationsPage({
   operations,
   onNewOperation,
   onReceipt,
+  onRetryElectronic,
   canCreate,
   canCancel,
   onCancel
@@ -762,6 +834,7 @@ function OperationsPage({
   operations: Operation[];
   onNewOperation: (type: "YAPE_TO_CASH" | "CASH_TO_YAPE") => void;
   onReceipt: (op: Operation) => void;
+  onRetryElectronic: (op: Operation) => void | Promise<void>;
   canCreate: boolean;
   canCancel: boolean;
   onCancel: (op: Operation) => void | Promise<void>;
@@ -784,7 +857,7 @@ function OperationsPage({
             <button className={filter === "CASH_TO_YAPE" ? "filter active" : "filter"} onClick={() => setFilter("CASH_TO_YAPE")}>Efectivo → Yape</button>
           </div>
         </div>
-        <OperationsTable operations={filtered} onReceipt={onReceipt} onCancel={canCancel ? onCancel : undefined} />
+        <OperationsTable operations={filtered} onReceipt={onReceipt} onCancel={canCancel ? onCancel : undefined} onRetryElectronic={canCreate ? onRetryElectronic : undefined} />
       </section>
     </>
   );
@@ -832,13 +905,62 @@ function CashPage({
   );
 }
 
-function ClosePage({ branchId, dashboard, onClose, onOpen }: { branchId: number; dashboard: Dashboard | null; onClose: () => void; onOpen: () => void }) {
+function ClosePage({ branchId, dashboard, canManageElectronic, onClose, onOpen }: { branchId: number; dashboard: Dashboard | null; canManageElectronic: boolean; onClose: () => void; onOpen: () => void }) {
   const [preview, setPreview] = useState<ClosurePreview | null>(null);
   const [closures, setClosures] = useState<ClosureHistoryRow[]>([]);
   const [selectedDetail, setSelectedDetail] = useState<number | null>(null);
   const [detail, setDetail] = useState<ClosureDetail | null>(null);
   const [historyError, setHistoryError] = useState("");
   const [error, setError] = useState("");
+  const [processingClosureIds, setProcessingClosureIds] = useState<Set<number>>(() => new Set());
+
+  async function loadHistory() {
+    try {
+      setHistoryError("");
+      const response = await fetch(`/api/branches/${branchId}/closures`, { credentials: "same-origin" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "No se pudo consultar el historial");
+      setClosures(result.closures ?? []);
+    } catch (err) {
+      setHistoryError(err instanceof Error ? err.message : "No se pudo consultar el historial");
+    }
+  }
+
+  async function showDetail(closureId: number) {
+    if (selectedDetail === closureId) { setSelectedDetail(null); setDetail(null); return; }
+    setSelectedDetail(closureId);
+    setDetail(null);
+    try {
+      const response = await fetch(`/api/branches/${branchId}/closures/${closureId}/detail`, { credentials: "same-origin" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "No se pudo cargar el cierre");
+      setDetail(result);
+    } catch (err) {
+      setHistoryError(err instanceof Error ? err.message : "No se pudo cargar el cierre");
+    }
+  }
+
+  async function retryClosureElectronic(closureId: number) {
+    if (processingClosureIds.has(closureId)) return;
+    setProcessingClosureIds((current) => new Set(current).add(closureId));
+    try {
+      const response = await fetch(`/api/branches/${branchId}/electronic-documents/closure/${closureId}/process-pending`, { method: "POST", credentials: "same-origin" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "No se pudieron reintentar las boletas.");
+      await loadHistory();
+    } catch (err) {
+      setHistoryError(err instanceof Error ? err.message : "No se pudieron reintentar las boletas.");
+    } finally {
+      setProcessingClosureIds((current) => { const next = new Set(current); next.delete(closureId); return next; });
+    }
+  }
+
+  useEffect(() => { void loadHistory(); }, [branchId, dashboard?.session?.id]);
+  useEffect(() => {
+    if (!closures.some((row) => row.electronic_status === "PENDING")) return;
+    const timer = window.setInterval(() => void loadHistory(), 4000);
+    return () => window.clearInterval(timer);
+  }, [branchId, closures]);
 
   async function loadHistory() {
     try {
@@ -927,7 +1049,7 @@ function ClosePage({ branchId, dashboard, onClose, onOpen }: { branchId: number;
         <div className="card-head"><div><strong>Historial de cierres</strong><span>{closures.length} cierres de {dashboard?.branch.name ?? "esta filial"}</span></div></div>
         {historyError && <div className="error-banner">{historyError}</div>}
         <div className="table-wrap"><table className="data-table"><thead><tr>
-          <th>Fecha</th><th>Responsable</th><th>Resultado</th><th>Operaciones</th><th>Comisión</th><th>Diferencias</th><th>Acciones</th>
+          <th>Fecha</th><th>Responsable</th><th>Resultado</th><th>Operaciones</th><th>Comisión</th><th>Diferencias</th><th>Boleta</th><th>Acciones</th>
         </tr></thead><tbody>
           {closures.map((row) => {
             const balanced = Math.abs(Number(row.difference_cash)) < 0.005 && Math.abs(Number(row.difference_wallet)) < 0.005;
@@ -936,10 +1058,11 @@ function ClosePage({ branchId, dashboard, onClose, onOpen }: { branchId: number;
               <td><span className={`status-pill ${balanced ? "ok" : "cancelled"}`}>{balanced ? "Cuadra" : "Con diferencia"}</span></td>
               <td>{row.operation_count}</td><td>{currency(row.commission_total)}</td>
               <td><span className={Number(row.difference_cash) < 0 ? "negative-text" : "positive-text"}>Efectivo {currency(row.difference_cash)}</span><br/><span className={Number(row.difference_wallet) < 0 ? "negative-text" : "positive-text"}>Yape {currency(row.difference_wallet)}</span></td>
-              <td className="closure-row-actions"><button className="mini-button" onClick={() => void showDetail(row.id)}><ChevronRight size={13}/>{selectedDetail === row.id ? "Ocultar" : "Detalle"}</button><button className="mini-button" onClick={() => window.open(`/api/branches/${branchId}/closures/${row.id}/pdf`, "_blank")}><Download size={12}/> PDF</button></td>
+              <td>{row.electronic_status ? <><span className={`electronic-status ${electronicStatusClass(row.electronic_status)}`}>{electronicStatusLabel(row.electronic_status)}</span>{row.electronic_message && <small className="closure-event-reason">{row.electronic_message}</small>}</> : "—"}</td>
+              <td className="closure-row-actions"><button className="mini-button" onClick={() => void showDetail(row.id)}><ChevronRight size={13}/>{selectedDetail === row.id ? "Ocultar" : "Detalle"}</button>{canManageElectronic && Number(row.electronic_retry_count ?? 0) > 0 && <button className="mini-button electronic-action-ready" disabled={processingClosureIds.has(row.id)} onClick={() => void retryClosureElectronic(row.id)}><RefreshCw size={12} className={processingClosureIds.has(row.id) ? "electronic-action-spinner" : undefined}/>{processingClosureIds.has(row.id) ? "Emitiendo…" : "Reintentar boleta"}</button>}<button className="mini-button" onClick={() => window.open(`/api/branches/${branchId}/closures/${row.id}/pdf`, "_blank")}><Download size={12}/> PDF</button></td>
             </tr>;
           })}
-          {!closures.length && <tr><td colSpan={7} className="empty-cell">Todavía no hay cierres registrados para esta filial.</td></tr>}
+          {!closures.length && <tr><td colSpan={8} className="empty-cell">Todavía no hay cierres registrados para esta filial.</td></tr>}
         </tbody></table></div>
         {selectedDetail && <div className="closure-detail-panel">
           {!detail ? <div className="owner-loading">Cargando detalle del cierre…</div> : <>
@@ -1203,7 +1326,14 @@ function HelpPage({ onNavigate, canWrite }: { onNavigate: (page: Page) => void; 
   );
 }
 
-function OperationsTable({ operations, onReceipt, onCancel }: { operations: Operation[]; onReceipt?: (op: Operation) => void; onCancel?: (op: Operation) => void | Promise<void> }) {
+function OperationsTable({ operations, onReceipt, onCancel, onRetryElectronic }: { operations: Operation[]; onReceipt?: (op: Operation) => void; onCancel?: (op: Operation) => void | Promise<void>; onRetryElectronic?: (op: Operation) => void | Promise<void> }) {
+  const [processingIds, setProcessingIds] = useState<Set<number>>(() => new Set());
+  async function retry(op: Operation) {
+    if (!onRetryElectronic || processingIds.has(op.id)) return;
+    setProcessingIds((current) => new Set(current).add(op.id));
+    try { await onRetryElectronic(op); }
+    finally { setProcessingIds((current) => { const next = new Set(current); next.delete(op.id); return next; }); }
+  }
   return (
     <div className="table-wrap">
       <table>
@@ -1217,7 +1347,7 @@ function OperationsTable({ operations, onReceipt, onCancel }: { operations: Oper
             <th>Comisión</th>
             <th>Entregado</th>
             <th>Estado</th>
-            {(onReceipt || onCancel) && <th>Acciones</th>}
+            {(onReceipt || onCancel || onRetryElectronic) && <th>Acciones</th>}
           </tr>
         </thead>
         <tbody>
@@ -1230,11 +1360,11 @@ function OperationsTable({ operations, onReceipt, onCancel }: { operations: Oper
               <td>{currency(op.amount)}</td>
               <td>{currency(op.commission)}</td>
               <td>{currency(op.net_amount)}</td>
-              <td><span className={`status ${operationStatusClass(op.status)}`}><i />{operationStatusLabel(op.status)}</span></td>
-              {(onReceipt || onCancel) && <td><div className="inline-actions">{onReceipt && <button className="mini-button" onClick={() => onReceipt(op)}><ReceiptText size={13} /> Ver</button>}{onCancel && op.status === "COMPLETED" && <button className="mini-button danger-mini" onClick={() => void onCancel(op)}>Anular</button>}</div></td>}
+              <td><span className={`status ${operationStatusClass(op.status)}`}><i />{operationStatusLabel(op.status)}</span>{op.electronic_status && <small className="closure-event-reason">{Number(op.electronic_count ?? 1) > 1 ? `${op.electronic_count} boletas` : op.electronic_status === "CANCELLED" ? "Boleta no emitida" : op.electronic_number == null ? "Boleta pendiente" : `Boleta ${op.electronic_series}-${String(op.electronic_number).padStart(8,"0")}`} · <span className={`electronic-status ${electronicStatusClass(op.electronic_status)}`}>{electronicStatusLabel(op.electronic_status)}</span>{op.electronic_message && <> · {op.electronic_message}</>}{op.electronic_status === "ACCEPTED" && <> · <a href={`/api/branches/${op.branch_id}/operations/${op.id}/electronic-document/pdf`} target="_blank" rel="noreferrer">Ver PDF</a></>}</small>}</td>
+              {(onReceipt || onCancel || onRetryElectronic) && <td><div className="inline-actions">{onReceipt && <button className="mini-button" onClick={() => onReceipt(op)}><ReceiptText size={13} /> Ver</button>}{onRetryElectronic && op.status === "COMPLETED" && Number(op.electronic_retry_count ?? 0) > 0 && <button className="mini-button electronic-action-ready" disabled={processingIds.has(op.id)} onClick={() => void retry(op)}><RefreshCw size={12} className={processingIds.has(op.id) ? "electronic-action-spinner" : undefined}/>{processingIds.has(op.id) ? "Emitiendo…" : "Reintentar boleta"}</button>}{onCancel && op.status === "COMPLETED" && <button className="mini-button danger-mini" onClick={() => void onCancel(op)}>Anular</button>}</div></td>}
             </tr>
           ))}
-          {!operations.length && <tr><td colSpan={(onReceipt || onCancel) ? 9 : 8} className="empty-cell">No hay operaciones para mostrar.</td></tr>}
+          {!operations.length && <tr><td colSpan={(onReceipt || onCancel || onRetryElectronic) ? 9 : 8} className="empty-cell">No hay operaciones para mostrar.</td></tr>}
         </tbody>
       </table>
     </div>
@@ -1289,6 +1419,8 @@ function OperationModal({
   const [amount, setAmount] = useState("");
   const [reference, setReference] = useState("");
   const [customer, setCustomer] = useState("");
+  const [customerDocumentType, setCustomerDocumentType] = useState("DNI");
+  const [customerDocumentNumber, setCustomerDocumentNumber] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -1299,6 +1431,9 @@ function OperationModal({
       : Number(settings.commission_value)
     : 0;
   const net = Math.max(0, numericAmount - commission);
+  const asksForCustomerDocument = Boolean(settings?.electronic_enabled)
+    && settings?.electronic_emission_mode === "OPERATION"
+    && Math.min(commission, Number(settings?.electronic_max_amount_per_receipt ?? 500)) > 700;
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -1312,7 +1447,9 @@ function OperationModal({
           operationType: type,
           amount: numericAmount,
           referenceCode: reference || undefined,
-          customerName: customer || undefined
+          customerName: customer || undefined,
+          customerDocumentType: asksForCustomerDocument ? customerDocumentType : undefined,
+          customerDocumentNumber: asksForCustomerDocument ? customerDocumentNumber : undefined
         })
       });
       const result = await response.json();
@@ -1347,7 +1484,12 @@ function OperationModal({
             <small>{type === "YAPE_TO_CASH" || Boolean(settings?.require_cash_to_yape_reference) ? "Código/referencia obligatorio" : "Opcional"}</small>
           </label>
         </div>
-        <label>Cliente<input value={customer} onChange={(e) => setCustomer(e.target.value)} placeholder="Nombre opcional" /></label>
+        <label>Cliente<input value={customer} onChange={(e) => setCustomer(e.target.value)} placeholder="Nombre opcional" required={asksForCustomerDocument} /></label>
+        {asksForCustomerDocument && <div className="field-grid">
+          <label>Tipo de documento del comprador<select value={customerDocumentType} onChange={(e)=>setCustomerDocumentType(e.target.value)}><option value="DNI">DNI</option><option value="RUC">RUC</option><option value="CE">Carné de extranjería</option><option value="PASSPORT">Pasaporte</option></select></label>
+          <label>Número de documento<input value={customerDocumentNumber} onChange={(e)=>setCustomerDocumentNumber(e.target.value)} required placeholder="Documento del comprador" /></label>
+        </div>}
+        {Boolean(settings?.electronic_enabled) && settings?.electronic_emission_mode === "OPERATION" && Math.min(commission, Number(settings?.electronic_max_amount_per_receipt ?? 500)) <= 700 && <small>Las boletas se emitirán sin DNI porque cada una respetará el tope y será de hasta S/ 700.00.</small>}
         <div className="calculation">
           <div><span>Monto</span><strong>{currency(numericAmount)}</strong></div>
           <div><span>Comisión</span><strong>- {currency(commission)}</strong></div>
@@ -1409,6 +1551,9 @@ function CloseCashModal({ branchId, dashboard, onClose, onClosed }: { branchId: 
   const [cash, setCash] = useState("");
   const [wallet, setWallet] = useState("");
   const [notes, setNotes] = useState("");
+  const [customerName, setCustomerName] = useState("");
+  const [customerDocumentType, setCustomerDocumentType] = useState("DNI");
+  const [customerDocumentNumber, setCustomerDocumentNumber] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<null | {
@@ -1418,6 +1563,7 @@ function CloseCashModal({ branchId, dashboard, onClose, onClosed }: { branchId: 
     expectedWallet: number; declaredWallet: number; differenceWallet: number;
     operationCount: number; commissionTotal: number; staffShareTotal: number; partnerShareTotal: number; unassignedCommission: number;
     assignedTo: string | null; notes: string | null;
+    electronicDocument?: { status: string; message?: string; series?: string; correlativo?: number; partCount?: number } | null;
   }>(null);
 
   useEffect(() => {
@@ -1440,12 +1586,20 @@ function CloseCashModal({ branchId, dashboard, onClose, onClosed }: { branchId: 
   const cashDiff = Number(cash || 0) - expectedCash;
   const walletDiff = Number(wallet || 0) - expectedWallet;
   const hasDifference = Math.abs(cashDiff) >= 0.005 || Math.abs(walletDiff) >= 0.005;
+  const asksForCustomerDocument = Boolean(preview?.electronicEnabled)
+    && preview?.electronicEmissionMode === "CLOSURE"
+    && Number(preview?.electronicMaxAmountPerReceipt ?? 500) > 700
+    && Number(preview?.commissionTotal ?? 0) > 700;
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (!preview) return;
     if (hasDifference && notes.trim().length < 5) {
       setError("Cuando existe una diferencia debes escribir una observación de al menos 5 caracteres.");
+      return;
+    }
+    if (asksForCustomerDocument && (!customerName.trim() || !customerDocumentNumber.trim())) {
+      setError("La boleta superará S/ 700.00. Completa nombre y documento del comprador para continuar.");
       return;
     }
     setSaving(true);
@@ -1458,7 +1612,10 @@ function CloseCashModal({ branchId, dashboard, onClose, onClosed }: { branchId: 
         body: JSON.stringify({
           declaredCash: Number(cash || 0),
           declaredWallet: Number(wallet || 0),
-          notes: notes.trim() || undefined
+          notes: notes.trim() || undefined,
+          customerName: asksForCustomerDocument ? customerName.trim() : undefined,
+          customerDocumentType: asksForCustomerDocument ? customerDocumentType : undefined,
+          customerDocumentNumber: asksForCustomerDocument ? customerDocumentNumber.trim() : undefined
         })
       });
       const data = await response.json();
@@ -1512,6 +1669,10 @@ function CloseCashModal({ branchId, dashboard, onClose, onClosed }: { branchId: 
 
           {result.notes && <div className="closure-result-note"><span>Observación</span><strong>{result.notes}</strong></div>}
 
+          {result.electronicDocument && <div className={["PENDING","PARTIAL","UNKNOWN"].includes(result.electronicDocument.status) ? "friendly-info" : ["ERROR","CANCELLED"].includes(result.electronicDocument.status) ? "modal-error" : "success-message"}>
+            <ReceiptText size={16}/><span>{result.electronicDocument.message || `Boleta ${result.electronicDocument.status}.`}{result.electronicDocument.series && ` · ${result.electronicDocument.series}-${String(result.electronicDocument.correlativo ?? "").padStart(8,"0")}`}{Number(result.electronicDocument.partCount ?? 1) > 1 && ` · ${result.electronicDocument.partCount} boletas`}</span>
+          </div>}
+
           <div className="modal-actions">
             <button className="soft" onClick={() => window.open(`/api/branches/${branchId}/closures/${result.closureId}/pdf`, "_blank")}><Download size={15}/> Descargar PDF</button>
             <button className="primary" onClick={onClosed}>Finalizar cierre</button>
@@ -1537,6 +1698,15 @@ function CloseCashModal({ branchId, dashboard, onClose, onClosed }: { branchId: 
             <span>Ganancia del encargado</span>
             <strong>{currency(preview.commissionTotal)}</strong>
           </div>
+
+          {asksForCustomerDocument && <>
+            <div className="friendly-info"><ReceiptText size={16}/><span>El total de esta boleta supera S/ 700.00; SUNAT pide identificar al comprador. Hasta S/ 700.00 puede emitirse sin DNI.</span></div>
+            <label>Nombre del comprador<input value={customerName} onChange={(e)=>setCustomerName(e.target.value)} required /></label>
+            <div className="field-grid">
+              <label>Tipo de documento<select value={customerDocumentType} onChange={(e)=>setCustomerDocumentType(e.target.value)}><option value="DNI">DNI</option><option value="RUC">RUC</option><option value="CE">Carné de extranjería</option><option value="PASSPORT">Pasaporte</option></select></label>
+              <label>Número de documento<input value={customerDocumentNumber} onChange={(e)=>setCustomerDocumentNumber(e.target.value)} required /></label>
+            </div>
+          </>}
 
           <div className="field-grid">
             <label>Efectivo declarado<div className="input-prefix"><span>S/</span><input value={cash} onChange={(e) => setCash(e.target.value)} inputMode="decimal" required /></div><small className={Math.abs(cashDiff)<0.005?"green-text":"red-text"}>Diferencia: {currency(cashDiff)}</small></label>

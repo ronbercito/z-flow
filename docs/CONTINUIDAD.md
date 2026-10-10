@@ -3,8 +3,8 @@
 **Fecha de corte:** 10/10/2026
 **Repositorio:** `ronbercito/z-flow`
 **Rama publicada:** `main`
-**Checkpoint publicado:** `main` `c09fffeb`
-**Estado general:** la revisión del código y la preparación para instalación limpia se integraron en `main`. CI aprobó API, web y Docker. Factiliza permanece retirado. El LXC no se actualizó y la primera instalación en un contenedor limpio todavía debe ejecutarse.
+**Ramas integradas:** `main` contiene la revisión general y el flujo electrónico desarrollado en `develop`.
+**Estado general:** se integraron en `main` la revisión general, la preparación de instalación y la emisión electrónica por filial. ApiSunat permanece restringido a Desarrollo (`DEV_`). Verificar CI y el despliegue desde `main` antes de usarlo en el panel.
 
 ## Revisión general y preparación de instalación (10/10/2026)
 
@@ -22,14 +22,51 @@ Ejecutar como `root` en un contenedor limpio. En Proxmox LXC, Docker requiere `n
 
 **Pendiente operativo:** probar este comando en el contenedor de destino y validar que API y web queden saludables. Esa instalación real no se ha ejecutado desde este entorno.
 
-## Estado del README y ramas al 09/10/2026
+## Estado del README y ramas al 10/10/2026
 
 - La página principal de GitHub estaba en `main`, que antes solo mostraba el README inicial. La PR #2 se combinó para llevar el proyecto completo a `main`.
 - El README se redujo a una presentación del producto, funciones y tecnología. El manual operativo detallado queda en `docs/LOCAL_PRODUCTION.md`.
-- La PR #3 ya se combinó en `main`; `main` está en `16c6c82` y el README breve es visible en la portada.
-- Las bitácoras de esta sesión se actualizan en `develop`; después deben promocionarse a `main` mediante una PR para conservar el flujo de ramas.
+- La PR #3 publicó el README breve en `main`; la rama ahora también incluye la revisión general y la integración electrónica descritas más abajo.
+- La integración actual combinó el trabajo de `develop` con los commits propios de `main`, sin reescribir historial.
 
-## Cambio más reciente: retiro de Factiliza
+## Revisión general y preparación de instalación (09/10/2026)
+
+Se corrigieron problemas identificados antes de la primera instalación limpia:
+
+- Las instalaciones nuevas ya no cargan movimientos de muestra ni abren una caja automáticamente.
+- Las transacciones de apertura, operación y cierre quedan serializadas para evitar sesiones duplicadas o cierres con totales incompletos.
+- Se rechazan montos infinitos y valores mayores al rango de la base de datos.
+- Se quitó CORS abierto; el panel web y la API operan bajo el mismo origen.
+- Los permisos de cajero se limitan a su filial; no se pueden asignar permisos globales al rol.
+- El rate limit de acceso limpia intentos antiguos y limita la memoria que ocupa.
+- Backups con permisos privados; restauración de consola validada antes de importar, con copia previa y recuperación automática ante error.
+- `scripts/install-local.sh` instala en Debian/Ubuntu desde `main`; genera secretos, configura Docker, backups diarios y rotación.
+
+La instalación desde cero está documentada en `docs/LOCAL_PRODUCTION.md`. La compilación de API/web y la configuración de Docker deben quedar aprobadas en GitHub Actions antes de promover esta revisión a `main`. No instalar todavía desde `main` hasta que se confirme esa promoción.
+
+## Revisión general y preparación de instalación (09/10/2026)
+
+Se corrigieron problemas identificados antes de la primera instalación limpia:
+
+- Las instalaciones nuevas ya no cargan movimientos de muestra ni abren una caja automáticamente.
+- Las transacciones de apertura, operación y cierre quedan serializadas para evitar sesiones duplicadas o cierres con totales incompletos.
+- Se rechazan montos infinitos y valores mayores al rango de la base de datos.
+- Se quitó CORS abierto; el panel web y la API operan bajo el mismo origen.
+- Los permisos de cajero se limitan a su filial; no se pueden asignar permisos globales al rol.
+- El rate limit de acceso limpia intentos antiguos y limita la memoria que ocupa.
+- Backups con permisos privados; restauración de consola validada antes de importar, con copia previa y recuperación automática ante error.
+- `scripts/install-local.sh` instala en Debian/Ubuntu desde `main`; genera secretos, configura Docker, backups diarios y rotación.
+
+La instalación desde cero está documentada en `docs/LOCAL_PRODUCTION.md`. La compilación de API/web y la configuración de Docker deben quedar aprobadas en GitHub Actions antes de promover esta revisión a `main`. No instalar todavía desde `main` hasta que se confirme esa promoción.
+
+## Estado del README y ramas al 10/10/2026
+
+- La página principal de GitHub estaba en `main`, que antes solo mostraba el README inicial. La PR #2 se combinó para llevar el proyecto completo a `main`.
+- El README se redujo a una presentación del producto, funciones y tecnología. El manual operativo detallado queda en `docs/LOCAL_PRODUCTION.md`.
+- La PR #3 publicó el README breve en `main`; la rama ahora también incluye la revisión general y la integración electrónica descritas más abajo.
+- La integración actual combinó el trabajo de `develop` con los commits propios de `main`, sin reescribir historial.
+
+## Retiro de Factiliza
 
 El propietario decidió retirar Factiliza para evitar emitir comprobantes por medio de un proveedor cuya autorización no estaba confirmada.
 
@@ -37,8 +74,7 @@ El propietario decidió retirar Factiliza para evitar emitir comprobantes por me
 - Se conserva la consulta de registros/archivos electrónicos históricos de cada cierre, si existen.
 - La base conserva la tabla histórica `factiliza_documents`; se eliminan las tablas de configuración y correlativos del proveedor.
 - El actualizador `scripts/update-local.sh` elimina las variables antiguas `FACTILIZA_*` del archivo `.env` al actualizar.
-- Hasta definir y verificar otro proveedor y el tratamiento tributario, los documentos generados por Z-FLOW son comprobantes internos de control, no comprobantes electrónicos SUNAT.
-- Próximo paso de despliegue: ejecutar `bash scripts/update-local.sh` en `/opt/z-flow` y comprobar que Integraciones ya no muestre Factiliza, que el estado del sistema sea saludable y que los registros electrónicos históricos continúen consultables.
+- La integración que se añadió después usa ApiSunat en Desarrollo y solo emite documentos de prueba, que no se envían a SUNAT ni tienen valor tributario.
 
 Los cambios de caja que figuraban como modificaciones locales antes de sincronizar el checkout ya están incluidos en `origin/develop`; el checkout local se alineó sobre esa versión y el commit de estilo de usuario ya estaba aplicado allí.
 
@@ -64,17 +100,18 @@ El primer uso de «Mi Negocio» mostró `Unexpected token '<'` al guardar una id
 
 ## 1. Regla principal para continuar el desarrollo
 
-Toda corrección o función debe hacerse **primero en el repositorio**.
+Desarrollar primero en `develop`; después de CI integrar a `main` y desplegar desde esa rama. Toda corrección debe quedar versionada.
 
 No aplicar soluciones permanentes solo en `/opt/z-flow`.
 
 Secuencia obligatoria:
 
-1. modificar `develop`;
-2. dejar pasar CI;
-3. actualizar el LXC desde Git;
-4. probar;
-5. si aparece un problema, corregir nuevamente en el repositorio.
+1. desarrollar los cambios en `develop`;
+2. validar compilación y CI;
+3. integrar a `main` conservando los cambios de ambas ramas;
+4. actualizar el entorno objetivo desde `main`;
+5. probar emisión, recuperación, archivos y permisos por rol;
+6. corregir en el repositorio si aparece un problema.
 
 Esto es importante porque después Z-FLOW debe instalarse limpio en otro servidor sin depender de arreglos manuales.
 
@@ -121,8 +158,8 @@ Para una actualización manual controlada:
 
 ```bash
 cd /opt/z-flow
-git checkout develop
-git pull --ff-only origin develop
+git checkout main
+git pull --ff-only origin main
 docker compose up -d --build
 docker compose ps
 ```
@@ -417,4 +454,13 @@ Si se abre un chat nuevo, empezar leyendo:
 
 El siguiente trabajo no es rediseñar usuarios ni volver a socios.
 
-**Siguiente objetivo:** ejecutar la primera instalación limpia con el instalador publicado en `main` y validar la operación en el contenedor de destino.
+**Siguiente objetivo:** revisar CI de la integración en `main`, actualizar el entorno objetivo y validar emisión, reintentos de filial, consulta administrativa y archivos usando ApiSunat Desarrollo.
+
+## Estado actual de emisión electrónica por filial (10/10/2026)
+
+- Cada operación se emite desde la filial cuando está activa la emisión automática. La filial puede consultar y reintentar sus pendientes; un reintento en curso bloquea el botón para evitar doble clic.
+- Los pendientes o errores conservan el estado de la operación y no se muestran como boletas aceptadas. Si ApiSunat no confirma el resultado, el sistema consulta el estado antes de volver a enviar.
+- El administrador de Z-FLOW tiene acceso de consulta: puede ver si el documento fue aceptado, quedó pendiente o devolvió un error y abrir los archivos archivados. No debe emitir ni reintentar desde el panel propietario.
+- Los PDF, XML y CDR se guardan en el almacenamiento local de Z-FLOW bajo `backups/boletas-electronicas/filial-<id>/...`.
+- El tope configurado divide la comisión en boletas que no exceden el máximo. Se pide identificación del comprador si el importe individual de una boleta supera S/ 700.00; con el tope de S/ 500.00 se usa consumidor final sin DNI cuando no hay datos del comprador.
+- ApiSunat está limitado a Desarrollo (`DEV_`); los documentos de prueba no tienen valor tributario. Confirmar el tratamiento contable e IGV antes de habilitar producción.

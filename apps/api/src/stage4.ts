@@ -672,12 +672,24 @@ export async function registerStage4Routes(app: FastifyInstance) {
     const op = rows[0];
     if (op.status !== "COMPLETED") return reply.code(409).send({ error: "Solo se puede anular una operación completada" });
     if (op.session_status !== "OPEN") return reply.code(409).send({ error: "El turno ya fue cerrado. La corrección debe hacerla el propietario mediante reverso" });
+    const [electronicRows] = await db.query<any[]>(`SELECT status FROM electronic_documents
+      WHERE branch_id=? AND operation_id=? AND status IN ('PENDING','ACCEPTED','UNKNOWN') LIMIT 1`, [parsedParams.data.branchId, op.id]);
+    if (electronicRows.length) return reply.code(409).send({ error: "Esta operación ya tiene una boleta enviada o aceptada. Regulariza primero el comprobante electrónico antes de anularla." });
 
     const connection = await db.getConnection();
     try {
       await connection.beginTransaction();
       await connection.execute("UPDATE operations SET status='CANCELLED' WHERE id=?", [op.id]);
+      const [inFlightDocuments] = await connection.query<any[]>(`SELECT id FROM electronic_documents
+        WHERE branch_id=? AND operation_id=? AND status IN ('PENDING','ACCEPTED','UNKNOWN') LIMIT 1`, [parsedParams.data.branchId, op.id]);
+      if (inFlightDocuments.length) {
+        await connection.rollback();
+        return reply.code(409).send({ error: "La emisión de la boleta comenzó antes de anular la operación. Regulariza primero el comprobante electrónico." });
+      }
       await connection.execute("UPDATE receipts SET status='VOID' WHERE operation_id=?", [op.id]);
+      await connection.execute(`UPDATE electronic_documents
+        SET status='CANCELLED',provider_message='Operación anulada antes de emitir; boleta pendiente cancelada.'
+        WHERE branch_id=? AND operation_id=? AND (status='QUEUED' OR (status='ERROR' AND provider_document_id IS NULL) OR status='EXCEPTION')`, [parsedParams.data.branchId, op.id]);
       await connection.execute(`
         INSERT INTO operation_events (operation_id,branch_id,user_id,action,reason)
         VALUES (?,?,?,'CANCEL',?)
@@ -711,12 +723,24 @@ export async function registerStage4Routes(app: FastifyInstance) {
     if (!["COMPLETED","CANCELLED"].includes(op.status)) {
       return reply.code(409).send({ error: "Esta operación ya fue revertida o no admite reverso" });
     }
+    const [electronicRows] = await db.query<any[]>(`SELECT status FROM electronic_documents
+      WHERE branch_id=? AND operation_id=? AND status IN ('PENDING','ACCEPTED','UNKNOWN') LIMIT 1`, [op.branch_id, op.id]);
+    if (electronicRows.length) return reply.code(409).send({ error: "Esta operación ya tiene una boleta enviada o aceptada. Regulariza primero el comprobante electrónico antes de revertirla." });
 
     const connection = await db.getConnection();
     try {
       await connection.beginTransaction();
       await connection.execute("UPDATE operations SET status='REVERSED' WHERE id=?", [op.id]);
+      const [inFlightDocuments] = await connection.query<any[]>(`SELECT id FROM electronic_documents
+        WHERE branch_id=? AND operation_id=? AND status IN ('PENDING','ACCEPTED','UNKNOWN') LIMIT 1`, [op.branch_id, op.id]);
+      if (inFlightDocuments.length) {
+        await connection.rollback();
+        return reply.code(409).send({ error: "La emisión de la boleta comenzó antes de revertir la operación. Regulariza primero el comprobante electrónico." });
+      }
       await connection.execute("UPDATE receipts SET status='VOID' WHERE operation_id=?", [op.id]);
+      await connection.execute(`UPDATE electronic_documents
+        SET status='CANCELLED',provider_message='Operación revertida antes de emitir; boleta pendiente cancelada.'
+        WHERE branch_id=? AND operation_id=? AND (status='QUEUED' OR (status='ERROR' AND provider_document_id IS NULL) OR status='EXCEPTION')`, [op.branch_id, op.id]);
       await connection.execute(`
         INSERT INTO operation_events (operation_id,branch_id,user_id,action,reason)
         VALUES (?,?,?,'REVERSE',?)
