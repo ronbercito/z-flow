@@ -353,6 +353,27 @@ function App() {
     if (authUser && authUser.role.code !== "OWNER" && branchId) void load();
   }, [authUser?.id, authUser?.role.code, branchId]);
 
+  // Keep the branch operation table in sync while ApiSunat validates a document.
+  // This refresh is intentionally silent so it does not replace the page with a loader.
+  useEffect(() => {
+    if (page !== "operations" || !branchId || !operations.some((operation) => operation.electronic_status === "PENDING")) return;
+    let active = true;
+    let checking = false;
+    const refreshStatuses = async () => {
+      if (checking) return;
+      checking = true;
+      try {
+        const response = await fetch(`/api/branches/${branchId}/operations`, { credentials: "same-origin" });
+        if (!response.ok) return;
+        const result = await response.json();
+        if (active) setOperations(result.operations ?? []);
+      } catch { /* A later refresh can recover a temporary connection issue. */ }
+      finally { checking = false; }
+    };
+    const timer = window.setInterval(() => { void refreshStatuses(); }, 4000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [page, branchId, operations.some((operation) => operation.electronic_status === "PENDING")]);
+
   useEffect(() => {
     if (!authUser || authUser.role.code === "OWNER" || !branchId) return;
     let active = true;
@@ -1661,4 +1682,3 @@ function ReceiptModal({ branchId, operation, branchName, businessName, onClose }
 }
 
 export default App;
-

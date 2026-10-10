@@ -316,7 +316,9 @@ async function issueDocument(input: {
 
 async function refreshDocument(branchId: number, sourceId: number, sourceType: "CLOSURE" | "OPERATION", partNumber: number, documentId: string, series: string, number: number, fileName: string) {
   const key = sourceType === "CLOSURE" ? "closure_id" : "operation_id";
-  for (let attempt = 0; attempt < 6; attempt++) {
+  // ApiSunat may take longer than a few seconds to validate. Keep checking for
+  // up to five minutes so the stored state and archived files reach a final result.
+  for (let attempt = 0; attempt < 60; attempt++) {
     try {
       await new Promise((resolve) => setTimeout(resolve, attempt ? 5000 : 2500));
       const result = await apiJson(`${APISUNAT_URL}/documents/${encodeURIComponent(documentId)}/getById`);
@@ -516,4 +518,3 @@ export async function registerElectronicRoutes(app: FastifyInstance) {
   });
 
 }
-
