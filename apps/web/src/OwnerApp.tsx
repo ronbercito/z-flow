@@ -2368,9 +2368,30 @@ function BranchDetailModal({
     try {
       const result = await api<{ remaining: number; results: Array<{ status: string; message?: string }> }>(`/api/admin/branches/${branchId}/electronic-documents/${sourceType}/${sourceId}/process-pending`, { method: "POST" });
       const failed = result.results.find((item) => item.status === "ERROR");
-      if (!failed) setMessage("Reintento enviado. La boleta está en validación; el estado se actualizará en esta tabla.");
+      if (!failed) setMessage("Reintento enviado. Consultando la respuesta de ApiSunat…");
       await loadDetail();
       if (failed) setError(failed.message || "No se pudo enviar la boleta. Revisa los datos de ApiSunat.");
+      else if (result.results.some((item) => item.status === "PENDING")) {
+        let latestDocuments: ElectronicArchiveDocument[] = [];
+        for (let attempt = 0; attempt < 10; attempt++) {
+          await new Promise((resolve) => setTimeout(resolve, 3000));
+          try {
+            const archives = await api<{ documents: ElectronicArchiveDocument[] }>(`/api/admin/branches/${branchId}/electronic-documents`);
+            latestDocuments = archives.documents;
+            setDetail((current) => current ? { ...current, electronicDocuments: archives.documents } : current);
+            const sourceDocuments = archives.documents.filter((item) => sourceType === "closure" ? item.closure_id === sourceId : item.operation_id === sourceId);
+            if (sourceDocuments.length && sourceDocuments.every((item) => item.status !== "PENDING")) break;
+          } catch { /* Keep checking; the next refresh can recover a temporary network error. */ }
+        }
+        const sourceDocuments = latestDocuments.filter((item) => sourceType === "closure" ? item.closure_id === sourceId : item.operation_id === sourceId);
+        if (sourceDocuments.length && sourceDocuments.every((item) => item.status === "ACCEPTED")) {
+          setMessage("Boleta aceptada por ApiSunat. PDF, XML y CDR guardados en el panel.");
+        } else if (sourceDocuments.some((item) => item.status === "PENDING")) {
+          setMessage("ApiSunat aún está validando la boleta. El estado sigue visible en esta tabla.");
+        } else if (sourceDocuments.some((item) => ["EXCEPTION", "REJECTED", "ERROR"].includes(item.status))) {
+          setMessage("ApiSunat respondió con una observación. Revisa el estado y el detalle en la tabla.");
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudieron emitir las boletas pendientes.");
     } finally {
