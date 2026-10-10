@@ -254,8 +254,10 @@ tr:last-child td { border-bottom:0; }
 .mini-button:disabled { cursor: not-allowed; opacity: .52; }
 .mini-button.electronic-action-ready { border-color:#8bb8ff; background:#f1f7ff; color:#1758c7; animation: electronic-action-ready 2.2s ease-in-out infinite; }
 .mini-button.electronic-action-ready:hover { background:#e5f0ff; border-color:#4f91f5; }
+.electronic-action-spinner { animation: electronic-action-spin .8s linear infinite; }
+@keyframes electronic-action-spin { to { transform:rotate(360deg); } }
 @keyframes electronic-action-ready { 0%,100% { box-shadow:0 0 0 0 rgba(37,99,235,0); } 50% { box-shadow:0 0 0 3px rgba(37,99,235,.14); } }
-@media (prefers-reduced-motion: reduce) { .mini-button.electronic-action-ready { animation:none; } }
+@media (prefers-reduced-motion: reduce) { .mini-button.electronic-action-ready,.electronic-action-spinner { animation:none; } }
 .empty-cell { text-align: center; padding: 24px; color: #96a2b1; }
 
 .detail-grid {
@@ -2497,3 +2499,4 @@ tr:last-child td { border-bottom:0; }
 .invoice-archive-notice small { color:#16805a; font-size:9px; }
 
 .closure-no-invoice { color:#8b98aa; font-size:8px; white-space:nowrap; }
+
