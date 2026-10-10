@@ -2475,6 +2475,7 @@ tr:last-child td { border-bottom:0; }
 .electronic-status.validating { color:#1758c7; background:#eaf2ff; }
 .electronic-status.queued { color:#9a6500; background:#fff4d6; }
 .electronic-status.failed { color:#b42318; background:#fff0ee; }
+.electronic-status.cancelled { color:#52627a; background:#edf1f6; }
 .electronic-status.unknown { color:#52627a; background:#edf1f6; }
 .closure-detail-footer { display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; padding:10px 12px; border-top:1px solid #e8edf4; }
 .closure-detail-message,.closure-detail-error { padding:16px; color:#718198; font-size:10px; }

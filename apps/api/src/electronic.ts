@@ -145,7 +145,7 @@ export async function ensureElectronicSchema() {
     customer_name VARCHAR(140) NOT NULL,
     description VARCHAR(250) NOT NULL DEFAULT 'Comision por servicio',
     amount DECIMAL(14,2) NOT NULL,
-    status ENUM('QUEUED','PENDING','ACCEPTED','REJECTED','EXCEPTION','ERROR','UNKNOWN') NOT NULL DEFAULT 'PENDING',
+    status ENUM('QUEUED','PENDING','ACCEPTED','REJECTED','EXCEPTION','ERROR','UNKNOWN','CANCELLED') NOT NULL DEFAULT 'PENDING',
     provider_document_id VARCHAR(80) NULL,
     provider_code VARCHAR(40) NULL,
     provider_message VARCHAR(1000) NULL,
@@ -170,9 +170,12 @@ export async function ensureElectronicSchema() {
   if (!documentColumns.some((column) => column.Field === "description")) await db.query("ALTER TABLE electronic_documents ADD COLUMN description VARCHAR(250) NOT NULL DEFAULT 'Comision por servicio' AFTER customer_name");
   if (documentColumns.some((column) => column.Field === "correlativo" && String(column.Null) !== "YES")) await db.query("ALTER TABLE electronic_documents MODIFY correlativo BIGINT UNSIGNED NULL");
   const statusColumn = documentColumns.find((column) => column.Field === "status");
-  if (statusColumn && !String(statusColumn.Type).includes("QUEUED")) {
-    await db.query("ALTER TABLE electronic_documents MODIFY status ENUM('QUEUED','PENDING','ACCEPTED','REJECTED','EXCEPTION','ERROR','UNKNOWN') NOT NULL DEFAULT 'PENDING'");
+  if (statusColumn && !String(statusColumn.Type).includes("CANCELLED")) {
+    await db.query("ALTER TABLE electronic_documents MODIFY status ENUM('QUEUED','PENDING','ACCEPTED','REJECTED','EXCEPTION','ERROR','UNKNOWN','CANCELLED') NOT NULL DEFAULT 'PENDING'");
   }
+  await db.query(`UPDATE electronic_documents ed JOIN operations o ON o.id=ed.operation_id
+    SET ed.status='CANCELLED',ed.provider_message='Operación anulada o revertida antes de emitir; boleta pendiente cancelada.'
+    WHERE o.status IN ('CANCELLED','REVERSED') AND ed.status='QUEUED'`);
   const [indexes] = await db.query<any[]>("SHOW INDEX FROM electronic_documents");
   const indexNames = new Set(indexes.map((index) => String(index.Key_name)));
   if (indexNames.has("uq_electronic_closure")) await db.query("ALTER TABLE electronic_documents DROP INDEX uq_electronic_closure");
@@ -399,6 +402,13 @@ function currencyText(amount: number) { return `S/ ${money(amount).toFixed(2)}`;
 
 async function processQueuedDocuments(branchId: number, sourceType: "CLOSURE" | "OPERATION", sourceId: number, createdBy: number) {
   const sourceField = sourceType === "CLOSURE" ? "closure_id" : "operation_id";
+  if (sourceType === "OPERATION") {
+    const [operations] = await db.query<any[]>("SELECT status FROM operations WHERE id=? AND branch_id=? LIMIT 1", [sourceId, branchId]);
+    if (!operations.length || operations[0].status !== "COMPLETED") {
+      await db.execute(`UPDATE electronic_documents SET status='CANCELLED',provider_message='Operación anulada o revertida antes de emitir; boleta pendiente cancelada.' WHERE branch_id=? AND operation_id=? AND status='QUEUED'`, [branchId, sourceId]);
+      return [];
+    }
+  }
   const [queued] = await db.query<any[]>(`SELECT id,part_number,part_count,amount,customer_document_type,customer_document_number,customer_name,description FROM electronic_documents WHERE branch_id=? AND ${sourceField}=? AND (status='QUEUED' OR (status='ERROR' AND provider_document_id IS NULL) OR status='EXCEPTION') ORDER BY part_number`, [branchId, sourceId]);
   const results: EmissionResult[] = [];
   for (const item of queued) {
@@ -481,10 +491,11 @@ export async function registerElectronicRoutes(app: FastifyInstance) {
     const parsed = ownerParams.safeParse(request.params);
     if (!parsed.success) return reply.code(400).send({ error: "Filial inválida" });
     if (!await requireOwner(request, reply)) return;
-    const [rows] = await db.query<any[]>(`SELECT id,closure_id,operation_id,series,correlativo,part_number,part_count,amount,status,provider_message,provider_document_id,created_at,0 AS legacy
+    const [rows] = await db.query<any[]>(`SELECT id,closure_id,operation_id,series,correlativo,part_number,part_count,amount,status,provider_message,provider_document_id,
+        (SELECT o.status FROM operations o WHERE o.id=electronic_documents.operation_id) AS operation_status,created_at,0 AS legacy
       FROM electronic_documents WHERE branch_id=?
       UNION ALL
-      SELECT id,closure_id,NULL AS operation_id,series,correlativo,1 AS part_number,1 AS part_count,amount,status,provider_message,NULL AS provider_document_id,created_at,1 AS legacy
+      SELECT id,closure_id,NULL AS operation_id,series,correlativo,1 AS part_number,1 AS part_count,amount,status,provider_message,NULL AS provider_document_id,NULL AS operation_status,created_at,1 AS legacy
       FROM factiliza_documents WHERE branch_id=?
       ORDER BY created_at DESC,id DESC LIMIT 300`, [parsed.data.branchId, parsed.data.branchId]);
     const documents = await Promise.all(rows.map(async (row) => {
@@ -492,7 +503,7 @@ export async function registerElectronicRoutes(app: FastifyInstance) {
       const folder = join(process.env.ZFLOW_BACKUP_DIR || "/backups", "boletas-electronicas", `filial-${parsed.data.branchId}`, sourceFolder);
       const number = row.correlativo == null ? "" : `${row.series}-${String(row.correlativo).padStart(row.legacy ? 6 : 8, "0")}`;
       const exists = async (ext: string) => { try { await access(join(folder, `${number}.${ext}`)); return true; } catch { return false; } };
-      return { ...row, canRetry: !row.legacy && (row.status === "QUEUED" || (row.status === "ERROR" && row.provider_document_id == null) || row.status === "EXCEPTION"), storedFiles: row.status === "ACCEPTED" && row.correlativo != null
+      return { ...row, canRetry: !row.legacy && (row.operation_id == null || row.operation_status === "COMPLETED") && (row.status === "QUEUED" || (row.status === "ERROR" && row.provider_document_id == null) || row.status === "EXCEPTION"), storedFiles: row.status === "ACCEPTED" && row.correlativo != null
         ? { pdf: await exists("pdf"), xml: await exists("xml"), cdr: await exists("cdr.zip"), folder: `boletas-electronicas/filial-${parsed.data.branchId}/${sourceFolder}` }
         : { pdf: false, xml: false, cdr: false, folder: `boletas-electronicas/filial-${parsed.data.branchId}/${sourceFolder}` } };
     }));

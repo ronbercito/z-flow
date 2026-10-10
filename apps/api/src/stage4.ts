@@ -678,6 +678,9 @@ export async function registerStage4Routes(app: FastifyInstance) {
       await connection.beginTransaction();
       await connection.execute("UPDATE operations SET status='CANCELLED' WHERE id=?", [op.id]);
       await connection.execute("UPDATE receipts SET status='VOID' WHERE operation_id=?", [op.id]);
+      await connection.execute(`UPDATE electronic_documents
+        SET status='CANCELLED',provider_message='Operación anulada antes de emitir; boleta pendiente cancelada.'
+        WHERE branch_id=? AND operation_id=? AND status='QUEUED'`, [parsedParams.data.branchId, op.id]);
       await connection.execute(`
         INSERT INTO operation_events (operation_id,branch_id,user_id,action,reason)
         VALUES (?,?,?,'CANCEL',?)
@@ -717,6 +720,9 @@ export async function registerStage4Routes(app: FastifyInstance) {
       await connection.beginTransaction();
       await connection.execute("UPDATE operations SET status='REVERSED' WHERE id=?", [op.id]);
       await connection.execute("UPDATE receipts SET status='VOID' WHERE operation_id=?", [op.id]);
+      await connection.execute(`UPDATE electronic_documents
+        SET status='CANCELLED',provider_message='Operación revertida antes de emitir; boleta pendiente cancelada.'
+        WHERE branch_id=? AND operation_id=? AND status='QUEUED'`, [op.branch_id, op.id]);
       await connection.execute(`
         INSERT INTO operation_events (operation_id,branch_id,user_id,action,reason)
         VALUES (?,?,?,'REVERSE',?)

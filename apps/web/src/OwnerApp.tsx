@@ -425,6 +425,7 @@ type ElectronicArchiveDocument = {
   amount: number;
   status: string;
   provider_message: string | null;
+  operation_status?: string | null;
   canRetry?: boolean;
   created_at: string;
   storedFiles: { pdf: boolean; xml: boolean; cdr: boolean; folder: string };
@@ -465,6 +466,7 @@ function electronicStatusLabel(status: string) {
     REJECTED: "Rechazada",
     EXCEPTION: "Requiere corrección",
     ERROR: "Error de envío",
+    CANCELLED: "Emisión cancelada",
     UNKNOWN: "Estado por confirmar"
   };
   return labels[status] ?? "Estado por confirmar";
@@ -475,6 +477,7 @@ function electronicStatusClass(status: string) {
   if (status === "PENDING") return "validating";
   if (status === "QUEUED") return "queued";
   if (["REJECTED", "EXCEPTION", "ERROR"].includes(status)) return "failed";
+  if (status === "CANCELLED") return "cancelled";
   return "unknown";
 }
 

@@ -237,6 +237,7 @@ function electronicStatusLabel(status: string) {
     REJECTED: "Rechazada",
     EXCEPTION: "Requiere corrección",
     ERROR: "Error de envío",
+    CANCELLED: "Emisión cancelada",
     UNKNOWN: "Estado por confirmar"
   };
   return labels[status] ?? "Estado por confirmar";
@@ -247,6 +248,7 @@ function electronicStatusClass(status: string) {
   if (status === "PENDING") return "validating";
   if (status === "QUEUED") return "queued";
   if (["REJECTED", "EXCEPTION", "ERROR"].includes(status)) return "failed";
+  if (status === "CANCELLED") return "cancelled";
   return "unknown";
 }
 
@@ -1283,7 +1285,7 @@ function OperationsTable({ operations, onReceipt, onCancel }: { operations: Oper
               <td>{currency(op.amount)}</td>
               <td>{currency(op.commission)}</td>
               <td>{currency(op.net_amount)}</td>
-            <td><span className={`status ${operationStatusClass(op.status)}`}><i />{operationStatusLabel(op.status)}</span>{op.electronic_status && <small className="closure-event-reason">{Number(op.electronic_count ?? 1) > 1 ? `${op.electronic_count} boletas` : op.electronic_number == null ? "Boleta pendiente" : `Boleta ${op.electronic_series}-${String(op.electronic_number).padStart(8,"0")}`} · <span className={`electronic-status ${electronicStatusClass(op.electronic_status)}`}>{electronicStatusLabel(op.electronic_status)}</span>{op.electronic_status === "ACCEPTED" && <> · <a href={`/api/branches/${op.branch_id}/operations/${op.id}/electronic-document/pdf`} target="_blank" rel="noreferrer">Ver PDF</a></>}</small>}</td>
+            <td><span className={`status ${operationStatusClass(op.status)}`}><i />{operationStatusLabel(op.status)}</span>{op.electronic_status && <small className="closure-event-reason">{Number(op.electronic_count ?? 1) > 1 ? `${op.electronic_count} boletas` : op.electronic_status === "CANCELLED" ? "Boleta no emitida" : op.electronic_number == null ? "Boleta pendiente" : `Boleta ${op.electronic_series}-${String(op.electronic_number).padStart(8,"0")}`} · <span className={`electronic-status ${electronicStatusClass(op.electronic_status)}`}>{electronicStatusLabel(op.electronic_status)}</span>{op.electronic_status === "ACCEPTED" && <> · <a href={`/api/branches/${op.branch_id}/operations/${op.id}/electronic-document/pdf`} target="_blank" rel="noreferrer">Ver PDF</a></>}</small>}</td>
               {(onReceipt || onCancel) && <td><div className="inline-actions">{onReceipt && <button className="mini-button" onClick={() => onReceipt(op)}><ReceiptText size={13} /> Ver</button>}{onCancel && op.status === "COMPLETED" && <button className="mini-button danger-mini" onClick={() => void onCancel(op)}>Anular</button>}</div></td>}
             </tr>
           ))}
