@@ -535,7 +535,11 @@ export async function registerReportRoutes(app: FastifyInstance) {
     const [rows] = await db.query<any[]>(`SELECT dc.id, dc.branch_id, dc.cash_session_id,
       dc.operation_count, dc.commission_total, dc.expected_cash, dc.declared_cash,
       dc.expected_wallet, dc.declared_wallet, dc.difference_cash, dc.difference_wallet,
-      dc.notes, dc.closed_at, u.full_name AS closed_by, b.name AS branch_name
+      dc.notes, dc.closed_at, u.full_name AS closed_by, b.name AS branch_name,
+      (SELECT ed.status FROM electronic_documents ed WHERE ed.closure_id=dc.id AND ed.branch_id=dc.branch_id ORDER BY CASE WHEN ed.status IN ('ERROR','EXCEPTION','QUEUED','PENDING') THEN 0 ELSE 1 END, ed.part_number LIMIT 1) AS electronic_status,
+      (SELECT ed.provider_message FROM electronic_documents ed WHERE ed.closure_id=dc.id AND ed.branch_id=dc.branch_id ORDER BY CASE WHEN ed.status IN ('ERROR','EXCEPTION','QUEUED','PENDING') THEN 0 ELSE 1 END, ed.part_number LIMIT 1) AS electronic_message,
+      (SELECT COUNT(*) FROM electronic_documents ed WHERE ed.closure_id=dc.id AND ed.branch_id=dc.branch_id
+        AND (ed.status='QUEUED' OR (ed.status='ERROR' AND ed.provider_document_id IS NULL) OR ed.status='EXCEPTION')) AS electronic_retry_count
       FROM daily_closures dc JOIN branches b ON b.id=dc.branch_id
       LEFT JOIN users u ON u.id=dc.closed_by_user_id
       WHERE ${conditions.join(" AND ")} ORDER BY dc.closed_at DESC LIMIT 250`, params);

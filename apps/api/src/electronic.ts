@@ -4,7 +4,7 @@ import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { db } from "./db.js";
-import { canReadBranch, requireAuth } from "./auth.js";
+import { canReadBranch, canWriteBranch, requireAuth } from "./auth.js";
 
 const APISUNAT_URL = "https://back.apisunat.com";
 const seriesSchema = z.string().trim().toUpperCase().regex(/^B[A-Z0-9]{3}$/,
@@ -476,15 +476,28 @@ export async function registerElectronicRoutes(app: FastifyInstance) {
     return { ok: true, tokenConfigured: Boolean(tokenCipher) };
   });
 
-  app.post("/api/admin/branches/:branchId/electronic-documents/:sourceType/:sourceId/process-pending", async (request, reply) => {
+  app.post("/api/branches/:branchId/electronic-documents/:sourceType/:sourceId/process-pending", async (request, reply) => {
     const parsed = z.object({ branchId: z.coerce.number().int().positive(), sourceType: z.enum(["closure", "operation"]), sourceId: z.coerce.number().int().positive() }).safeParse(request.params);
     if (!parsed.success) return reply.code(400).send({ error: "Solicitud inválida" });
-    const auth = await requireOwner(request, reply);
+    const auth = await requireAuth(request, reply);
     if (!auth) return;
+    if (auth.roleCode === "OWNER" || !canWriteBranch(auth, parsed.data.branchId)) {
+      return reply.code(403).send({ error: "La emisión y los reintentos se gestionan desde la filial." });
+    }
     const sourceType = parsed.data.sourceType === "closure" ? "CLOSURE" : "OPERATION";
+    if (sourceType === "CLOSURE") {
+      const [closures] = await db.query<any[]>("SELECT id FROM daily_closures WHERE id=? AND branch_id=? LIMIT 1", [parsed.data.sourceId, parsed.data.branchId]);
+      if (!closures.length) return reply.code(404).send({ error: "Cierre no encontrado en esta filial." });
+    }
     const results = await processQueuedDocuments(parsed.data.branchId, sourceType, parsed.data.sourceId, auth.userId);
     const [remaining] = await db.query<any[]>(`SELECT COUNT(*) AS count FROM electronic_documents WHERE branch_id=? AND ${sourceType === "CLOSURE" ? "closure_id" : "operation_id"}=? AND (status='QUEUED' OR (status='ERROR' AND provider_document_id IS NULL) OR status='EXCEPTION')`, [parsed.data.branchId, parsed.data.sourceId]);
     return { results, remaining: Number(remaining[0]?.count ?? 0) };
+  });
+
+  app.post("/api/admin/branches/:branchId/electronic-documents/:sourceType/:sourceId/process-pending", async (request, reply) => {
+    const auth = await requireOwner(request, reply);
+    if (!auth) return;
+    return reply.code(403).send({ error: "La emisión y los reintentos deben realizarse desde la filial." });
   });
 
   app.get("/api/admin/branches/:branchId/electronic-documents", async (request, reply) => {
