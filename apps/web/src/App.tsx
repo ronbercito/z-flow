@@ -229,6 +229,27 @@ function operationStatusClass(status: string) {
   return "pending";
 }
 
+function electronicStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    QUEUED: "Pendiente de emisión",
+    PENDING: "En validación",
+    ACCEPTED: "Aceptada",
+    REJECTED: "Rechazada",
+    EXCEPTION: "Requiere corrección",
+    ERROR: "Error de envío",
+    UNKNOWN: "Estado por confirmar"
+  };
+  return labels[status] ?? "Estado por confirmar";
+}
+
+function electronicStatusClass(status: string) {
+  if (status === "ACCEPTED") return "accepted";
+  if (status === "PENDING") return "validating";
+  if (status === "QUEUED") return "queued";
+  if (["REJECTED", "EXCEPTION", "ERROR"].includes(status)) return "failed";
+  return "unknown";
+}
+
 function App() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
@@ -1241,7 +1262,7 @@ function OperationsTable({ operations, onReceipt, onCancel }: { operations: Oper
               <td>{currency(op.amount)}</td>
               <td>{currency(op.commission)}</td>
               <td>{currency(op.net_amount)}</td>
-            <td><span className={`status ${operationStatusClass(op.status)}`}><i />{operationStatusLabel(op.status)}</span>{op.electronic_status && <small className="closure-event-reason">{Number(op.electronic_count ?? 1) > 1 ? `${op.electronic_count} boletas` : op.electronic_number == null ? "Boleta pendiente" : `Boleta ${op.electronic_series}-${String(op.electronic_number).padStart(8,"0")}`} · {op.electronic_status === "QUEUED" ? "En cola de emisión" : op.electronic_status === "ACCEPTED" ? <a href={`/api/branches/${op.branch_id}/operations/${op.id}/electronic-document/pdf`} target="_blank" rel="noreferrer">Ver PDF</a> : op.electronic_status}</small>}</td>
+            <td><span className={`status ${operationStatusClass(op.status)}`}><i />{operationStatusLabel(op.status)}</span>{op.electronic_status && <small className="closure-event-reason">{Number(op.electronic_count ?? 1) > 1 ? `${op.electronic_count} boletas` : op.electronic_number == null ? "Boleta pendiente" : `Boleta ${op.electronic_series}-${String(op.electronic_number).padStart(8,"0")}`} · <span className={`electronic-status ${electronicStatusClass(op.electronic_status)}`}>{electronicStatusLabel(op.electronic_status)}</span>{op.electronic_status === "ACCEPTED" && <> · <a href={`/api/branches/${op.branch_id}/operations/${op.id}/electronic-document/pdf`} target="_blank" rel="noreferrer">Ver PDF</a></>}</small>}</td>
               {(onReceipt || onCancel) && <td><div className="inline-actions">{onReceipt && <button className="mini-button" onClick={() => onReceipt(op)}><ReceiptText size={13} /> Ver</button>}{onCancel && op.status === "COMPLETED" && <button className="mini-button danger-mini" onClick={() => void onCancel(op)}>Anular</button>}</div></td>}
             </tr>
           ))}
@@ -1640,3 +1661,4 @@ function ReceiptModal({ branchId, operation, branchName, businessName, onClose }
 }
 
 export default App;
+
