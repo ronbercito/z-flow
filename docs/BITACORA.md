@@ -3,7 +3,7 @@
 **Última actualización:** 11/10/2026
 **Repositorio:** `ronbercito/z-flow`
 **Rama publicada:** `main`
-**Estado:** emisión electrónica y tope mensual por filial integrados en `main`; en revisión la reemisión automática de pendientes del tope al iniciar un nuevo mes. Las instalaciones configuran copias diarias de la base de datos a las 03:00 de Lima y conservan 14 días.
+**Estado:** emisión electrónica, tope mensual por filial y reintento automático al cambiar de mes integrados en `main` mediante PR #12. CI aprobó los builds de API, web y Docker. Las instalaciones crean copias diarias de la base de datos a las 03:00 de Lima y conservan 14 días.
 
 ## 11/10/2026 — Tope mensual de emisión por filial
 
@@ -11,16 +11,16 @@
 - La configuración del tope se separó en recuadros para datos del emisor, límites y consumo mensual, y acceso a ApiSunat; el consumo ahora destaca el monto y el avance con una barra.
 - La API valida el tope antes de cada envío, tanto automático como manual o reintento. La reserva se serializa por filial en la base de datos para cubrir solicitudes simultáneas.
 - El acumulado toma boletas aceptadas, en validación o con resultado incierto, porque ya pudieron ser recibidas por ApiSunat. Errores confirmados y rechazos no consumen el tope.
-- Al no caber una boleta completa en el saldo mensual, queda pendiente y no se envía; podrá reintentarse desde la filial el mes siguiente. El límite se calcula por mes calendario de Lima.
+- Al no caber una boleta completa en el saldo mensual, queda pendiente y no se envía. Al cambiar al siguiente mes calendario de Lima, la API la reintenta automáticamente; el tope se calcula de nuevo con los envíos del mes vigente.
 - El límite queda desactivado por defecto en instalaciones existentes y nuevas hasta que el propietario configure un importe. La migración agrega el límite y la fecha de envío sin borrar datos.
-- PR #10 quedó integrado en `main`; CI aprobó los builds de API, web y Docker. Pendiente: validar en una instalación de prueba el bloqueo al alcanzar el tope y el reinicio del periodo.
+- PR #10 quedó integrado en `main`; la filial confirmó en prueba que el tope bloquea nuevas emisiones cuando se alcanza. La suma mensual usa límites de fechas del calendario de Lima, por lo que empieza un nuevo periodo sin borrar el historial; la verificación práctica del cambio de mes corresponde al 1 de noviembre.
 
 ## 11/10/2026 — reintento automático mensual y copias diarias
 
 - Las boletas que quedaron `QUEUED` específicamente por alcanzar el tope mensual se vuelven a intentar automáticamente al cambiar el mes calendario de Lima. El proceso corre al iniciar la API y luego cada minuto; el tope se comprueba de nuevo antes de enviar.
 - El documento guarda una nota como “Pendiente del mes 2026-10; reintento automático iniciado en 2026-11”, visible en el historial de la filial y en la consulta del propietario. La nota no marca la boleta como aceptada: el estado solo cambia cuando ApiSunat confirma el resultado.
 - Se agregó una reserva condicional de estado en base de datos para evitar que dos instancias envíen a la vez la misma boleta durante los reintentos.
-- El instalador ya activa copias de la base de datos todos los días a las 03:00, con retención de 14 días y una copia inicial. Ahora el horario de cron queda fijado a `America/Lima`, aunque el servidor tenga otra zona horaria.
+- PR #12 quedó integrado en `main`; GitHub Actions aprobó los builds de API, web y Docker.
 
 ## 10/10/2026 — Revisión general integrada a main
 
