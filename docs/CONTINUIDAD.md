@@ -4,7 +4,7 @@
 **Repositorio:** `ronbercito/z-flow`
 **Rama publicada:** `main`
 **Ramas integradas:** `main` contiene la revisión general y el flujo electrónico desarrollado en `develop`.
-**Estado general:** `main` contiene la revisión general, la instalación limpia y la emisión electrónica por filial. La instalación nueva quedó operativa y una boleta de prueba en ApiSunat Desarrollo aparece como `Aceptada`, con el PDF disponible. El tope mensual por filial se integró en `main` mediante PR #10. En curso: reintento automático al cambiar de mes para las boletas pendientes por tope y zona de Lima explícita para el cron diario de backups. Producción sigue deshabilitada.
+**Estado general:** `main` contiene la revisión general, la instalación limpia, la emisión electrónica por filial, el tope mensual y el reintento automático de pendientes al cambiar de mes (PR #12). CI aprobó los builds de API, web y Docker. Las copias de base de datos corren diariamente a las 03:00 de Lima, con retención de 14 días. La suma mensual se reinicia por el rango de fechas del calendario de Lima; la próxima comprobación práctica del cambio de periodo es el 1 de noviembre. Producción sigue deshabilitada.
 
 ## Tope mensual de emisión por filial (11/10/2026)
 
@@ -13,9 +13,9 @@
 - El panel muestra el importe enviado durante el mes calendario actual de Lima.
 - La API reserva y comprueba el importe antes del envío a ApiSunat. El control aplica a emisiones automáticas, solicitudes desde la filial y reintentos, incluso si llegan a la vez.
 - Se cuentan boletas aceptadas, en validación o con resultado incierto. Rechazos y errores confirmados no cuentan como emisión.
-- Si una boleta completa excedería el saldo, no se envía y queda pendiente para reintento desde la filial. El saldo se renueva al cambiar el mes.
+- Si una boleta completa excedería el saldo, no se envía y queda pendiente. Al iniciar un nuevo mes de Lima, la API vuelve a intentar su emisión automáticamente y registra una nota con los meses de origen y reintento. La suma del tope usa el mes vigente y no requiere borrar registros.
 - La migración añade `monthly_emission_limit` y `submitted_at`; el tope queda desactivado en datos existentes hasta configurarlo.
-- CI de PR #10 aprobó API, web y Docker y el cambio ya está en `main`. Siguiente: probar con un tope bajo, confirmar el bloqueo y el reinicio mensual, y actualizar el entorno con el procedimiento habitual.
+- La filial confirmó con un tope bajo que las emisiones pendientes bloquean correctamente. El cálculo de periodo usa el calendario de Lima; queda observar el cambio real del 1 de noviembre y comprobar el procesamiento automático de la cola.
 
 ### Reintentos pendientes y backups diarios (11/10/2026)
 
@@ -23,7 +23,7 @@
 - La boleta conserva estado pendiente, incierto o de error hasta que ApiSunat confirme el resultado; el comentario del reintento no significa que haya sido emitida/aceptada.
 - El reintento usa la configuración y credenciales de ApiSunat de la filial y vuelve a aplicar el tope del mes actual. La reserva de estado evita envíos duplicados entre instancias.
 - `scripts/install-backup-cron.sh` instala cron diario a las 03:00 `America/Lima`, conserva 14 días de copias de la base de datos y registra la salida en `/var/log/zflow-backup.log`. La instalación limpia también crea una copia inicial. `scripts/update-local.sh` vuelve a sincronizar la tarea cuando se actualiza la aplicación.
-- Tras desplegar estos cambios, revisar el cron con `cat /etc/cron.d/zflow-backup` y el último resultado con `tail -n 50 /var/log/zflow-backup.log`.
+- PR #12 quedó integrado en `main`; CI aprobó los builds de API, web y Docker. Tras desplegar, revisar el cron con `cat /etc/cron.d/zflow-backup` y el último resultado con `tail -n 50 /var/log/zflow-backup.log`.
 
 ## Revisión general y preparación de instalación (10/10/2026)
 
