@@ -4,7 +4,7 @@
 **Repositorio:** `ronbercito/z-flow`
 **Rama publicada:** `main`
 **Ramas integradas:** `main` contiene la revisión general y el flujo electrónico desarrollado en `develop`.
-**Estado general:** `main` contiene la revisión general, la instalación limpia y la emisión electrónica por filial. La instalación nueva quedó operativa y una boleta de prueba en ApiSunat Desarrollo aparece como `Aceptada`, con el PDF disponible. El tope mensual por filial se integró en `main` mediante PR #10. CI aprobó los builds de API, web y Docker; falta validar el bloqueo del tope en el entorno de prueba. Producción sigue deshabilitada.
+**Estado general:** `main` contiene la revisión general, la instalación limpia y la emisión electrónica por filial. La instalación nueva quedó operativa y una boleta de prueba en ApiSunat Desarrollo aparece como `Aceptada`, con el PDF disponible. El tope mensual por filial se integró en `main` mediante PR #10. En curso: reintento automático al cambiar de mes para las boletas pendientes por tope y zona de Lima explícita para el cron diario de backups. Producción sigue deshabilitada.
 
 ## Tope mensual de emisión por filial (11/10/2026)
 
@@ -16,6 +16,14 @@
 - Si una boleta completa excedería el saldo, no se envía y queda pendiente para reintento desde la filial. El saldo se renueva al cambiar el mes.
 - La migración añade `monthly_emission_limit` y `submitted_at`; el tope queda desactivado en datos existentes hasta configurarlo.
 - CI de PR #10 aprobó API, web y Docker y el cambio ya está en `main`. Siguiente: probar con un tope bajo, confirmar el bloqueo y el reinicio mensual, y actualizar el entorno con el procedimiento habitual.
+
+### Reintentos pendientes y backups diarios (11/10/2026)
+
+- La API revisa cada minuto las boletas `QUEUED` que se detuvieron por el tope mensual. Cuando detecta un mes nuevo en `America/Lima`, reintenta la emisión automáticamente y registra en la boleta el mes de origen y el mes del reintento.
+- La boleta conserva estado pendiente, incierto o de error hasta que ApiSunat confirme el resultado; el comentario del reintento no significa que haya sido emitida/aceptada.
+- El reintento usa la configuración y credenciales de ApiSunat de la filial y vuelve a aplicar el tope del mes actual. La reserva de estado evita envíos duplicados entre instancias.
+- `scripts/install-backup-cron.sh` instala cron diario a las 03:00 `America/Lima`, conserva 14 días de copias de la base de datos y registra la salida en `/var/log/zflow-backup.log`. La instalación limpia también crea una copia inicial. `scripts/update-local.sh` vuelve a sincronizar la tarea cuando se actualiza la aplicación.
+- Tras desplegar estos cambios, revisar el cron con `cat /etc/cron.d/zflow-backup` y el último resultado con `tail -n 50 /var/log/zflow-backup.log`.
 
 ## Revisión general y preparación de instalación (10/10/2026)
 
@@ -467,4 +475,5 @@ El siguiente trabajo no es rediseñar usuarios ni volver a socios.
 ## Puerto web predeterminado
 
 Las instalaciones nuevas publican el panel en el puerto 80 (`http://IP_DEL_CONTENEDOR`). El puerto se puede cambiar con `WEB_PORT` antes de instalar.
+
 
