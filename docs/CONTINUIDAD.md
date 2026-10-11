@@ -477,3 +477,11 @@ El siguiente trabajo no es rediseñar usuarios ni volver a socios.
 Las instalaciones nuevas publican el panel en el puerto 80 (`http://IP_DEL_CONTENEDOR`). El puerto se puede cambiar con `WEB_PORT` antes de instalar.
 
 
+
+
+## Backups configurables (11/10/2026)
+
+- El propietario define la hora diaria y los días de retención en **Backup → Programación automática**. Se mantienen 03:00 y 14 días como valores iniciales.
+- La configuración se conserva en el volumen persistente. Cron revisa cada minuto la hora de Lima, ejecuta como máximo una vez al día y recupera ejecuciones perdidas mientras el servidor estuvo detenido.
+- Las copias locales con prefijo `zflow_` se eliminan al superar el período configurado; las subidas con prefijo `uploaded_` no se purgan.
+- PR #14 está integrado en `main`; CI aprobó API, web y Docker. Las instalaciones existentes reciben el cambio con `bash scripts/update-local.sh`; las nuevas lo incluyen desde `main`.
