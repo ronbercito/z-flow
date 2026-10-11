@@ -4,7 +4,7 @@
 **Repositorio:** `ronbercito/z-flow`
 **Rama publicada:** `main`
 **Ramas integradas:** `main` contiene la revisión general y el flujo electrónico desarrollado en `develop`.
-**Estado general:** `main` contiene la revisión general, la instalación limpia y la emisión electrónica por filial. La instalación nueva quedó operativa y una boleta de prueba en ApiSunat Desarrollo aparece como `Aceptada`, con el PDF disponible. El tope mensual por filial está implementado en esta rama y pendiente de CI e integración. Producción sigue deshabilitada.
+**Estado general:** `main` contiene la revisión general, la instalación limpia y la emisión electrónica por filial. La instalación nueva quedó operativa y una boleta de prueba en ApiSunat Desarrollo aparece como `Aceptada`, con el PDF disponible. El tope mensual por filial se integró en `main` mediante PR #10. CI aprobó los builds de API, web y Docker; falta validar el bloqueo del tope en el entorno de prueba. Producción sigue deshabilitada.
 
 ## Tope mensual de emisión por filial (11/10/2026)
 
