@@ -28,6 +28,6 @@ gzip -t "$TMP_FILE"
 mv "$TMP_FILE" "$OUT_FILE"
 chmod 600 "$OUT_FILE"
 
-find "$BACKUP_DIR" -type f -name 'zflow_*.sql.gz' -mtime "+$RETENTION_DAYS" -delete
+find "$BACKUP_DIR" -type f -name 'zflow_*.sql.gz' -mmin "+$((RETENTION_DAYS * 1440))" -delete
 
 echo "[Z-FLOW] Backup completado: $OUT_FILE"

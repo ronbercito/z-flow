@@ -10,9 +10,9 @@ if ! command -v cron >/dev/null 2>&1; then
 fi
 
 cat > "$CRON_FILE" <<EOF
-# Z-FLOW database backup - every day at 03:00
+# Z-FLOW checks the saved daily schedule every minute; backups run once at the configured Lima time.
 CRON_TZ=America/Lima
-0 3 * * * root cd $ROOT_DIR && TZ=America/Lima ZFLOW_BACKUP_RETENTION_DAYS=14 bash ./scripts/backup.sh >> /var/log/zflow-backup.log 2>&1
+* * * * * root cd $ROOT_DIR && TZ=America/Lima bash ./scripts/run-scheduled-backup.sh >> /var/log/zflow-backup.log 2>&1
 EOF
 
 chmod 0644 "$CRON_FILE"
@@ -23,6 +23,6 @@ else
   service cron start || true
 fi
 
-echo "[Z-FLOW] Backup automático instalado: diario 03:00 (America/Lima), retención 14 días."
+echo "[Z-FLOW] Programador de backups activo (America/Lima). Configuración predeterminada: 03:00, retención 14 días."
 echo "[Z-FLOW] Log: /var/log/zflow-backup.log"
 

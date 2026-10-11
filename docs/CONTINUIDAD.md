@@ -4,7 +4,7 @@
 **Repositorio:** `ronbercito/z-flow`
 **Rama publicada:** `main`
 **Ramas integradas:** `main` contiene la revisión general y el flujo electrónico desarrollado en `develop`.
-**Estado general:** `main` contiene la revisión general, la instalación limpia, la emisión electrónica por filial, el tope mensual y el reintento automático de pendientes al cambiar de mes (PR #12). CI aprobó los builds de API, web y Docker. Las copias de base de datos corren diariamente a las 03:00 de Lima, con retención de 14 días. La suma mensual se reinicia por el rango de fechas del calendario de Lima; la próxima comprobación práctica del cambio de periodo es el 1 de noviembre. Producción sigue deshabilitada.
+**Estado general:** `main` contiene la revisión general, la instalación limpia, la emisión electrónica por filial, el tope mensual y el reintento automático de pendientes al cambiar de mes (PR #12). CI aprobó los builds de API, web y Docker. Las copias de base de datos se generan diariamente según el horario configurable del panel (predeterminado 03:00 de Lima) y la retención configurable (predeterminada de 14 días). La suma mensual se reinicia por el rango de fechas del calendario de Lima; la próxima comprobación práctica del cambio de periodo es el 1 de noviembre. Producción sigue deshabilitada.
 
 ## Tope mensual de emisión por filial (11/10/2026)
 
@@ -22,7 +22,7 @@
 - La API revisa cada minuto las boletas `QUEUED` que se detuvieron por el tope mensual. Cuando detecta un mes nuevo en `America/Lima`, reintenta la emisión automáticamente y registra en la boleta el mes de origen y el mes del reintento.
 - La boleta conserva estado pendiente, incierto o de error hasta que ApiSunat confirme el resultado; el comentario del reintento no significa que haya sido emitida/aceptada.
 - El reintento usa la configuración y credenciales de ApiSunat de la filial y vuelve a aplicar el tope del mes actual. La reserva de estado evita envíos duplicados entre instancias.
-- `scripts/install-backup-cron.sh` instala cron diario a las 03:00 `America/Lima`, conserva 14 días de copias de la base de datos y registra la salida en `/var/log/zflow-backup.log`. La instalación limpia también crea una copia inicial. `scripts/update-local.sh` vuelve a sincronizar la tarea cuando se actualiza la aplicación.
+- `scripts/install-backup-cron.sh` instala el programador diario en `America/Lima`. Sus valores iniciales son 03:00 y 14 días; el propietario los modifica desde Backup en el panel. El horario y la retención se guardan en `backups/backup-schedule.env`, en el volumen persistente, y cron comprueba el horario cada minuto para respetar cambios sin reinicios. La instalación limpia también crea una copia inicial. `scripts/update-local.sh` vuelve a sincronizar la tarea cuando se actualiza la aplicación.
 - PR #12 quedó integrado en `main`; CI aprobó los builds de API, web y Docker. Tras desplegar, revisar el cron con `cat /etc/cron.d/zflow-backup` y el último resultado con `tail -n 50 /var/log/zflow-backup.log`.
 
 ## Revisión general y preparación de instalación (10/10/2026)

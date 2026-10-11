@@ -71,10 +71,10 @@ if command -v systemctl >/dev/null 2>&1; then
   systemctl is-active --quiet cron || fail "cron no está activo"
   systemctl is-enabled --quiet cron || fail "cron no está habilitado al arranque"
 fi
-grep -q "scripts/backup.sh" /etc/cron.d/zflow-backup || fail "Cron de backup inválido"
+grep -q "scripts/run-scheduled-backup.sh" /etc/cron.d/zflow-backup || fail "Cron de backup inválido"
 grep -q "CRON_TZ=America/Lima" /etc/cron.d/zflow-backup || fail "El cron no fija la zona horaria de Lima"
-grep -q "^0 3 \* \* \* root" /etc/cron.d/zflow-backup || fail "El cron no programa el backup diario a las 03:00"
-echo "  Cron diario: OK"
+grep -q "^\* \* \* \* \* root" /etc/cron.d/zflow-backup || fail "El cron no revisa la programación diaria"
+echo "  Programador diario configurable: OK"
 
 echo "[7/7] Estado final"
 docker compose ps
