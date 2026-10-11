@@ -12,7 +12,7 @@
 - El acumulado toma boletas aceptadas, en validación o con resultado incierto, porque ya pudieron ser recibidas por ApiSunat. Errores confirmados y rechazos no consumen el tope.
 - Al no caber una boleta completa en el saldo mensual, queda pendiente y no se envía; podrá reintentarse desde la filial el mes siguiente. El límite se calcula por mes calendario de Lima.
 - El límite queda desactivado por defecto en instalaciones existentes y nuevas hasta que el propietario configure un importe. La migración agrega el límite y la fecha de envío sin borrar datos.
-- Pendiente: CI/build y validar en una instalación de prueba el bloqueo al alcanzar el tope y el reinicio de periodo.
+- PR #10 quedó integrado en `main`; CI aprobó los builds de API, web y Docker. Pendiente: validar en una instalación de prueba el bloqueo al alcanzar el tope y el reinicio del periodo.
 
 ## 10/10/2026 — Revisión general integrada a main
 
