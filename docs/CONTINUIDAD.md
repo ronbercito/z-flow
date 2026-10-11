@@ -14,7 +14,7 @@
 - Se cuentan boletas aceptadas, en validación o con resultado incierto. Rechazos y errores confirmados no cuentan como emisión.
 - Si una boleta completa excedería el saldo, no se envía y queda pendiente para reintento desde la filial. El saldo se renueva al cambiar el mes.
 - La migración añade `monthly_emission_limit` y `submitted_at`; el tope queda desactivado en datos existentes hasta configurarlo.
-- Siguiente: validar builds/CI, probar un tope bajo con varias operaciones y confirmar que el reintento se permite en el mes nuevo. Después integrar a `main` y desplegar con el procedimiento habitual.
+- CI de PR #10 aprobó API, web y Docker y el cambio ya está en `main`. Siguiente: probar con un tope bajo, confirmar el bloqueo y el reinicio mensual, y actualizar el entorno con el procedimiento habitual.
 
 ## Revisión general y preparación de instalación (10/10/2026)
 
