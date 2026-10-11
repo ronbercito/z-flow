@@ -1766,6 +1766,7 @@ type ElectronicSettingsForm = {
   personaToken: string;
   series: string;
   maxAmountPerReceipt: number;
+  monthlyEmissionLimit: number | null;
 };
 
 function ElectronicIntegrationsPage({ branches }: { branches: Branch[] }) {
@@ -1775,18 +1776,32 @@ function ElectronicIntegrationsPage({ branches }: { branches: Branch[] }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [monthlyUsage, setMonthlyUsage] = useState({ amount: 0, month: "" });
 
   async function load() {
     if (!branchId) return;
     setLoading(true); setError(""); setMessage("");
     try {
-      const data = await api<Omit<ElectronicSettingsForm, "personaToken">>(`/api/admin/branches/${branchId}/electronic-settings`);
-      setForm({ ...data, maxAmountPerReceipt: Number((data as any).maxAmountPerReceipt ?? 500), personaToken: "" });
+      const data = await api<Omit<ElectronicSettingsForm, "personaToken"> & { monthlyIssuedAmount: number; month: string }>(`/api/admin/branches/${branchId}/electronic-settings`);
+      setMonthlyUsage({ amount: Number(data.monthlyIssuedAmount ?? 0), month: data.month ?? "" });
+      setForm({ ...data, maxAmountPerReceipt: Number(data.maxAmountPerReceipt ?? 500), monthlyEmissionLimit: data.monthlyEmissionLimit == null ? null : Number(data.monthlyEmissionLimit), personaToken: "" });
     } catch (err) { setError(err instanceof Error ? err.message : "No se pudo cargar la integración."); }
     finally { setLoading(false); }
   }
 
-  useEffect(() => { void load(); }, [branchId]);
+  async function refreshMonthlyUsage() {
+    if (!branchId) return;
+    try {
+      const data = await api<{ monthlyIssuedAmount: number; month: string }>(`/api/admin/branches/${branchId}/electronic-settings`);
+      setMonthlyUsage({ amount: Number(data.monthlyIssuedAmount ?? 0), month: data.month ?? "" });
+    } catch { /* Keep the last displayed amount if a refresh is temporarily unavailable. */ }
+  }
+
+  useEffect(() => {
+    void load();
+    const timer = window.setInterval(() => { void refreshMonthlyUsage(); }, 15000);
+    return () => window.clearInterval(timer);
+  }, [branchId]);
 
   async function save(event: FormEvent) {
     event.preventDefault();
@@ -1820,6 +1835,8 @@ function ElectronicIntegrationsPage({ branches }: { branches: Branch[] }) {
           <label>Serie de boleta<input value={form.series} onChange={(event)=>setForm({...form,series:event.target.value.toUpperCase()})} placeholder="B001" maxLength={4} /></label>
         </div>
         <label>Máximo por boleta (S/)<input type="number" min="0.01" step="0.01" value={form.maxAmountPerReceipt} onChange={(event)=>setForm({...form,maxAmountPerReceipt:Number(event.target.value)})} required /></label>
+        <label>Tope mensual por filial (S/)<input type="number" min="0.01" step="0.01" value={form.monthlyEmissionLimit ?? ""} onChange={(event)=>setForm({...form,monthlyEmissionLimit:event.target.value === "" ? null : Number(event.target.value)})} placeholder="Sin límite mensual" /></label>
+        <div className="stage4-policy-note"><ReceiptText size={16}/><span><strong>Enviado este mes{monthlyUsage.month ? ` (${monthlyUsage.month})` : ""}: {currency(monthlyUsage.amount)}</strong>{form.monthlyEmissionLimit == null ? "No hay un límite mensual configurado para esta filial." : monthlyUsage.amount >= form.monthlyEmissionLimit ? `Se alcanzó el tope de ${currency(form.monthlyEmissionLimit)}. La emisión y los reintentos se reactivan el próximo mes.` : `Límite: ${currency(form.monthlyEmissionLimit)}. Se consideran boletas aceptadas, en validación o con resultado por confirmar.`}<progress max={form.monthlyEmissionLimit ?? 1} value={Math.min(monthlyUsage.amount, form.monthlyEmissionLimit ?? 0)} style={{display:form.monthlyEmissionLimit == null ? "none" : "block",width:"100%"}} /></span></div>
         <label>Token API de Desarrollo<input type="password" value={form.personaToken} onChange={(event)=>setForm({...form,personaToken:event.target.value})} placeholder={form.tokenConfigured ? "Token guardado · escribe solo para reemplazarlo" : "Pega aquí el token DEV_ de ApiSunat"} autoComplete="new-password" /></label>
         <div className="friendly-info"><ShieldCheck size={16}/><span>Esta conexión acepta tokens DEV_. El modo Desarrollo permite pruebas; esos documentos no se envían a SUNAT ni tienen valor tributario.</span></div>
         <div className="stage4-policy-note"><ReceiptText size={16}/><span>Si la comisión supera este máximo, se divide en varias boletas y ninguna excede el tope. Las partes que no se logren enviar quedan pendientes para reintento. Se emite sin DNI cuando cada boleta es hasta S/ 700.00. <a href="https://cpe.sunat.gob.pe/tipos_de_comprobantes/boleta" target="_blank" rel="noreferrer">Regla SUNAT</a>.</span></div>
@@ -2473,3 +2490,4 @@ function BranchDetailModal({
     </div>
   </div>;
 }
+

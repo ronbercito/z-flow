@@ -1,9 +1,18 @@
 # Z-FLOW — Bitácora de desarrollo
 
-**Última actualización:** 10/10/2026
+**Última actualización:** 11/10/2026
 **Repositorio:** `ronbercito/z-flow`
 **Rama publicada:** `main`
-**Estado:** emisión electrónica integrada en `main`; pendiente verificar el flujo desplegado desde esta rama en el entorno objetivo.
+**Estado:** emisión electrónica integrada en `main`; el nuevo tope mensual está implementado localmente y queda pendiente de CI e integración.
+
+## 11/10/2026 — Tope mensual de emisión por filial
+
+- Integraciones del propietario permite fijar un tope mensual opcional en soles para cada filial y muestra el acumulado del mes en curso.
+- La API valida el tope antes de cada envío, tanto automático como manual o reintento. La reserva se serializa por filial en la base de datos para cubrir solicitudes simultáneas.
+- El acumulado toma boletas aceptadas, en validación o con resultado incierto, porque ya pudieron ser recibidas por ApiSunat. Errores confirmados y rechazos no consumen el tope.
+- Al no caber una boleta completa en el saldo mensual, queda pendiente y no se envía; podrá reintentarse desde la filial el mes siguiente. El límite se calcula por mes calendario de Lima.
+- El límite queda desactivado por defecto en instalaciones existentes y nuevas hasta que el propietario configure un importe. La migración agrega el límite y la fecha de envío sin borrar datos.
+- Pendiente: CI/build y validar en una instalación de prueba el bloqueo al alcanzar el tope y el reinicio de periodo.
 
 ## 10/10/2026 — Revisión general integrada a main
 
@@ -374,3 +383,4 @@ pm`, y el `pnpm` incluido no pudo resolver el directorio del workspace (EPERM). 
 - ApiSunat requiere el nodo UBL `cac:PartyIdentification/cbc:ID` incluso para consumidor final. La integración ahora usa la representación sin documento del widget oficial: `schemeID: "-"` y `00000000`.
 - El valor técnico `00000000` no se muestra como DNI capturado del cliente. La boleta conserva el estado pendiente/error hasta recibir confirmación del proveedor.
 - Prueba manual reportada en la instalación nueva: la operación aparece como `Aceptada` en ApiSunat y el panel muestra `Ver PDF`. Esto confirma el flujo de emisión en Desarrollo.
+

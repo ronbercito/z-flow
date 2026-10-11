@@ -16,7 +16,8 @@ const settingsBody = z.object({
   personaId: z.string().trim().max(80).optional().default(""),
   personaToken: z.string().trim().max(500).optional().default(""),
   series: seriesSchema.default("B001"),
-  maxAmountPerReceipt: z.coerce.number().positive().max(999999999).default(500)
+  maxAmountPerReceipt: z.coerce.number().positive().max(999999999).default(500),
+  monthlyEmissionLimit: z.number().positive().max(999999999).nullable().optional()
 });
 
 type EmissionResult = { status: string; message?: string; documentId?: string; series?: string; correlativo?: number; amount?: number; partNumber?: number; partCount?: number };
@@ -53,6 +54,24 @@ function localDate(date = new Date()) {
 
 function localTime(date = new Date()) {
   return new Intl.DateTimeFormat("en-GB", { timeZone: "America/Lima", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).format(date);
+}
+
+function limaMonthRange(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en", { timeZone: "America/Lima", year: "numeric", month: "2-digit" }).formatToParts(date);
+  const year = Number(parts.find((part) => part.type === "year")?.value);
+  const month = Number(parts.find((part) => part.type === "month")?.value);
+  // The MariaDB service also runs in America/Lima, so TIMESTAMP bounds are local midnights.
+  const nextYear = month === 12 ? year + 1 : year;
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const sqlDate = (y: number, m: number) => `${String(y)}-${String(m).padStart(2, "0")}-01 00:00:00`;
+  return { start: sqlDate(year, month), end: sqlDate(nextYear, nextMonth), label: `${String(year)}-${String(month).padStart(2, "0")}` };
+}
+
+async function monthlyIssuedAmount(branchId: number) {
+  const month = limaMonthRange();
+  const [rows] = await db.query<any[]>(`SELECT COALESCE(SUM(amount),0) AS issued_amount FROM electronic_documents
+    WHERE branch_id=? AND status IN ('PENDING','ACCEPTED','UNKNOWN') AND submitted_at>=? AND submitted_at<?`, [branchId, month.start, month.end]);
+  return { amount: money(rows[0]?.issued_amount ?? 0), month: month.label };
 }
 
 function documentBody(input: {
@@ -127,6 +146,7 @@ export async function ensureElectronicSchema() {
     persona_token_cipher TEXT NULL,
     series VARCHAR(4) NOT NULL DEFAULT 'B001',
     max_amount_per_receipt DECIMAL(14,2) NOT NULL DEFAULT 500.00,
+    monthly_emission_limit DECIMAL(14,2) NULL DEFAULT NULL,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (branch_id),
     CONSTRAINT fk_branch_electronic_settings_branch FOREIGN KEY (branch_id) REFERENCES branches(id)
@@ -153,6 +173,7 @@ export async function ensureElectronicSchema() {
     created_by_user_id BIGINT UNSIGNED NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    submitted_at TIMESTAMP NULL DEFAULT NULL,
     PRIMARY KEY (id),
     UNIQUE KEY uq_electronic_closure_part (closure_id,part_number),
     UNIQUE KEY uq_electronic_operation_part (operation_id,part_number),
@@ -164,10 +185,17 @@ export async function ensureElectronicSchema() {
   if (!settingsColumns.some((column) => column.Field === "max_amount_per_receipt")) {
     await db.query("ALTER TABLE branch_electronic_settings ADD COLUMN max_amount_per_receipt DECIMAL(14,2) NOT NULL DEFAULT 500.00 AFTER series");
   }
+  if (!settingsColumns.some((column) => column.Field === "monthly_emission_limit")) {
+    await db.query("ALTER TABLE branch_electronic_settings ADD COLUMN monthly_emission_limit DECIMAL(14,2) NULL DEFAULT NULL AFTER max_amount_per_receipt");
+  }
   const [documentColumns] = await db.query<any[]>("SHOW COLUMNS FROM electronic_documents");
   if (!documentColumns.some((column) => column.Field === "part_number")) await db.query("ALTER TABLE electronic_documents ADD COLUMN part_number INT UNSIGNED NOT NULL DEFAULT 1 AFTER correlativo");
   if (!documentColumns.some((column) => column.Field === "part_count")) await db.query("ALTER TABLE electronic_documents ADD COLUMN part_count INT UNSIGNED NOT NULL DEFAULT 1 AFTER part_number");
   if (!documentColumns.some((column) => column.Field === "description")) await db.query("ALTER TABLE electronic_documents ADD COLUMN description VARCHAR(250) NOT NULL DEFAULT 'Comision por servicio' AFTER customer_name");
+  if (!documentColumns.some((column) => column.Field === "submitted_at")) {
+    await db.query("ALTER TABLE electronic_documents ADD COLUMN submitted_at TIMESTAMP NULL DEFAULT NULL AFTER updated_at");
+    await db.query("UPDATE electronic_documents SET submitted_at=created_at WHERE status IN ('PENDING','ACCEPTED','UNKNOWN')");
+  }
   if (documentColumns.some((column) => column.Field === "correlativo" && String(column.Null) !== "YES")) await db.query("ALTER TABLE electronic_documents MODIFY correlativo BIGINT UNSIGNED NULL");
   const statusColumn = documentColumns.find((column) => column.Field === "status");
   if (statusColumn && !String(statusColumn.Type).includes("CANCELLED")) {
@@ -317,6 +345,8 @@ async function issueDocument(input: {
     const fileName = `${String(c.ruc)}-03-${c.series}-${number}`;
     const connection = await db.getConnection();
     let operationWasCancelled = false;
+    let monthlyLimitReached = false;
+    let monthlyLimit = 0;
     try {
       await connection.beginTransaction();
       if (input.sourceType === "OPERATION") {
@@ -326,7 +356,19 @@ async function issueDocument(input: {
       if (operationWasCancelled) {
         await connection.execute("UPDATE electronic_documents SET status='CANCELLED',provider_message='Operación anulada antes del envío de la boleta.' WHERE id=? AND status IN ('QUEUED','ERROR','EXCEPTION')", [retryRecordId]);
       } else {
-        await connection.execute(`UPDATE electronic_documents SET series=?,correlativo=?,part_count=?,customer_document_type=?,customer_document_number=?,customer_name=?,description=?,amount=?,status='UNKNOWN',provider_document_id=NULL,provider_message='Enviando a ApiSunat; confirmando el resultado.',file_name=?,created_by_user_id=? WHERE id=? AND status IN ('QUEUED','ERROR','EXCEPTION')`, [c.series, Number(number), partCount, input.customerDocumentType ?? null, input.customerDocumentNumber ?? null, input.customerName || "CLIENTES VARIOS", input.description.slice(0, 250), money(input.amount), fileName, input.createdBy, retryRecordId]);
+        // Serialize the monthly allowance reservation across API workers.
+        const [policyRows] = await connection.query<any[]>("SELECT monthly_emission_limit FROM branch_electronic_settings WHERE branch_id=? LIMIT 1 FOR UPDATE", [input.branchId]);
+        monthlyLimit = policyRows.length && policyRows[0].monthly_emission_limit != null ? money(policyRows[0].monthly_emission_limit) : 0;
+        if (monthlyLimit > 0) {
+          const month = limaMonthRange();
+          const [totals] = await connection.query<any[]>(`SELECT COALESCE(SUM(amount),0) AS issued_amount FROM electronic_documents
+            WHERE branch_id=? AND status IN ('PENDING','ACCEPTED','UNKNOWN') AND submitted_at>=? AND submitted_at<?`, [input.branchId, month.start, month.end]);
+          const issued = money(totals[0]?.issued_amount ?? 0);
+          monthlyLimitReached = Math.round((issued + money(input.amount)) * 100) > Math.round(monthlyLimit * 100);
+        }
+        if (!monthlyLimitReached) {
+          await connection.execute(`UPDATE electronic_documents SET series=?,correlativo=?,part_count=?,customer_document_type=?,customer_document_number=?,customer_name=?,description=?,amount=?,status='UNKNOWN',submitted_at=CURRENT_TIMESTAMP,provider_document_id=NULL,provider_message='Enviando a ApiSunat; confirmando el resultado.',file_name=?,created_by_user_id=? WHERE id=? AND status IN ('QUEUED','ERROR','EXCEPTION')`, [c.series, Number(number), partCount, input.customerDocumentType ?? null, input.customerDocumentNumber ?? null, input.customerName || "CLIENTES VARIOS", input.description.slice(0, 250), money(input.amount), fileName, input.createdBy, retryRecordId]);
+        }
       }
       await connection.commit();
     } catch (error) {
@@ -337,6 +379,12 @@ async function issueDocument(input: {
     }
     if (operationWasCancelled) {
       return { status: "CANCELLED", message: "La operación fue anulada antes de enviar la boleta.", amount: money(input.amount), partNumber, partCount };
+    }
+    if (monthlyLimitReached) {
+      const month = limaMonthRange();
+      const message = `Se alcanzó el tope mensual de ${currencyText(monthlyLimit)} para esta filial (${month.label}). La boleta quedó pendiente; podrá reintentarse el próximo mes.`;
+      if (retryRecordId) await db.execute("UPDATE electronic_documents SET status='QUEUED',provider_message=? WHERE id=? AND status IN ('QUEUED','ERROR','EXCEPTION')", [message, retryRecordId]);
+      return { status: "LIMIT_REACHED", message, amount: money(input.amount), partNumber, partCount };
     }
     const date = new Date();
     const body = documentBody({ ruc: String(c.ruc), issuer: String(c.legal_name || c.business_name), address: c.address, series: c.series, number, date: localDate(date), time: localTime(date), amount: money(input.amount), description: input.description, customerName: input.customerName, customerDocumentType: input.customerDocumentType, customerDocumentNumber: input.customerDocumentNumber });
@@ -463,8 +511,9 @@ async function issueSplitDocuments(input: {
     try { result = await issueDocument({ ...input, amount: parts[index] / 100, partNumber, partCount: parts.length }); }
     catch (error) { result = { status: "ERROR", message: (error instanceof Error ? error.message : "No se pudo emitir la boleta.").slice(0, 900), amount: parts[index] / 100, partNumber, partCount: parts.length }; }
     results.push(result);
-    if (["ERROR", "UNKNOWN", "CANCELLED"].includes(result.status)) {
+    if (["ERROR", "UNKNOWN", "CANCELLED", "LIMIT_REACHED"].includes(result.status)) {
       if (result.status === "CANCELLED") break;
+      const limitReached = result.status === "LIMIT_REACHED";
       const firstQueuedIndex = result.correlativo ? index + 1 : index;
       for (let queuedIndex = firstQueuedIndex; queuedIndex < parts.length; queuedIndex++) {
         await db.execute(`INSERT IGNORE INTO electronic_documents (branch_id,closure_id,operation_id,series,correlativo,part_number,part_count,customer_document_type,customer_document_number,customer_name,description,amount,status,provider_message,file_name,created_by_user_id)
@@ -472,7 +521,7 @@ async function issueSplitDocuments(input: {
           input.branchId, input.sourceType === "CLOSURE" ? input.sourceId : null, input.sourceType === "OPERATION" ? input.sourceId : null,
           input.series, queuedIndex + 1, parts.length, input.customerDocumentType ?? null, input.customerDocumentNumber ?? null,
           input.customerName || "CLIENTES VARIOS", input.description.slice(0, 250), parts[queuedIndex] / 100,
-          queuedIndex === index ? (result.message ?? "Error al solicitar la emisión; pendiente de reintento.").slice(0, 900) : "En espera de resolver el error de emisión de una parte anterior.", input.createdBy
+          limitReached ? (result.message ?? "Tope mensual alcanzado; pendiente para el próximo mes.").slice(0, 900) : queuedIndex === index ? (result.message ?? "Error al solicitar la emisión; pendiente de reintento.").slice(0, 900) : "En espera de resolver el error de emisión de una parte anterior.", input.createdBy
         ]);
       }
       break;
@@ -480,9 +529,12 @@ async function issueSplitDocuments(input: {
   }
   const firstError = results.find((item) => item.status === "ERROR" || item.status === "UNKNOWN");
   const wasCancelled = results.some((item) => item.status === "CANCELLED");
-  const status = wasCancelled ? "CANCELLED" : firstError?.status === "UNKNOWN" ? "UNKNOWN" : firstError ? "PARTIAL" : results.every((item) => item.status === "ACCEPTED") ? "ACCEPTED" : "PENDING";
+  const limitReached = results.some((item) => item.status === "LIMIT_REACHED");
+  const status = wasCancelled ? "CANCELLED" : limitReached ? "QUEUED" : firstError?.status === "UNKNOWN" ? "UNKNOWN" : firstError ? "PARTIAL" : results.every((item) => item.status === "ACCEPTED") ? "ACCEPTED" : "PENDING";
   return { ...results[0], status, amount: money(input.amount), partNumber: results.length, partCount: parts.length,
-    message: firstError
+    message: limitReached
+      ? results.find((item) => item.status === "LIMIT_REACHED")?.message
+      : firstError
       ? `${results.length} de ${parts.length} boleta(s) procesada(s). El resto quedó pendiente. ${firstError.message ?? ""}`
       : wasCancelled ? "La operación se anuló antes de completar la emisión."
       : parts.length > 1 ? `Comisión dividida en ${parts.length} boletas, ninguna supera ${currencyText(input.maxAmount)}.` : results[0]?.message };
@@ -506,7 +558,7 @@ async function processQueuedDocuments(branchId: number, sourceType: "CLOSURE" | 
       customerName: item.customer_name, customerDocumentType: item.customer_document_type, customerDocumentNumber: item.customer_document_number,
       partNumber: Number(item.part_number), partCount: Number(item.part_count) });
     results.push(result);
-    if (["ERROR", "UNKNOWN", "CANCELLED"].includes(result.status)) break;
+    if (["ERROR", "UNKNOWN", "CANCELLED", "LIMIT_REACHED"].includes(result.status)) break;
   }
   return results;
 }
@@ -527,9 +579,10 @@ export async function registerElectronicRoutes(app: FastifyInstance) {
     const parsed = ownerParams.safeParse(request.params);
     if (!parsed.success) return reply.code(400).send({ error: "Filial inválida" });
     if (!await requireOwner(request, reply)) return;
-    const [rows] = await db.query<any[]>("SELECT enabled,emission_mode,persona_id,persona_token_cipher,series,max_amount_per_receipt,updated_at FROM branch_electronic_settings WHERE branch_id=? LIMIT 1", [parsed.data.branchId]);
-    if (!rows.length) return { enabled: false, emissionMode: "CLOSURE", personaId: "", tokenConfigured: false, series: "B001", maxAmountPerReceipt: 500 };
-    return { enabled: Boolean(rows[0].enabled), emissionMode: rows[0].emission_mode, personaId: rows[0].persona_id ?? "", tokenConfigured: Boolean(rows[0].persona_token_cipher), series: rows[0].series, maxAmountPerReceipt: Number(rows[0].max_amount_per_receipt), updatedAt: rows[0].updated_at };
+    const [rows] = await db.query<any[]>("SELECT enabled,emission_mode,persona_id,persona_token_cipher,series,max_amount_per_receipt,monthly_emission_limit,updated_at FROM branch_electronic_settings WHERE branch_id=? LIMIT 1", [parsed.data.branchId]);
+    const usage = await monthlyIssuedAmount(parsed.data.branchId);
+    if (!rows.length) return { enabled: false, emissionMode: "CLOSURE", personaId: "", tokenConfigured: false, series: "B001", maxAmountPerReceipt: 500, monthlyEmissionLimit: null, monthlyIssuedAmount: usage.amount, month: usage.month };
+    return { enabled: Boolean(rows[0].enabled), emissionMode: rows[0].emission_mode, personaId: rows[0].persona_id ?? "", tokenConfigured: Boolean(rows[0].persona_token_cipher), series: rows[0].series, maxAmountPerReceipt: Number(rows[0].max_amount_per_receipt), monthlyEmissionLimit: rows[0].monthly_emission_limit == null ? null : Number(rows[0].monthly_emission_limit), monthlyIssuedAmount: usage.amount, month: usage.month, updatedAt: rows[0].updated_at };
   });
 
   app.get("/api/branches/:branchId/operations/:operationId/electronic-document/:format", async (request, reply) => {
@@ -558,15 +611,19 @@ export async function registerElectronicRoutes(app: FastifyInstance) {
     if (!auth) return;
     const [branches] = await db.query<any[]>("SELECT id FROM branches WHERE id=? AND active=1 LIMIT 1", [parsed.data.branchId]);
     if (!branches.length) return reply.code(404).send({ error: "Filial no encontrada" });
-    const [current] = await db.query<any[]>("SELECT persona_token_cipher FROM branch_electronic_settings WHERE branch_id=? LIMIT 1", [parsed.data.branchId]);
+    const [current] = await db.query<any[]>("SELECT persona_token_cipher,monthly_emission_limit FROM branch_electronic_settings WHERE branch_id=? LIMIT 1", [parsed.data.branchId]);
     const tokenCipher = body.data.personaToken ? encryptSecret(body.data.personaToken) : current[0]?.persona_token_cipher ?? null;
+    const currentMonthlyLimit = current[0]?.monthly_emission_limit;
+    const monthlyEmissionLimit = body.data.monthlyEmissionLimit === undefined
+      ? (currentMonthlyLimit == null ? null : Number(currentMonthlyLimit))
+      : body.data.monthlyEmissionLimit;
     if (body.data.enabled && (!body.data.personaId || !tokenCipher)) return reply.code(422).send({ error: "Para activar la emisión ingresa personaId y el token de ApiSunat." });
     if (body.data.enabled && body.data.personaToken && !body.data.personaToken.startsWith("DEV_")) return reply.code(422).send({ error: "Por seguridad, esta primera conexión acepta únicamente tokens de DESARROLLO (prefijo DEV_)." });
-    await db.execute(`INSERT INTO branch_electronic_settings (branch_id,enabled,emission_mode,persona_id,persona_token_cipher,series,max_amount_per_receipt)
-      VALUES (?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE enabled=VALUES(enabled),emission_mode=VALUES(emission_mode),persona_id=VALUES(persona_id),persona_token_cipher=VALUES(persona_token_cipher),series=VALUES(series),max_amount_per_receipt=VALUES(max_amount_per_receipt)`,
-      [parsed.data.branchId, body.data.enabled ? 1 : 0, body.data.emissionMode, body.data.personaId || null, tokenCipher, body.data.series, body.data.maxAmountPerReceipt]);
+    await db.execute(`INSERT INTO branch_electronic_settings (branch_id,enabled,emission_mode,persona_id,persona_token_cipher,series,max_amount_per_receipt,monthly_emission_limit)
+      VALUES (?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE enabled=VALUES(enabled),emission_mode=VALUES(emission_mode),persona_id=VALUES(persona_id),persona_token_cipher=VALUES(persona_token_cipher),series=VALUES(series),max_amount_per_receipt=VALUES(max_amount_per_receipt),monthly_emission_limit=VALUES(monthly_emission_limit)`,
+      [parsed.data.branchId, body.data.enabled ? 1 : 0, body.data.emissionMode, body.data.personaId || null, tokenCipher, body.data.series, body.data.maxAmountPerReceipt, monthlyEmissionLimit]);
     await db.execute(`INSERT INTO audit_logs (branch_id,user_id,action,entity_type,entity_id,details,ip_address,user_agent)
-      VALUES (?,?, 'ELECTRONIC_SETTINGS_UPDATED','BRANCH',?, ?, ?, ?)`, [parsed.data.branchId, auth.userId, parsed.data.branchId, JSON.stringify({ enabled: body.data.enabled, emissionMode: body.data.emissionMode, personaIdConfigured: Boolean(body.data.personaId), tokenChanged: Boolean(body.data.personaToken), series: body.data.series, maxAmountPerReceipt: body.data.maxAmountPerReceipt }), request.ip, String(request.headers["user-agent"] ?? "").slice(0, 255)]);
+      VALUES (?,?, 'ELECTRONIC_SETTINGS_UPDATED','BRANCH',?, ?, ?, ?)`, [parsed.data.branchId, auth.userId, parsed.data.branchId, JSON.stringify({ enabled: body.data.enabled, emissionMode: body.data.emissionMode, personaIdConfigured: Boolean(body.data.personaId), tokenChanged: Boolean(body.data.personaToken), series: body.data.series, maxAmountPerReceipt: body.data.maxAmountPerReceipt, monthlyEmissionLimit }), request.ip, String(request.headers["user-agent"] ?? "").slice(0, 255)]);
     return { ok: true, tokenConfigured: Boolean(tokenCipher) };
   });
 
@@ -636,3 +693,4 @@ export async function registerElectronicRoutes(app: FastifyInstance) {
   });
 
 }
+

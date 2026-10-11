@@ -1,10 +1,20 @@
 # Z-FLOW — Documento de continuidad
 
-**Fecha de corte:** 10/10/2026
+**Fecha de corte:** 11/10/2026
 **Repositorio:** `ronbercito/z-flow`
 **Rama publicada:** `main`
 **Ramas integradas:** `main` contiene la revisión general y el flujo electrónico desarrollado en `develop`.
-**Estado general:** `main` contiene la revisión general, la instalación limpia y la emisión electrónica por filial. La instalación nueva quedó operativa y una boleta de prueba en ApiSunat Desarrollo aparece como `Aceptada`, con el PDF disponible. Producción sigue deshabilitada.
+**Estado general:** `main` contiene la revisión general, la instalación limpia y la emisión electrónica por filial. La instalación nueva quedó operativa y una boleta de prueba en ApiSunat Desarrollo aparece como `Aceptada`, con el PDF disponible. El tope mensual por filial está implementado en esta rama y pendiente de CI e integración. Producción sigue deshabilitada.
+
+## Tope mensual de emisión por filial (11/10/2026)
+
+- El propietario puede definir en Integraciones un máximo mensual de comprobantes por filial; si queda vacío, no hay tope.
+- El panel muestra el importe enviado durante el mes calendario actual de Lima.
+- La API reserva y comprueba el importe antes del envío a ApiSunat. El control aplica a emisiones automáticas, solicitudes desde la filial y reintentos, incluso si llegan a la vez.
+- Se cuentan boletas aceptadas, en validación o con resultado incierto. Rechazos y errores confirmados no cuentan como emisión.
+- Si una boleta completa excedería el saldo, no se envía y queda pendiente para reintento desde la filial. El saldo se renueva al cambiar el mes.
+- La migración añade `monthly_emission_limit` y `submitted_at`; el tope queda desactivado en datos existentes hasta configurarlo.
+- Siguiente: validar builds/CI, probar un tope bajo con varias operaciones y confirmar que el reintento se permite en el mes nuevo. Después integrar a `main` y desplegar con el procedimiento habitual.
 
 ## Revisión general y preparación de instalación (10/10/2026)
 
@@ -456,3 +466,4 @@ El siguiente trabajo no es rediseñar usuarios ni volver a socios.
 ## Puerto web predeterminado
 
 Las instalaciones nuevas publican el panel en el puerto 80 (`http://IP_DEL_CONTENEDOR`). El puerto se puede cambiar con `WEB_PORT` antes de instalar.
+
