@@ -399,5 +399,5 @@ pm`, y el `pnpm` incluido no pudo resolver el directorio del workspace (EPERM). 
 
 - El propietario puede configurar desde Backup la hora diaria (hora de Lima) y cuánto tiempo conservar copias automáticas (1–3650 días). Los valores iniciales siguen siendo 03:00 y 14 días.
 - La programación se guarda como archivo protegido dentro del volumen persistente `backups`, así se conserva tras reiniciar o actualizar el contenedor.
-- Cron revisa la hora configurada cada minuto y el ejecutor garantiza como máximo una copia al día. La rotación solo elimina copias automáticas `zflow_*.sql.gz`; no elimina copias manuales ni las que se subieron.
-- La API valida el horario y el período de retención y registra los cambios en auditoría. No se ejecutaron pruebas locales; la validación de compilación corresponde a CI antes de integrar en `main`.
+- Cron revisa la hora configurada cada minuto y el ejecutor garantiza como máximo una copia al día. Las copias locales con prefijo `zflow_` se eliminan al superar la retención; las copias subidas con prefijo `uploaded_` no se purgan.
+- La API valida el horario y el período de retención y registra los cambios en auditoría. PR #14 quedó integrado en `main`; GitHub Actions aprobó los builds de API, web y Docker.
