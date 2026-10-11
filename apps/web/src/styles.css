@@ -1550,6 +1550,35 @@ tr:last-child td { border-bottom:0; }
 }
 .stage4-settings-card { overflow: hidden; }
 .settings-form-body { padding: 16px; display: grid; gap: 11px; }
+.integration-settings-section {
+  display: grid;
+  gap: 13px;
+  padding: 15px;
+  border: 1px solid #e3eaf4;
+  border-radius: 11px;
+  background: #fff;
+}
+.integration-section-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.integration-section-heading > div { display:grid; gap:4px; }
+.integration-section-heading strong { color:#27364d; font-size:10px; }
+.integration-section-heading span { color:#8492a6; font-size:8px; line-height:1.45; }
+.integration-section-icon { display:grid; place-items:center; width:30px; height:30px; flex:0 0 30px; border-radius:9px; color:#2563eb !important; background:#edf4ff; font-size:10px !important; font-weight:800; }
+.monthly-cap-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.monthly-cap-fields label { align-content:start; }
+.monthly-cap-fields label > span { color:#34455e; }
+.monthly-cap-fields label small { color:#8794a7; font-size:8px; font-weight:500; line-height:1.45; }
+.monthly-usage-card { display:grid; grid-template-columns:34px minmax(0,1fr); gap:11px; padding:13px; border:1px solid #d6e5fa; border-radius:10px; background:linear-gradient(110deg,#f5f9ff,#fff); }
+.monthly-usage-icon { display:grid; place-items:center; width:32px; height:32px; border-radius:9px; color:#2563eb; background:#e7f0ff; }
+.monthly-usage-content { min-width:0; display:grid; gap:7px; }
+.monthly-usage-heading,.monthly-usage-totals { display:flex; align-items:baseline; justify-content:space-between; gap:10px; }
+.monthly-usage-heading strong { color:#34445c; font-size:9px; }
+.monthly-usage-heading span,.monthly-usage-totals span { color:#8492a6; font-size:8px; }
+.monthly-usage-totals strong { color:#1d4ed8; font-size:16px; line-height:1.15; }
+.monthly-usage-card progress { appearance:none; width:100%; height:7px; overflow:hidden; border:0; border-radius:99px; background:#e4ebf5; }
+.monthly-usage-card progress::-webkit-progress-bar { border-radius:99px; background:#e4ebf5; }
+.monthly-usage-card progress::-webkit-progress-value { border-radius:99px; background:linear-gradient(90deg,#3b82f6,#635bdb); transition:width .25s ease; }
+.monthly-usage-card progress::-moz-progress-bar { border-radius:99px; background:linear-gradient(90deg,#3b82f6,#635bdb); }
+.monthly-usage-content > small { color:#718198; font-size:8px; line-height:1.45; }
 .settings-form-body label {
   display: grid;
   gap: 6px;
@@ -1582,6 +1611,7 @@ tr:last-child td { border-bottom:0; }
   font-size: 8px;
   line-height: 1.45;
 }
+.integration-settings-section .stage4-policy-note { margin-top:0; }
 .stage4-settings-actions {
   grid-column: 1/-1;
   display: flex;
@@ -1666,6 +1696,8 @@ tr:last-child td { border-bottom:0; }
   .security-status-grid { grid-template-columns: repeat(2,1fr); }
 }
 @media (max-width: 650px) {
+  .monthly-cap-fields { grid-template-columns: 1fr; }
+  .integration-settings-section { padding: 12px; }
   .security-status-grid { grid-template-columns: 1fr; }
   .stage4-settings-actions { align-items: stretch; flex-direction: column; }
   .stage4-settings-actions .primary { width: 100%; }

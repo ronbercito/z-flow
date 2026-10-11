@@ -9,6 +9,7 @@
 ## Tope mensual de emisión por filial (11/10/2026)
 
 - El propietario puede definir en Integraciones un máximo mensual de comprobantes por filial; si queda vacío, no hay tope.
+- La pantalla separa datos del emisor, límites y consumo mensual, y credenciales en recuadros con explicación para cada ajuste.
 - El panel muestra el importe enviado durante el mes calendario actual de Lima.
 - La API reserva y comprueba el importe antes del envío a ApiSunat. El control aplica a emisiones automáticas, solicitudes desde la filial y reintentos, incluso si llegan a la vez.
 - Se cuentan boletas aceptadas, en validación o con resultado incierto. Rechazos y errores confirmados no cuentan como emisión.

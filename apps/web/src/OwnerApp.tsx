@@ -1830,16 +1830,37 @@ function ElectronicIntegrationsPage({ branches }: { branches: Branch[] }) {
         <label>Filial<select value={branchId} onChange={(event)=>setBranchId(event.target.value)}>{branches.map((branch)=><option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>
         <label className="active-toggle"><input type="checkbox" checked={form.enabled} onChange={(event)=>setForm({...form,enabled:event.target.checked})}/> Activar emisión automática para esta filial</label>
         <label>Emitir comprobante<select value={form.emissionMode} onChange={(event)=>setForm({...form,emissionMode:event.target.value as "CLOSURE"|"OPERATION"})}><option value="CLOSURE">Una boleta por cada cierre de caja</option><option value="OPERATION">Una boleta por cada operación completada</option></select></label>
-        <div className="field-grid">
-          <label>Persona ID<input value={form.personaId} onChange={(event)=>setForm({...form,personaId:event.target.value})} placeholder="ID de empresa en ApiSunat" autoComplete="off" /></label>
-          <label>Serie de boleta<input value={form.series} onChange={(event)=>setForm({...form,series:event.target.value.toUpperCase()})} placeholder="B001" maxLength={4} /></label>
-        </div>
-        <label>Máximo por boleta (S/)<input type="number" min="0.01" step="0.01" value={form.maxAmountPerReceipt} onChange={(event)=>setForm({...form,maxAmountPerReceipt:Number(event.target.value)})} required /></label>
-        <label>Tope mensual por filial (S/)<input type="number" min="0.01" step="0.01" value={form.monthlyEmissionLimit ?? ""} onChange={(event)=>setForm({...form,monthlyEmissionLimit:event.target.value === "" ? null : Number(event.target.value)})} placeholder="Sin límite mensual" /></label>
-        <div className="stage4-policy-note"><ReceiptText size={16}/><span><strong>Enviado este mes{monthlyUsage.month ? ` (${monthlyUsage.month})` : ""}: {currency(monthlyUsage.amount)}</strong>{form.monthlyEmissionLimit == null ? "No hay un límite mensual configurado para esta filial." : monthlyUsage.amount >= form.monthlyEmissionLimit ? `Se alcanzó el tope de ${currency(form.monthlyEmissionLimit)}. La emisión y los reintentos se reactivan el próximo mes.` : `Límite: ${currency(form.monthlyEmissionLimit)}. Se consideran boletas aceptadas, en validación o con resultado por confirmar.`}<progress max={form.monthlyEmissionLimit ?? 1} value={Math.min(monthlyUsage.amount, form.monthlyEmissionLimit ?? 0)} style={{display:form.monthlyEmissionLimit == null ? "none" : "block",width:"100%"}} /></span></div>
-        <label>Token API de Desarrollo<input type="password" value={form.personaToken} onChange={(event)=>setForm({...form,personaToken:event.target.value})} placeholder={form.tokenConfigured ? "Token guardado · escribe solo para reemplazarlo" : "Pega aquí el token DEV_ de ApiSunat"} autoComplete="new-password" /></label>
-        <div className="friendly-info"><ShieldCheck size={16}/><span>Esta conexión acepta tokens DEV_. El modo Desarrollo permite pruebas; esos documentos no se envían a SUNAT ni tienen valor tributario.</span></div>
-        <div className="stage4-policy-note"><ReceiptText size={16}/><span>Si la comisión supera este máximo, se divide en varias boletas y ninguna excede el tope. Las partes que no se logren enviar quedan pendientes para reintento. Se emite sin DNI cuando cada boleta es hasta S/ 700.00. <a href="https://cpe.sunat.gob.pe/tipos_de_comprobantes/boleta" target="_blank" rel="noreferrer">Regla SUNAT</a>.</span></div>
+        <section className="integration-settings-section">
+          <div className="integration-section-heading"><div><strong>Datos del emisor</strong><span>Identificación y numeración configuradas en ApiSunat.</span></div></div>
+          <div className="field-grid">
+            <label>Persona ID<input value={form.personaId} onChange={(event)=>setForm({...form,personaId:event.target.value})} placeholder="ID de empresa en ApiSunat" autoComplete="off" /></label>
+            <label>Serie de boleta<input value={form.series} onChange={(event)=>setForm({...form,series:event.target.value.toUpperCase()})} placeholder="B001" maxLength={4} /></label>
+          </div>
+        </section>
+
+        <section className="integration-settings-section monthly-cap-section">
+          <div className="integration-section-heading"><div><strong>Límites de emisión</strong><span>Define cuánto puede emitir esta filial y cómo se divide cada comprobante.</span></div><span className="integration-section-icon">S/</span></div>
+          <div className="monthly-cap-fields">
+            <label><span>Tope mensual de la filial</span><div className="input-prefix"><span>S/</span><input type="number" min="0.01" step="0.01" value={form.monthlyEmissionLimit ?? ""} onChange={(event)=>setForm({...form,monthlyEmissionLimit:event.target.value === "" ? null : Number(event.target.value)})} placeholder="Sin límite" /></div><small>Al alcanzarlo, las emisiones quedan pendientes hasta el siguiente mes. Déjalo vacío para no aplicar un tope.</small></label>
+            <label><span>Máximo por boleta</span><div className="input-prefix"><span>S/</span><input type="number" min="0.01" step="0.01" value={form.maxAmountPerReceipt} onChange={(event)=>setForm({...form,maxAmountPerReceipt:Number(event.target.value)})} required /></div><small>Si una comisión supera este monto, se divide en varias boletas.</small></label>
+          </div>
+          <div className="monthly-usage-card">
+            <div className="monthly-usage-icon"><ReceiptText size={17}/></div>
+            <div className="monthly-usage-content">
+              <div className="monthly-usage-heading"><strong>Consumo del mes</strong><span>{monthlyUsage.month || "Mes actual"}</span></div>
+              <div className="monthly-usage-totals"><strong>{currency(monthlyUsage.amount)}</strong><span>{form.monthlyEmissionLimit == null ? "Sin tope configurado" : `de ${currency(form.monthlyEmissionLimit)}`}</span></div>
+              {form.monthlyEmissionLimit != null && <progress max={form.monthlyEmissionLimit} value={Math.min(monthlyUsage.amount, form.monthlyEmissionLimit)} />}
+              <small>{form.monthlyEmissionLimit == null ? "Ingresa un tope mensual para activar el control de emisión." : monthlyUsage.amount >= form.monthlyEmissionLimit ? "Tope alcanzado. La emisión y los reintentos se habilitarán el próximo mes." : "Cuenta boletas aceptadas, en validación o con resultado por confirmar."}</small>
+            </div>
+          </div>
+          <div className="stage4-policy-note"><ReceiptText size={15}/><span>Se emite sin DNI cuando cada boleta es hasta S/ 700.00. <a href="https://cpe.sunat.gob.pe/tipos_de_comprobantes/boleta" target="_blank" rel="noreferrer">Ver regla SUNAT</a>.</span></div>
+        </section>
+
+        <section className="integration-settings-section">
+          <div className="integration-section-heading"><div><strong>Acceso a ApiSunat</strong><span>La clave se cifra en el servidor y nunca vuelve a mostrarse.</span></div></div>
+          <label>Token API de Desarrollo<input type="password" value={form.personaToken} onChange={(event)=>setForm({...form,personaToken:event.target.value})} placeholder={form.tokenConfigured ? "Token guardado · escribe solo para reemplazarlo" : "Pega aquí el token DEV_ de ApiSunat"} autoComplete="new-password" /></label>
+          <div className="friendly-info"><ShieldCheck size={16}/><span>El modo Desarrollo permite hacer pruebas. Esos documentos no se envían a SUNAT ni tienen valor tributario.</span></div>
+        </section>
       </div>
     </section>
     <div className="stage4-settings-actions"><div>{error&&<div className="modal-error">{error}</div>}{message&&<div className="success-message">{message}</div>}</div><button className="primary" disabled={saving||loading}>{saving?"Guardando…":"Guardar integración"}</button></div>
