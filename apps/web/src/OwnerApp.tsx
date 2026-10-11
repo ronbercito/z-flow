@@ -1455,7 +1455,8 @@ function auditActionLabel(action: string) {
     USER_STATUS_CHANGED: "Estado de usuario actualizado",
     USER_UPDATED: "Usuario actualizado",
     DATABASE_BACKUP_CREATED: "Copia de base de datos creada",
-    DATABASE_BACKUP_RESTORED: "Copia de base de datos restaurada"
+    DATABASE_BACKUP_RESTORED: "Copia de base de datos restaurada",
+    BACKUP_SCHEDULE_UPDATED: "Programación de copias actualizada"
   };
   return labels[action] ?? "Evento del sistema";
 }
@@ -1495,24 +1496,53 @@ function AuditPage({ rows }: { rows: AuditRow[] }) {
 }
 
 type BackupFile = { filename: string; size: number; createdAt: string };
+type BackupSchedule = { time: string; retentionDays: number };
+const defaultBackupSchedule: BackupSchedule = { time: "03:00", retentionDays: 14 };
 
 function BackupPage() {
   const [backups, setBackups] = useState<BackupFile[]>([]);
+  const [schedule, setSchedule] = useState<BackupSchedule>(defaultBackupSchedule);
+  const [scheduleDraft, setScheduleDraft] = useState<BackupSchedule>(defaultBackupSchedule);
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
+  const [scheduleSaving, setScheduleSaving] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
   async function load() {
     try {
-      const result = await api<{ backups: BackupFile[] }>("/api/admin/backups");
+      const [result, savedSchedule] = await Promise.all([
+        api<{ backups: BackupFile[] }>("/api/admin/backups"),
+        api<BackupSchedule>("/api/admin/backups/schedule")
+      ]);
       setBackups(result.backups ?? []);
+      setSchedule(savedSchedule);
+      setScheduleDraft(savedSchedule);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudieron cargar las copias");
     }
   }
 
   useEffect(() => { void load(); }, []);
+
+  async function saveSchedule(event: FormEvent) {
+    event.preventDefault();
+    setScheduleSaving(true); setError(""); setMessage("");
+    try {
+      const saved = await api<BackupSchedule>("/api/admin/backups/schedule", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...scheduleDraft, retentionDays: Number(scheduleDraft.retentionDays) })
+      });
+      setSchedule(saved);
+      setScheduleDraft(saved);
+      setMessage("Programación guardada. Se aplicará automáticamente en la próxima ejecución.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo guardar la programación");
+    } finally {
+      setScheduleSaving(false);
+    }
+  }
 
   async function createBackup() {
     setBusy(true); setError(""); setMessage("");
@@ -1610,6 +1640,31 @@ function BackupPage() {
           </div>
         </section>
       </div>
+
+      <section className="card backup-card backup-schedule-card">
+        <div className="backup-card-heading">
+          <span className="backup-icon backup-icon-blue"><RefreshCw size={17}/></span>
+          <div><strong>Programación automática</strong><span>Define cuándo se crea la copia y cuánto tiempo se conserva.</span></div>
+        </div>
+        <form className="backup-schedule-form" onSubmit={(event)=>void saveSchedule(event)}>
+          <label>
+            <span>Hora diaria (hora de Lima)</span>
+            <input type="time" required value={scheduleDraft.time} onChange={(event)=>setScheduleDraft({...scheduleDraft,time:event.target.value})}/>
+            <small>El sistema ejecutará una copia cada día a esta hora.</small>
+          </label>
+          <label>
+            <span>Conservar copias por</span>
+            <div className="backup-retention-field"><input type="number" min={1} max={3650} step={1} required value={scheduleDraft.retentionDays} onChange={(event)=>setScheduleDraft({...scheduleDraft,retentionDays:Number(event.target.value)})}/><span>días</span></div>
+            <small>Las copias automáticas más antiguas se eliminarán al superar este plazo.</small>
+          </label>
+          <div className="backup-schedule-actions">
+            <span>Configurado: todos los días a las {schedule.time} · conservación de {schedule.retentionDays} días.</span>
+            <button className="primary" type="submit" disabled={scheduleSaving || (scheduleDraft.time === schedule.time && Number(scheduleDraft.retentionDays) === schedule.retentionDays)}>
+              {scheduleSaving ? "Guardando…" : "Guardar programación"}
+            </button>
+          </div>
+        </form>
+      </section>
 
       <div className="backup-safety-note">
         <ShieldCheck size={16}/>

@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { spawn } from "node:child_process";
 import { createReadStream, createWriteStream } from "node:fs";
-import { chmod, mkdir, readdir, stat, unlink } from "node:fs/promises";
+import { chmod, mkdir, readFile, readdir, stat, unlink, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -11,7 +11,13 @@ import { db } from "./db.js";
 import { requireAuth } from "./auth.js";
 
 const backupDir = resolve(process.env.ZFLOW_BACKUP_DIR ?? "/backups");
+const scheduleFile = join(backupDir, "backup-schedule.env");
+const defaultSchedule = { time: "03:00", retentionDays: 14 };
 const maxUploadBytes = 100 * 1024 * 1024;
+const backupScheduleSchema = z.object({
+  time: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/, "Indica una hora válida."),
+  retentionDays: z.number().int().min(1).max(3650)
+});
 const restoreBody = z.object({
   filename: z.string().regex(/^(zflow|uploaded)_\d{14}(?:_\d+)?\.sql\.gz$/),
   confirmation: z.literal("RESTAURAR")
@@ -29,6 +35,23 @@ async function requireOwner(request: FastifyRequest, reply: FastifyReply) {
 
 function validFilename(filename: string) {
   return /^(zflow|uploaded)_\d{14}(?:_\d+)?\.sql\.gz$/.test(filename);
+}
+
+async function readBackupSchedule() {
+  try {
+    const contents = await readFile(scheduleFile, "utf8");
+    const values = new Map<string, string>(contents.split(/\r?\n/).map((line): [string, string] => {
+      const separator = line.indexOf("=");
+      return separator < 0 ? ["", ""] : [line.slice(0, separator), line.slice(separator + 1)];
+    }));
+    const parsed = backupScheduleSchema.safeParse({
+      time: values.get("BACKUP_TIME"),
+      retentionDays: Number(values.get("BACKUP_RETENTION_DAYS"))
+    });
+    return parsed.success ? parsed.data : defaultSchedule;
+  } catch {
+    return defaultSchedule;
+  }
 }
 
 function stamp() {
@@ -139,6 +162,35 @@ export async function registerBackupRoutes(app: FastifyInstance) {
     { parseAs: "buffer", bodyLimit: maxUploadBytes },
     (_request, body, done) => done(null, body)
   );
+
+  app.get("/api/admin/backups/schedule", async (request, reply) => {
+    if (!(await requireOwner(request, reply))) return;
+    return await readBackupSchedule();
+  });
+
+  app.put("/api/admin/backups/schedule", async (request, reply) => {
+    const auth = await requireOwner(request, reply);
+    if (!auth) return;
+    const parsed = backupScheduleSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "Revisa la hora y los días de conservación (de 1 a 3650)." });
+    }
+    try {
+      await mkdir(backupDir, { recursive: true, mode: 0o700 });
+      await chmod(backupDir, 0o700);
+      const contents = "BACKUP_TIME=" + parsed.data.time + "\nBACKUP_RETENTION_DAYS=" + parsed.data.retentionDays + "\n";
+      await writeFile(scheduleFile, contents, { mode: 0o600 });
+      await chmod(scheduleFile, 0o600);
+      await db.execute(
+        "INSERT INTO audit_logs (user_id, action, entity_type, details, ip_address, user_agent) VALUES (?, 'BACKUP_SCHEDULE_UPDATED', 'DATABASE', ?, ?, ?)",
+        [auth.userId, JSON.stringify(parsed.data), request.ip, String(request.headers["user-agent"] ?? "").slice(0, 255)]
+      ).catch(() => undefined);
+      return parsed.data;
+    } catch (error) {
+      request.log.error(error);
+      return reply.code(500).send({ error: "No se pudo guardar la programación de copias." });
+    }
+  });
 
   app.get("/api/admin/backups", async (request, reply) => {
     if (!(await requireOwner(request, reply))) return;
