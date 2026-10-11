@@ -62,6 +62,7 @@ type AdminPage =
   | "reports"
   | "audit"
   | "backup"
+  | "updates"
   | "settings"
   | "integrations"
   | "security"
@@ -443,6 +444,7 @@ const nav: Array<{ page: AdminPage; label: string; icon: typeof Home }> = [
   { page: "reports", label: "Reportes", icon: BarChart3 },
   { page: "audit", label: "Auditoría", icon: FileSearch },
   { page: "backup", label: "Backup", icon: Database },
+  { page: "updates", label: "Actualizaciones", icon: RefreshCw },
   { page: "integrations", label: "Integraciones", icon: KeyRound },
   { page: "settings", label: "Configuración", icon: Settings2 },
   { page: "security", label: "Seguridad", icon: ShieldCheck },
@@ -602,6 +604,7 @@ export default function OwnerApp({ user, onLogout, businessName }: { user: AuthU
     reports: ["Reportes", "Consolidado operativo y financiero"],
     audit: ["Auditoría", "Historial de acciones sensibles del sistema"],
     backup: ["Backup", "Crea, descarga y restaura copias de la base de datos"],
+    updates: ["Actualizaciones", "Revisa versiones nuevas y aplica actualizaciones de forma segura"],
     settings: ["Configuración general", "Datos del negocio y reglas centrales del sistema local"],
     integrations: ["Integraciones", "Configura ApiSunat y la emisión electrónica por filial"],
     security: ["Seguridad y sesiones", "Control de sesiones activas y estado del entorno local"],
@@ -683,6 +686,7 @@ export default function OwnerApp({ user, onLogout, businessName }: { user: AuthU
           {page === "reports" && overview && <AdminReports overview={overview} operations={operations} closures={closures} />}
           {page === "audit" && <AuditPage rows={auditRows} />}
           {page === "backup" && <BackupPage />}
+          {page === "updates" && <UpdatesPage />}
           {page === "settings" && <SystemSettingsPage />}
           {page === "integrations" && overview && <ElectronicIntegrationsPage branches={overview.branches} />}
           {page === "security" && <SecurityPage currentUserId={user.id} />}
@@ -1456,7 +1460,8 @@ function auditActionLabel(action: string) {
     USER_UPDATED: "Usuario actualizado",
     DATABASE_BACKUP_CREATED: "Copia de base de datos creada",
     DATABASE_BACKUP_RESTORED: "Copia de base de datos restaurada",
-    BACKUP_SCHEDULE_UPDATED: "Programación de copias actualizada"
+    BACKUP_SCHEDULE_UPDATED: "Programación de copias actualizada",
+    AUTO_UPDATE_SETTINGS_UPDATED: "Configuración de actualizaciones actualizada"
   };
   return labels[action] ?? "Evento del sistema";
 }
@@ -1492,6 +1497,133 @@ function AuditPage({ rows }: { rows: AuditRow[] }) {
         </table>
       </div>
     </section>
+  );
+}
+
+type AutoUpdateInfo = {
+  enabled: boolean;
+  intervalSeconds: 5 | 10;
+  currentVersion: string;
+  latestVersion: string;
+  state: string;
+  message: string;
+  lastChecked: string | null;
+  log: string;
+};
+
+function UpdatesPage() {
+  const [info, setInfo] = useState<AutoUpdateInfo | null>(null);
+  const [draft, setDraft] = useState({ enabled: true, intervalSeconds: 10 as 5 | 10 });
+  const [saving, setSaving] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+
+  async function load() {
+    try {
+      const result = await api<AutoUpdateInfo>("/api/admin/updates");
+      setInfo(result);
+      setDraft({ enabled: result.enabled, intervalSeconds: result.intervalSeconds });
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo consultar la versión.");
+    }
+  }
+
+  useEffect(() => {
+    void load();
+    const timer = window.setInterval(() => void load(), (info?.intervalSeconds ?? 10) * 1000);
+    return () => window.clearInterval(timer);
+  }, [info?.intervalSeconds]);
+
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true); setError(""); setMessage("");
+    try {
+      await api("/api/admin/updates", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(draft)
+      });
+      setMessage("Configuración de actualizaciones guardada.");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo guardar la configuración.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function checkNow() {
+    setChecking(true); setError(""); setMessage("");
+    try {
+      await api("/api/admin/updates/check", { method: "POST" });
+      setMessage("Comprobación solicitada. El estado se actualizará en unos segundos.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo solicitar la comprobación.");
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  const stateLabels: Record<string, string> = {
+    checking: "Esperando comprobación",
+    disabled: "Actualización automática desactivada",
+    up_to_date: "El sistema está actualizado",
+    update_available: "Nueva versión disponible",
+    updating: "Actualizando el sistema",
+    updated: "Actualización completada",
+    failed: "Falló la actualización",
+    local_changes: "Actualización pausada por cambios locales",
+    check_failed: "No se pudo comprobar la versión"
+  };
+
+  return (
+    <div className="backup-page auto-update-page">
+      {error && <div className="error-banner">{error}</div>}
+      {message && <div className="success-banner">{message}</div>}
+
+      <section className="card auto-update-version-card">
+        <div className="auto-update-version-mark"><RefreshCw size={20}/></div>
+        <div className="auto-update-version-copy">
+          <strong>Versión instalada: {info?.currentVersion ?? "1.0"}</strong>
+          <span>Versión más reciente: {info?.latestVersion ?? "1.0"}</span>
+        </div>
+        <span className={"auto-update-state auto-update-state-" + (info?.state ?? "checking")}>{stateLabels[info?.state ?? "checking"] ?? info?.state}</span>
+      </section>
+
+      <section className="card backup-card">
+        <div className="backup-card-heading">
+          <span className="backup-icon backup-icon-blue"><RefreshCw size={17}/></span>
+          <div><strong>Actualización automática</strong><span>Cuando se publique una versión superior, el servidor la instalará por sí solo.</span></div>
+        </div>
+        <form className="auto-update-settings" onSubmit={(event)=>void save(event)}>
+          <label className="auto-update-toggle">
+            <input type="checkbox" checked={draft.enabled} onChange={(event)=>setDraft({...draft,enabled:event.target.checked})}/>
+            <span><strong>Instalar automáticamente las nuevas versiones</strong><small>Antes de actualizar se crea una copia de seguridad; si la actualización falla, se recuperan el código y la base de datos anteriores.</small></span>
+          </label>
+          <label className="auto-update-interval">
+            <span>Frecuencia de comprobación</span>
+            <select value={draft.intervalSeconds} onChange={(event)=>setDraft({...draft,intervalSeconds:Number(event.target.value) as 5 | 10})}>
+              <option value={5}>Cada 5 segundos</option>
+              <option value={10}>Cada 10 segundos</option>
+            </select>
+          </label>
+          <div className="auto-update-actions">
+            <span>{info?.lastChecked ? "Última comprobación: " + dateTime(info.lastChecked) : "Aún no se ha comprobado una versión."}</span>
+            <div>
+              <button className="soft" type="button" disabled={checking} onClick={()=>void checkNow()}><RefreshCw size={14}/>{checking ? "Solicitando…" : "Comprobar ahora"}</button>
+              <button className="primary" type="submit" disabled={saving || (draft.enabled === info?.enabled && draft.intervalSeconds === info?.intervalSeconds)}>{saving ? "Guardando…" : "Guardar configuración"}</button>
+            </div>
+          </div>
+        </form>
+      </section>
+
+      <section className="card auto-update-log">
+        <div className="backup-list-heading"><div><strong>Registro de actualizaciones</strong><span>Detalle de comprobaciones, copias, instalaciones y errores</span></div></div>
+        <pre>{info?.log || "Todavía no hay registros de actualización."}</pre>
+      </section>
+    </div>
   );
 }
 

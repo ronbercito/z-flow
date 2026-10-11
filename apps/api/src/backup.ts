@@ -12,8 +12,15 @@ import { requireAuth } from "./auth.js";
 
 const backupDir = resolve(process.env.ZFLOW_BACKUP_DIR ?? "/backups");
 const scheduleFile = join(backupDir, "backup-schedule.env");
+const updateSettingsFile = join(backupDir, "update-settings.env");
+const updateStatusFile = join(backupDir, "update-status.json");
+const updateLogFile = join(backupDir, "auto-update.log");
+const failedUpdateVersionFile = join(backupDir, ".auto-update-failed-version");
+const forcedUpdateCheckFile = join(backupDir, ".auto-update-force");
 const defaultSchedule = { time: "03:00", retentionDays: 14 };
 const maxUploadBytes = 100 * 1024 * 1024;
+const defaultUpdateSettings = { enabled: true, intervalSeconds: 10 } as const;
+const updateSettingsSchema = z.object({ enabled: z.boolean(), intervalSeconds: z.union([z.literal(5), z.literal(10)]) });
 const backupScheduleSchema = z.object({
   time: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/, "Indica una hora válida."),
   retentionDays: z.number().int().min(1).max(3650)
@@ -35,6 +42,23 @@ async function requireOwner(request: FastifyRequest, reply: FastifyReply) {
 
 function validFilename(filename: string) {
   return /^(zflow|uploaded)_\d{14}(?:_\d+)?\.sql\.gz$/.test(filename);
+}
+
+async function readUpdateSettings() {
+  try {
+    const contents = await readFile(updateSettingsFile, "utf8");
+    const values = new Map<string, string>(contents.split(/\r?\n/).map((line): [string, string] => {
+      const separator = line.indexOf("=");
+      return separator < 0 ? ["", ""] : [line.slice(0, separator), line.slice(separator + 1)];
+    }));
+    const parsed = updateSettingsSchema.safeParse({
+      enabled: values.get("AUTO_UPDATE_ENABLED") === "1",
+      intervalSeconds: Number(values.get("AUTO_UPDATE_INTERVAL_SECONDS"))
+    });
+    return parsed.success ? parsed.data : defaultUpdateSettings;
+  } catch {
+    return defaultUpdateSettings;
+  }
 }
 
 async function readBackupSchedule() {
@@ -162,6 +186,57 @@ export async function registerBackupRoutes(app: FastifyInstance) {
     { parseAs: "buffer", bodyLimit: maxUploadBytes },
     (_request, body, done) => done(null, body)
   );
+
+  app.get("/api/admin/updates", async (request, reply) => {
+    if (!(await requireOwner(request, reply))) return;
+    const settings = await readUpdateSettings();
+    const currentVersion = process.env.APP_VERSION ?? "1.0";
+    let status: any = {};
+    let log = "";
+    try { status = JSON.parse(await readFile(updateStatusFile, "utf8")); } catch { /* first install */ }
+    try { log = (await readFile(updateLogFile, "utf8")).slice(-12000); } catch { /* no attempts yet */ }
+    return {
+      ...settings,
+      currentVersion,
+      latestVersion: typeof status.latestVersion === "string" ? status.latestVersion : currentVersion,
+      state: typeof status.state === "string" ? status.state : "checking",
+      message: typeof status.message === "string" ? status.message : "Esperando la primera comprobación del servidor.",
+      lastChecked: typeof status.lastChecked === "string" ? status.lastChecked : null,
+      log
+    };
+  });
+
+  app.put("/api/admin/updates", async (request, reply) => {
+    const auth = await requireOwner(request, reply);
+    if (!auth) return;
+    const parsed = updateSettingsSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: "Elige 5 o 10 segundos y activa o desactiva las actualizaciones automáticas." });
+    try {
+      await mkdir(backupDir, { recursive: true, mode: 0o700 });
+      await chmod(backupDir, 0o700);
+      const contents = "AUTO_UPDATE_ENABLED=" + (parsed.data.enabled ? "1" : "0") + "\nAUTO_UPDATE_INTERVAL_SECONDS=" + parsed.data.intervalSeconds + "\n";
+      await writeFile(updateSettingsFile, contents, { mode: 0o600 });
+      await chmod(updateSettingsFile, 0o600);
+      await unlink(failedUpdateVersionFile).catch(() => undefined);
+      await writeFile(forcedUpdateCheckFile, String(Date.now()) + "\n", { mode: 0o600 });
+      await db.execute(
+        "INSERT INTO audit_logs (user_id, action, entity_type, details, ip_address, user_agent) VALUES (?, 'AUTO_UPDATE_SETTINGS_UPDATED', 'SYSTEM', ?, ?, ?)",
+        [auth.userId, JSON.stringify(parsed.data), request.ip, String(request.headers["user-agent"] ?? "").slice(0, 255)]
+      ).catch(() => undefined);
+      return parsed.data;
+    } catch (error) {
+      request.log.error(error);
+      return reply.code(500).send({ error: "No se pudo guardar la configuración de actualizaciones." });
+    }
+  });
+
+  app.post("/api/admin/updates/check", async (request, reply) => {
+    if (!(await requireOwner(request, reply))) return;
+    await mkdir(backupDir, { recursive: true, mode: 0o700 });
+    await unlink(failedUpdateVersionFile).catch(() => undefined);
+    await writeFile(forcedUpdateCheckFile, String(Date.now()) + "\n", { mode: 0o600 });
+    return { ok: true, message: "Se solicitó una comprobación inmediata." };
+  });
 
   app.get("/api/admin/backups/schedule", async (request, reply) => {
     if (!(await requireOwner(request, reply))) return;

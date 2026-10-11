@@ -60,3 +60,17 @@ La restauración requiere escribir `RESTAURAR`, bloquea la operación mientras h
 ## Etapa nube
 
 Al migrar a nube se añadirá una segunda copia fuera del servidor local (object storage o almacenamiento externo). Un backup guardado únicamente en el mismo LXC no sustituye un backup externo.
+
+
+## Actualizaciones automáticas y recuperación
+
+La versión inicial del sistema es **1.0**. El panel propietario muestra la versión instalada y la publicada en **Actualizaciones**. El servidor consulta GitHub cada 10 segundos por defecto; se puede elegir 5 segundos o desactivar la actualización automática desde el panel. Solo instala una versión cuando el archivo `VERSION` publicado aumenta (la siguiente versión será **1.1**).
+
+Antes de instalar, `scripts/update-local.sh` guarda una copia comprimida de la base de datos. Después construye la nueva versión y comprueba que API y panel respondan. Si falla, recupera el commit anterior, reconstruye las imágenes y restaura la base de datos desde esa copia. El archivo de seguridad se conserva aunque ocurra el rollback.
+
+El propietario puede revisar el registro en **Actualizaciones**. En el servidor también se encuentra en `/opt/z-flow/backups/auto-update.log`; el servicio guarda el estado y configuración de actualización en ese mismo directorio persistente. Para instalar o actualizar manualmente:
+
+```bash
+cd /opt/z-flow
+bash scripts/update-local.sh
+```

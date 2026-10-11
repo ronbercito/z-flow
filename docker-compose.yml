@@ -25,6 +25,8 @@ services:
   api:
     build:
       context: ./apps/api
+      args:
+        APP_VERSION: ${APP_VERSION:-1.0}
     restart: unless-stopped
     environment:
       TZ: ${TZ:-America/Lima}
