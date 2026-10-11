@@ -3,7 +3,7 @@
 **Última actualización:** 11/10/2026
 **Repositorio:** `ronbercito/z-flow`
 **Rama publicada:** `main`
-**Estado:** emisión electrónica integrada en `main`; el nuevo tope mensual está implementado localmente y queda pendiente de CI e integración.
+**Estado:** emisión electrónica y tope mensual por filial integrados en `main`; CI aprobó los builds de API, web y Docker. Falta validar el bloqueo del tope en el entorno de prueba.
 
 ## 11/10/2026 — Tope mensual de emisión por filial
 
