@@ -8,6 +8,7 @@
 ## 11/10/2026 — Tope mensual de emisión por filial
 
 - Integraciones del propietario permite fijar un tope mensual opcional en soles para cada filial y muestra el acumulado del mes en curso.
+- La configuración del tope se separó en recuadros para datos del emisor, límites y consumo mensual, y acceso a ApiSunat; el consumo ahora destaca el monto y el avance con una barra.
 - La API valida el tope antes de cada envío, tanto automático como manual o reintento. La reserva se serializa por filial en la base de datos para cubrir solicitudes simultáneas.
 - El acumulado toma boletas aceptadas, en validación o con resultado incierto, porque ya pudieron ser recibidas por ApiSunat. Errores confirmados y rechazos no consumen el tope.
 - Al no caber una boleta completa en el saldo mensual, queda pendiente y no se envía; podrá reintentarse desde la filial el mes siguiente. El límite se calcula por mes calendario de Lima.
