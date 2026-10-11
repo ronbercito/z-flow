@@ -57,7 +57,7 @@ Se corrigieron problemas identificados antes de la primera instalación limpia:
 - Backups con permisos privados; restauración de consola validada antes de importar, con copia previa y recuperación automática ante error.
 - `scripts/install-local.sh` instala en Debian/Ubuntu desde `main`; genera secretos, configura Docker, backups diarios y rotación.
 
-La instalación desde cero está documentada en `docs/LOCAL_PRODUCTION.md`. La compilación de API/web y la configuración de Docker deben quedar aprobadas en GitHub Actions antes de promover esta revisión a `main`. No instalar todavía desde `main` hasta que se confirme esa promoción.
+La instalación desde cero está documentada en `docs/LOCAL_PRODUCTION.md`. La revisión se promovió a `main` el 10/10/2026 tras la aprobación de CI. La instalación limpia y una emisión de prueba en ApiSunat Desarrollo ya fueron verificadas.
 
 ## Estado del README y ramas al 10/10/2026
 
