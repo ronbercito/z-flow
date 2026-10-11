@@ -3,7 +3,7 @@
 **Última actualización:** 11/10/2026
 **Repositorio:** `ronbercito/z-flow`
 **Rama publicada:** `main`
-**Estado:** emisión electrónica y tope mensual por filial integrados en `main`; CI aprobó los builds de API, web y Docker. Falta validar el bloqueo del tope en el entorno de prueba.
+**Estado:** emisión electrónica y tope mensual por filial integrados en `main`; en revisión la reemisión automática de pendientes del tope al iniciar un nuevo mes. Las instalaciones configuran copias diarias de la base de datos a las 03:00 de Lima y conservan 14 días.
 
 ## 11/10/2026 — Tope mensual de emisión por filial
 
@@ -15,11 +15,18 @@
 - El límite queda desactivado por defecto en instalaciones existentes y nuevas hasta que el propietario configure un importe. La migración agrega el límite y la fecha de envío sin borrar datos.
 - PR #10 quedó integrado en `main`; CI aprobó los builds de API, web y Docker. Pendiente: validar en una instalación de prueba el bloqueo al alcanzar el tope y el reinicio del periodo.
 
+## 11/10/2026 — reintento automático mensual y copias diarias
+
+- Las boletas que quedaron `QUEUED` específicamente por alcanzar el tope mensual se vuelven a intentar automáticamente al cambiar el mes calendario de Lima. El proceso corre al iniciar la API y luego cada minuto; el tope se comprueba de nuevo antes de enviar.
+- El documento guarda una nota como “Pendiente del mes 2026-10; reintento automático iniciado en 2026-11”, visible en el historial de la filial y en la consulta del propietario. La nota no marca la boleta como aceptada: el estado solo cambia cuando ApiSunat confirma el resultado.
+- Se agregó una reserva condicional de estado en base de datos para evitar que dos instancias envíen a la vez la misma boleta durante los reintentos.
+- El instalador ya activa copias de la base de datos todos los días a las 03:00, con retención de 14 días y una copia inicial. Ahora el horario de cron queda fijado a `America/Lima`, aunque el servidor tenga otra zona horaria.
+
 ## 10/10/2026 — Revisión general integrada a main
 
 - Se revisaron caja, permisos por filial, validaciones financieras, autenticación y manejo de backups/restauración.
 - La instalación nueva ya no carga operaciones ficticias, no abre una caja por defecto y tampoco precarga filiales ni usuarios operativos. Solo crea el propietario `admin`.
-- El instalador de Debian/Ubuntu está publicado en `scripts/install-local.sh`; obtiene la versión de `main`, configura Docker, genera secretos aleatorios, activa backups programados y guarda una copia inicial.
+- El instalador de Debian/Ubuntu está publicado en `scripts/install-local.sh`; obtiene la versión de `main`, configura Docker, genera secretos aleatorios, activa backups diarios de la base de datos y guarda una copia inicial.
 - La revisión se integró en `main` mediante PR #4. CI aprobó API, web y Docker; Docker pasó al reintentar una descarga afectada por el límite temporal de Docker Hub.
 - Instalación: `curl -fsSL https://raw.githubusercontent.com/ronbercito/z-flow/main/scripts/install-local.sh | bash`.
 - La primera instalación en un contenedor limpio aún está pendiente; CI valida compilación y configuración, no sustituye esa prueba de despliegue.
@@ -384,4 +391,5 @@ pm`, y el `pnpm` incluido no pudo resolver el directorio del workspace (EPERM). 
 - ApiSunat requiere el nodo UBL `cac:PartyIdentification/cbc:ID` incluso para consumidor final. La integración ahora usa la representación sin documento del widget oficial: `schemeID: "-"` y `00000000`.
 - El valor técnico `00000000` no se muestra como DNI capturado del cliente. La boleta conserva el estado pendiente/error hasta recibir confirmación del proveedor.
 - Prueba manual reportada en la instalación nueva: la operación aparece como `Aceptada` en ApiSunat y el panel muestra `Ver PDF`. Esto confirma el flujo de emisión en Desarrollo.
+
 

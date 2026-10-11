@@ -26,6 +26,9 @@ else
 fi
 git pull --ff-only origin main
 
+echo "2.1) Sincronizando backup automático diario"
+bash scripts/install-backup-cron.sh
+
 echo "Retirando credenciales antiguas de Factiliza"
 unset FACTILIZA_API_TOKEN FACTILIZA_API_BASE_URL FACTILIZA_BOLETA_SERIES FACTILIZA_RUS_ACTIVITY_CONFIRMED
 if [ -f .env ]; then
@@ -64,3 +67,4 @@ echo "Commit anterior: $BEFORE"
 echo "No se hace rollback automático de base de datos."
 echo "Revisa: docker compose logs --tail=150 api"
 exit 1
+

@@ -367,7 +367,7 @@ app.get("/api/branches/:branchId/operations", async (request, reply) => {
             (SELECT ed.series FROM electronic_documents ed WHERE ed.operation_id=o.id AND ed.branch_id=o.branch_id ORDER BY ed.part_number LIMIT 1) AS electronic_series,
             (SELECT ed.correlativo FROM electronic_documents ed WHERE ed.operation_id=o.id AND ed.branch_id=o.branch_id ORDER BY ed.part_number LIMIT 1) AS electronic_number,
             (SELECT ed.status FROM electronic_documents ed WHERE ed.operation_id=o.id AND ed.branch_id=o.branch_id ORDER BY CASE WHEN ed.status IN ('ERROR','EXCEPTION','REJECTED','QUEUED','PENDING','UNKNOWN') THEN 0 ELSE 1 END, ed.part_number LIMIT 1) AS electronic_status,
-            (SELECT ed.provider_message FROM electronic_documents ed WHERE ed.operation_id=o.id AND ed.branch_id=o.branch_id ORDER BY CASE WHEN ed.status IN ('ERROR','EXCEPTION','REJECTED','QUEUED','PENDING','UNKNOWN') THEN 0 ELSE 1 END, ed.part_number LIMIT 1) AS electronic_message,
+            (SELECT CONCAT_WS(' · ',NULLIF(ed.provider_message,''),NULLIF(ed.emission_note,'')) FROM electronic_documents ed WHERE ed.operation_id=o.id AND ed.branch_id=o.branch_id ORDER BY CASE WHEN ed.status IN ('ERROR','EXCEPTION','REJECTED','QUEUED','PENDING','UNKNOWN') THEN 0 ELSE 1 END, ed.part_number LIMIT 1) AS electronic_message,
             (SELECT COUNT(*) FROM electronic_documents ed WHERE ed.operation_id=o.id AND ed.branch_id=o.branch_id) AS electronic_count,
             (SELECT COUNT(*) FROM electronic_documents ed WHERE ed.operation_id=o.id AND ed.branch_id=o.branch_id
               AND (ed.status='QUEUED' OR (ed.status='ERROR' AND ed.provider_document_id IS NULL) OR ed.status='EXCEPTION')) AS electronic_retry_count
@@ -889,4 +889,5 @@ await registerElectronicRoutes(app);
 
 const port = Number(process.env.PORT ?? 3001);
 await app.listen({ host: "0.0.0.0", port });
+
 

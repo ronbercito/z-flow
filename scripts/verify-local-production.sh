@@ -72,6 +72,8 @@ if command -v systemctl >/dev/null 2>&1; then
   systemctl is-enabled --quiet cron || fail "cron no está habilitado al arranque"
 fi
 grep -q "scripts/backup.sh" /etc/cron.d/zflow-backup || fail "Cron de backup inválido"
+grep -q "CRON_TZ=America/Lima" /etc/cron.d/zflow-backup || fail "El cron no fija la zona horaria de Lima"
+grep -q "^0 3 \* \* \* root" /etc/cron.d/zflow-backup || fail "El cron no programa el backup diario a las 03:00"
 echo "  Cron diario: OK"
 
 echo "[7/7] Estado final"
@@ -83,3 +85,4 @@ echo " Z-FLOW LOCAL: VALIDACIÓN COMPLETA OK"
 echo " Backup verificado y restaurable."
 echo " Servicios preparados para reinicio del LXC."
 echo "============================================"
+

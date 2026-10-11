@@ -169,6 +169,7 @@ export async function ensureElectronicSchema() {
     provider_document_id VARCHAR(80) NULL,
     provider_code VARCHAR(40) NULL,
     provider_message VARCHAR(1000) NULL,
+    emission_note VARCHAR(255) NULL,
     file_name VARCHAR(100) NOT NULL,
     created_by_user_id BIGINT UNSIGNED NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -195,6 +196,9 @@ export async function ensureElectronicSchema() {
   if (!documentColumns.some((column) => column.Field === "submitted_at")) {
     await db.query("ALTER TABLE electronic_documents ADD COLUMN submitted_at TIMESTAMP NULL DEFAULT NULL AFTER updated_at");
     await db.query("UPDATE electronic_documents SET submitted_at=created_at WHERE status IN ('PENDING','ACCEPTED','UNKNOWN')");
+  }
+  if (!documentColumns.some((column) => column.Field === "emission_note")) {
+    await db.query("ALTER TABLE electronic_documents ADD COLUMN emission_note VARCHAR(255) NULL AFTER provider_message");
   }
   if (documentColumns.some((column) => column.Field === "correlativo" && String(column.Null) !== "YES")) await db.query("ALTER TABLE electronic_documents MODIFY correlativo BIGINT UNSIGNED NULL");
   const statusColumn = documentColumns.find((column) => column.Field === "status");
@@ -290,8 +294,8 @@ async function saveProviderFiles(branchId: number, sourceType: "CLOSURE" | "OPER
 
 async function issueDocument(input: {
   branchId: number; sourceType: "CLOSURE" | "OPERATION"; sourceId: number; amount: number; description: string;
-  createdBy: number; customerName?: string | null; customerDocumentType?: string | null; customerDocumentNumber?: string | null;
-  partNumber?: number; partCount?: number;
+  createdBy: number | null; customerName?: string | null; customerDocumentType?: string | null; customerDocumentNumber?: string | null;
+  partNumber?: number; partCount?: number; emissionNote?: string;
 }): Promise<EmissionResult> {
   if (money(input.amount) <= 0) return { status: "SKIPPED", message: "No se emitió boleta porque la comisión es S/ 0.00." };
   if (money(input.amount) > 700 && (!input.customerDocumentNumber || !input.customerDocumentType || !input.customerName?.trim())) {
@@ -367,7 +371,11 @@ async function issueDocument(input: {
           monthlyLimitReached = Math.round((issued + money(input.amount)) * 100) > Math.round(monthlyLimit * 100);
         }
         if (!monthlyLimitReached) {
-          await connection.execute(`UPDATE electronic_documents SET series=?,correlativo=?,part_count=?,customer_document_type=?,customer_document_number=?,customer_name=?,description=?,amount=?,status='UNKNOWN',submitted_at=CURRENT_TIMESTAMP,provider_document_id=NULL,provider_message='Enviando a ApiSunat; confirmando el resultado.',file_name=?,created_by_user_id=? WHERE id=? AND status IN ('QUEUED','ERROR','EXCEPTION')`, [c.series, Number(number), partCount, input.customerDocumentType ?? null, input.customerDocumentNumber ?? null, input.customerName || "CLIENTES VARIOS", input.description.slice(0, 250), money(input.amount), fileName, input.createdBy, retryRecordId]);
+          const [claim] = await connection.execute<any>(`UPDATE electronic_documents SET series=?,correlativo=?,part_count=?,customer_document_type=?,customer_document_number=?,customer_name=?,description=?,amount=?,status='UNKNOWN',submitted_at=CURRENT_TIMESTAMP,provider_document_id=NULL,provider_message='Enviando a ApiSunat; confirmando el resultado.',emission_note=COALESCE(?,emission_note),file_name=?,created_by_user_id=COALESCE(?,created_by_user_id) WHERE id=? AND status IN ('QUEUED','ERROR','EXCEPTION')`, [c.series, Number(number), partCount, input.customerDocumentType ?? null, input.customerDocumentNumber ?? null, input.customerName || "CLIENTES VARIOS", input.description.slice(0, 250), money(input.amount), input.emissionNote ?? null, fileName, input.createdBy, retryRecordId]);
+          if (claim.affectedRows === 0) {
+            await connection.commit();
+            return { status: "PENDING", message: "La boleta ya está siendo procesada.", amount: money(input.amount), partNumber, partCount };
+          }
         }
       }
       await connection.commit();
@@ -542,7 +550,7 @@ async function issueSplitDocuments(input: {
 
 function currencyText(amount: number) { return `S/ ${money(amount).toFixed(2)}`; }
 
-async function processQueuedDocuments(branchId: number, sourceType: "CLOSURE" | "OPERATION", sourceId: number, createdBy: number) {
+async function processQueuedDocuments(branchId: number, sourceType: "CLOSURE" | "OPERATION", sourceId: number, createdBy: number | null, emissionNote?: string) {
   const sourceField = sourceType === "CLOSURE" ? "closure_id" : "operation_id";
   if (sourceType === "OPERATION") {
     const [operations] = await db.query<any[]>("SELECT status FROM operations WHERE id=? AND branch_id=? LIMIT 1", [sourceId, branchId]);
@@ -556,11 +564,46 @@ async function processQueuedDocuments(branchId: number, sourceType: "CLOSURE" | 
   for (const item of queued) {
     const result = await issueDocument({ branchId, sourceType, sourceId, amount: Number(item.amount), description: String(item.description), createdBy,
       customerName: item.customer_name, customerDocumentType: item.customer_document_type, customerDocumentNumber: item.customer_document_number,
-      partNumber: Number(item.part_number), partCount: Number(item.part_count) });
+      partNumber: Number(item.part_number), partCount: Number(item.part_count), emissionNote });
     results.push(result);
     if (["ERROR", "UNKNOWN", "CANCELLED", "LIMIT_REACHED"].includes(result.status)) break;
   }
   return results;
+}
+
+let monthlyLimitQueueScanRunning = false;
+async function processMonthlyLimitQueue(log: FastifyInstance["log"]) {
+  if (monthlyLimitQueueScanRunning) return;
+  monthlyLimitQueueScanRunning = true;
+  try {
+    const currentMonth = limaMonthRange().label;
+    const [rows] = await db.query<any[]>(`SELECT branch_id,closure_id,operation_id,created_by_user_id,provider_message
+      FROM electronic_documents WHERE status='QUEUED' AND provider_message LIKE 'Se alcanzó el tope mensual de %'
+      ORDER BY created_at,id LIMIT 300`);
+    const groups = new Map<string, { branchId: number; sourceType: "CLOSURE" | "OPERATION"; sourceId: number; createdBy: number | null; previousMonth: string }>();
+    for (const row of rows) {
+      const previousMonth = String(row.provider_message ?? "").match(/\((\d{4}-\d{2})\)/)?.[1];
+      if (!previousMonth || previousMonth >= currentMonth) continue;
+      const branchId = Number(row.branch_id);
+      const sourceType = row.closure_id == null ? "OPERATION" : "CLOSURE";
+      const sourceId = Number(row.closure_id ?? row.operation_id);
+      if (!branchId || !sourceId) continue;
+      const key = `${branchId}:${sourceType}:${sourceId}`;
+      if (!groups.has(key)) groups.set(key, { branchId, sourceType, sourceId, createdBy: row.created_by_user_id == null ? null : Number(row.created_by_user_id), previousMonth });
+    }
+    for (const group of groups.values()) {
+      try {
+        const note = `Pendiente del mes ${group.previousMonth}; reintento automático iniciado en ${currentMonth}.`;
+        await processQueuedDocuments(group.branchId, group.sourceType, group.sourceId, group.createdBy, note);
+      } catch (error) {
+        log.error({ err: error, branchId: group.branchId, sourceId: group.sourceId }, "No se pudo reintentar automáticamente una boleta pendiente del mes anterior");
+      }
+    }
+  } catch (error) {
+    log.error({ err: error }, "No se pudo revisar la cola mensual de boletas electrónicas");
+  } finally {
+    monthlyLimitQueueScanRunning = false;
+  }
 }
 
 async function requireOwner(request: FastifyRequest, reply: FastifyReply) {
@@ -574,6 +617,9 @@ export async function registerElectronicRoutes(app: FastifyInstance) {
   const pendingRefreshTimer = setInterval(() => { void refreshPendingDocuments().catch(() => {}); }, 15_000);
   pendingRefreshTimer.unref?.();
   void refreshPendingDocuments().catch(() => {});
+  const monthlyLimitRetryTimer = setInterval(() => { void processMonthlyLimitQueue(app.log); }, 60_000);
+  monthlyLimitRetryTimer.unref?.();
+  void processMonthlyLimitQueue(app.log);
 
   app.get("/api/admin/branches/:branchId/electronic-settings", async (request, reply) => {
     const parsed = ownerParams.safeParse(request.params);
@@ -655,11 +701,11 @@ export async function registerElectronicRoutes(app: FastifyInstance) {
     const parsed = ownerParams.safeParse(request.params);
     if (!parsed.success) return reply.code(400).send({ error: "Filial inválida" });
     if (!await requireOwner(request, reply)) return;
-    const [rows] = await db.query<any[]>(`SELECT id,closure_id,operation_id,series,correlativo,part_number,part_count,amount,status,provider_message,provider_document_id,
+    const [rows] = await db.query<any[]>(`SELECT id,closure_id,operation_id,series,correlativo,part_number,part_count,amount,status,provider_message,emission_note,provider_document_id,
         (SELECT o.status FROM operations o WHERE o.id=electronic_documents.operation_id) AS operation_status,created_at,0 AS legacy
       FROM electronic_documents WHERE branch_id=?
       UNION ALL
-      SELECT id,closure_id,NULL AS operation_id,series,correlativo,1 AS part_number,1 AS part_count,amount,status,provider_message,NULL AS provider_document_id,NULL AS operation_status,created_at,1 AS legacy
+      SELECT id,closure_id,NULL AS operation_id,series,correlativo,1 AS part_number,1 AS part_count,amount,status,provider_message,NULL AS emission_note,NULL AS provider_document_id,NULL AS operation_status,created_at,1 AS legacy
       FROM factiliza_documents WHERE branch_id=?
       ORDER BY created_at DESC,id DESC LIMIT 300`, [parsed.data.branchId, parsed.data.branchId]);
     const documents = await Promise.all(rows.map(async (row) => {
@@ -693,4 +739,5 @@ export async function registerElectronicRoutes(app: FastifyInstance) {
   });
 
 }
+
 
