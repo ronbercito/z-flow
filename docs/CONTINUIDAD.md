@@ -4,7 +4,7 @@
 **Repositorio:** `ronbercito/z-flow`
 **Rama publicada:** `main`
 **Ramas integradas:** `main` contiene la revisión general y el flujo electrónico desarrollado en `develop`.
-**Estado general:** se integraron en `main` la revisión general, la preparación de instalación y la emisión electrónica por filial. ApiSunat permanece restringido a Desarrollo (`DEV_`). GitHub Actions aprobó API, web y Docker en la corrección final; falta actualizar el panel desde `main` y probar el flujo real.
+**Estado general:** `main` contiene la revisión general, la instalación limpia y la emisión electrónica por filial. La instalación nueva quedó operativa y una boleta de prueba en ApiSunat Desarrollo aparece como `Aceptada`, con el PDF disponible. Producción sigue deshabilitada.
 
 ## Revisión general y preparación de instalación (10/10/2026)
 
@@ -20,7 +20,7 @@ curl -fsSL https://raw.githubusercontent.com/ronbercito/z-flow/main/scripts/inst
 
 Ejecutar como `root` en un contenedor limpio. En Proxmox LXC, Docker requiere `nesting=1` y `keyctl=1`. Se puede descargar el script antes y definir `WEB_PORT` y `API_PORT` si los puertos predeterminados están ocupados. El instalador muestra la IP, el puerto y las credenciales iniciales del propietario y encargado; guárdalas al terminar.
 
-**Pendiente operativo:** probar este comando en el contenedor de destino y validar que API y web queden saludables. Esa instalación real no se ha ejecutado desde este entorno.
+**Validación de instalación nueva:** completada. El panel abrió en el contenedor instalado y una operación mostró la boleta `Aceptada` con `Ver PDF` disponible. Queda continuar la revisión del resto de flujos operativos y las cinco filiales reales.
 
 ## Estado del README y ramas al 10/10/2026
 
@@ -42,7 +42,7 @@ Se corrigieron problemas identificados antes de la primera instalación limpia:
 - Backups con permisos privados; restauración de consola validada antes de importar, con copia previa y recuperación automática ante error.
 - `scripts/install-local.sh` instala en Debian/Ubuntu desde `main`; genera secretos, configura Docker, backups diarios y rotación.
 
-La instalación desde cero está documentada en `docs/LOCAL_PRODUCTION.md`. La compilación de API/web y la configuración de Docker deben quedar aprobadas en GitHub Actions antes de promover esta revisión a `main`. No instalar todavía desde `main` hasta que se confirme esa promoción.
+La instalación desde cero está documentada en `docs/LOCAL_PRODUCTION.md`. La revisión se promovió a `main` el 10/10/2026 después de la aprobación de CI. La instalación limpia y una emisión de prueba en ApiSunat Desarrollo ya fueron verificadas.
 
 ## Revisión general y preparación de instalación (09/10/2026)
 
@@ -391,25 +391,11 @@ En Proxmox mantener activado **Start at boot** para el CT de Z-FLOW.
 - Arranque automático de servicios.
 - Cron de backup.
 
-## 13. Pendiente inmediato
+## 13. Validación operativa pendiente
 
-### Primera instalación limpia
+La instalación limpia desde `main` y una emisión de prueba en ApiSunat Desarrollo ya fueron verificadas. La captura confirma una boleta `Aceptada` y el PDF disponible.
 
-1. Ejecutar el instalador publicado en un contenedor Debian/Ubuntu vacío.
-2. En Proxmox, habilitar `nesting=1` y `keyctl=1`.
-3. Confirmar que Docker, API y Web queden saludables.
-4. Guardar las credenciales iniciales mostradas por el instalador.
-5. Abrir la primera caja y validar una operación de cada tipo, cierre y backup.
-
-### Validación operativa pendiente
-
-Después de la instalación, actualizar el LXC de pruebas desde el repositorio y comprobar:
-
-- que Integraciones/Factiliza ya no aparezca;
-- que el historial electrónico antiguo siga consultable;
-- que cada filial vea solo su identidad, reporte y cierres;
-- que el propietario pueda consultar la información consolidada;
-- los flujos con las cinco filiales reales antes de cerrar esa etapa.
+Resta completar la revisión de las cinco filiales reales, validar los demás flujos de operación y cierre, y confirmar backups y restauración en el entorno de destino.
 
 ## 14. Fase final futura
 
@@ -454,7 +440,7 @@ Si se abre un chat nuevo, empezar leyendo:
 
 El siguiente trabajo no es rediseñar usuarios ni volver a socios.
 
-**Siguiente objetivo:** actualizar el entorno objetivo desde `main` y validar emisión, reintentos de filial, consulta administrativa y archivos usando ApiSunat Desarrollo.
+**Siguiente objetivo:** completar la revisión operativa de las cinco filiales reales, reintentos, consulta administrativa, archivos, backups y restauración. La emisión de prueba en Desarrollo ya fue aceptada.
 
 ## Estado actual de emisión electrónica por filial (10/10/2026)
 
