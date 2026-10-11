@@ -409,3 +409,9 @@ pm`, y el `pnpm` incluido no pudo resolver el directorio del workspace (EPERM). 
 - La versión inicial es 1.0 y la siguiente publicación debe incrementar `VERSION` a 1.1. Solo se instala cuando la versión publicada es mayor.
 - Cada actualización crea primero una copia comprimida de la base de datos; valida API y panel y, si falla, restaura el código e importa la copia anterior.
 - El diagnóstico queda en `backups/auto-update.log`, visible también en el panel. El instalador nuevo y el actualizador existente instalan el temporizador de systemd.
+
+
+## 11/10/2026 — publicación de la versión 1.1
+
+- Se incrementó `VERSION` de 1.0 a 1.1 para activar el actualizador automático publicado en 1.0.
+- Los servidores con el temporizador activo detectarán esta publicación y actualizarán con backup previo, verificación de salud y rollback automático si falla.

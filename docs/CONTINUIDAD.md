@@ -494,3 +494,10 @@ Las instalaciones nuevas publican el panel en el puerto 80 (`http://IP_DEL_CONTE
 - Antes de cambiar el código se genera un backup de la base de datos. API y panel deben superar su comprobación de salud; ante un fallo se recuperan el commit y la base de datos anteriores.
 - El resultado y los errores se conservan en `backups/auto-update.log` y se consultan desde el panel. Un lanzamiento fallido queda pausado para evitar un ciclo de reintentos; al guardar la configuración se permite comprobarlo de nuevo.
 - La instalación configura el temporizador de systemd. Se instala durante una instalación nueva y también desde `scripts/update-local.sh` en instalaciones existentes.
+
+
+## Publicación de la versión 1.1 (11/10/2026)
+
+- La versión 1.1 activa el ciclo de actualización automática sobre la base 1.0. Los servidores con actualizador instalado y habilitado detectan la nueva versión cada 5 o 10 segundos, según la configuración del propietario.
+- El proceso crea un backup, instala la versión, comprueba API y panel y restaura código y base de datos si algo falla. Revisar el resultado desde **Actualizaciones** o en `backups/auto-update.log`.
+- Si un servidor permanece en 1.0, revisar que su temporizador `zflow-auto-update.timer` esté activo y que tenga acceso a GitHub.
