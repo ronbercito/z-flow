@@ -7,6 +7,8 @@ COPY src ./src
 RUN npm run build
 
 FROM node:22-alpine
+ARG APP_VERSION=1.0
+ENV APP_VERSION=$APP_VERSION
 RUN apk add --no-cache mariadb-client
 WORKDIR /app
 ENV NODE_ENV=production

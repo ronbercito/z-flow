@@ -2279,6 +2279,37 @@ tr:last-child td { border-bottom:0; }
 .backup-page .success-banner { margin:0; padding:10px 13px; border:1px solid #ccebd9; border-radius:9px; background:#effaf4; color:#197348; font-size:11px; line-height:1.45; }
 .owner-shell:has(.backup-page) .content { max-width:1200px; }
 
+.auto-update-version-card { max-width:1120px; width:100%; margin:18px auto 0; padding:16px 18px; display:flex; align-items:center; gap:13px; }
+.auto-update-version-mark { width:42px; height:42px; border-radius:12px; color:#2563eb; background:#edf5ff; display:grid; place-items:center; flex:0 0 auto; }
+.auto-update-version-copy { display:grid; gap:5px; flex:1; }
+.auto-update-version-copy strong { color:#1d293b; font-size:13px; }
+.auto-update-version-copy span { color:#8492a6; font-size:10px; }
+.auto-update-state { border-radius:999px; padding:7px 10px; font-size:10px; font-weight:700; background:#eef3f8; color:#52657c; }
+.auto-update-state-up_to_date, .auto-update-state-updated { color:#087a4c; background:#e9f8f0; }
+.auto-update-state-update_available, .auto-update-state-updating { color:#9a6100; background:#fff4d8; }
+.auto-update-state-failed, .auto-update-state-check_failed { color:#b42318; background:#fff0ee; }
+.auto-update-settings { padding:16px; display:grid; gap:15px; }
+.auto-update-toggle { display:flex; align-items:flex-start; gap:10px; color:#34445b; cursor:pointer; }
+.auto-update-toggle input { width:17px; height:17px; margin:1px 0 0; accent-color:#2563eb; flex:0 0 auto; }
+.auto-update-toggle span { display:grid; gap:5px; }
+.auto-update-toggle strong, .auto-update-interval > span { color:#34445b; font-size:11px; }
+.auto-update-toggle small { color:#8492a6; font-size:10px; line-height:1.5; font-weight:400; }
+.auto-update-interval { max-width:380px; display:grid; gap:7px; }
+.auto-update-interval select { min-height:38px; border:1px solid #d8e2ef; border-radius:8px; padding:0 10px; color:#26364b; background:#fff; font:inherit; font-size:11px; }
+.auto-update-actions { border-top:1px solid #f0f3f8; padding-top:13px; display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.auto-update-actions > span { color:#8492a6; font-size:10px; }
+.auto-update-actions > div { display:flex; align-items:center; gap:8px; }
+.auto-update-actions button { min-height:35px; display:flex; align-items:center; gap:6px; }
+.auto-update-log { overflow:hidden; }
+.auto-update-log pre { max-height:340px; overflow:auto; margin:0; padding:14px 16px; background:#101827; color:#c7d5e8; font:10px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace; white-space:pre-wrap; overflow-wrap:anywhere; }
+@media (max-width: 600px) {
+  .auto-update-version-card { margin-top:12px; padding:13px; flex-wrap:wrap; }
+  .auto-update-state { margin-left:55px; }
+  .auto-update-actions { align-items:flex-start; flex-direction:column; }
+  .auto-update-actions > div { flex-wrap:wrap; }
+}
+
+
 
 .owner-profile-grid { display:grid; grid-template-columns:minmax(0,1.35fr) minmax(340px,1fr); gap:14px; align-items:start; }
 .owner-profile-card, .owner-password-card { min-width:0; padding:18px; }

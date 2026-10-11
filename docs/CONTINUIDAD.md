@@ -485,3 +485,12 @@ Las instalaciones nuevas publican el panel en el puerto 80 (`http://IP_DEL_CONTE
 - La configuración se conserva en el volumen persistente. Cron revisa cada minuto la hora de Lima, ejecuta como máximo una vez al día y recupera ejecuciones perdidas mientras el servidor estuvo detenido.
 - Las copias locales con prefijo `zflow_` se eliminan al superar el período configurado; las subidas con prefijo `uploaded_` no se purgan.
 - PR #14 está integrado en `main`; CI aprobó API, web y Docker. Las instalaciones existentes reciben el cambio con `bash scripts/update-local.sh`; las nuevas lo incluyen desde `main`.
+
+
+## Actualización automática segura (11/10/2026)
+
+- La versión base publicada es 1.0; para publicar la siguiente versión se incrementa `VERSION` a 1.1. El actualizador compara versiones publicadas y no actualiza por cambios de commit que mantengan el mismo número.
+- Desde **Actualizaciones** el propietario consulta la versión, activa o desactiva instalaciones automáticas y elige comprobaciones cada 5 o 10 segundos. El valor inicial es activado cada 10 segundos.
+- Antes de cambiar el código se genera un backup de la base de datos. API y panel deben superar su comprobación de salud; ante un fallo se recuperan el commit y la base de datos anteriores.
+- El resultado y los errores se conservan en `backups/auto-update.log` y se consultan desde el panel. Un lanzamiento fallido queda pausado para evitar un ciclo de reintentos; al guardar la configuración se permite comprobarlo de nuevo.
+- La instalación configura el temporizador de systemd. Se instala durante una instalación nueva y también desde `scripts/update-local.sh` en instalaciones existentes.

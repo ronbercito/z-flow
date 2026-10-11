@@ -27,6 +27,7 @@ docker info >/dev/null || {
 
 git clone --depth 1 --branch main https://github.com/ronbercito/z-flow.git "$INSTALL_DIR"
 cd "$INSTALL_DIR"
+export APP_VERSION="$(tr -d '\r\n' < VERSION)"
 cp .env.example .env
 sed -i "s/^WEB_PORT=.*/WEB_PORT=$WEB_PORT/; s/^API_PORT=.*/API_PORT=$API_PORT/; s/^DB_PASSWORD=.*/DB_PASSWORD=$(openssl rand -hex 32)/; s/^DB_ROOT_PASSWORD=.*/DB_ROOT_PASSWORD=$(openssl rand -hex 32)/; s/^ZFLOW_CREDENTIAL_KEY=.*/ZFLOW_CREDENTIAL_KEY=$(openssl rand -hex 32)/" .env
 chmod 600 .env
@@ -44,8 +45,9 @@ done
 [ "${api_ok:-0}" -eq 1 ] && [ "${web_ok:-0}" -eq 1 ] || { docker compose logs --tail=80; echo "Z-FLOW no quedó saludable."; exit 1; }
 
 bash scripts/install-backup-cron.sh
-cat >/etc/logrotate.d/zflow <<'EOF'
-/var/log/zflow-backup.log {
+bash scripts/install-auto-update.sh
+cat >/etc/logrotate.d/zflow <<EOF
+/var/log/zflow-backup.log $INSTALL_DIR/backups/auto-update.log {
   weekly
   rotate 8
   compress

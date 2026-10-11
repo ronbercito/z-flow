@@ -401,3 +401,11 @@ pm`, y el `pnpm` incluido no pudo resolver el directorio del workspace (EPERM). 
 - La programación se guarda como archivo protegido dentro del volumen persistente `backups`, así se conserva tras reiniciar o actualizar el contenedor.
 - Cron revisa la hora configurada cada minuto y el ejecutor garantiza como máximo una copia al día. Las copias locales con prefijo `zflow_` se eliminan al superar la retención; las copias subidas con prefijo `uploaded_` no se purgan.
 - La API valida el horario y el período de retención y registra los cambios en auditoría. PR #14 quedó integrado en `main`; GitHub Actions aprobó los builds de API, web y Docker.
+
+
+## 11/10/2026 — actualizaciones automáticas con recuperación
+
+- Se agregó el módulo propietario **Actualizaciones**, con versión instalada/publicada, intervalo de 5 o 10 segundos, activación, comprobación manual y registro persistente.
+- La versión inicial es 1.0 y la siguiente publicación debe incrementar `VERSION` a 1.1. Solo se instala cuando la versión publicada es mayor.
+- Cada actualización crea primero una copia comprimida de la base de datos; valida API y panel y, si falla, restaura el código e importa la copia anterior.
+- El diagnóstico queda en `backups/auto-update.log`, visible también en el panel. El instalador nuevo y el actualizador existente instalan el temporizador de systemd.
